@@ -89,6 +89,104 @@ Add to `~/.claude/settings.json`:
 .\venv\Scripts\python.exe -m src.voice_bridge
 ```
 
+## Tip: Name your terminals
+
+When running multiple Claude Code terminals in parallel, start each session with a first prompt that declares the terminal's role, e.g.:
+
+```
+You are "Frontend" terminal. You work on UI components.
+```
+
+The TTS voice guide announces the project name from `cwd`, but naming each terminal helps you instantly recognize **which agent is speaking** when you hear a notification.
+
+## Sound Pack System
+
+The TTS notification system uses **data-driven sound packs** with semantic event mapping. Each pack is a folder with MP3 files and a `manifest.json` that maps sounds to events.
+
+### Available Packs (188 sounds)
+
+| Pack | Sounds | Description |
+|------|--------|-------------|
+| `r2d2` | 22 | R2-D2 semantic chimes - robot beeps and boops |
+| `south-park` | 28 | Cartman, Kenny, Butters - English |
+| `south-park-ita` | 25 | Cartman doppiaggio italiano, Trombino & Pompadour |
+| `american-dad` | 14 | Roger, Stan Smith & family |
+| `star-wars` | 17 | Lightsabers, Vader, Palpatine, Chewbacca, Duel of Fates |
+| `dune` | 48 | Bene Gesserit Voice, sandworms, shields, Zimmer score |
+| `maccio-capatonda` | 15 | Italiano Medio, SCOPAREEEEE, balletto |
+| `horror-zombie` | 19 | Zombie grunts, horror stingers, groans |
+
+### How it works
+
+Each pack lives in `~/.claude/cache/tts/sounds/<pack-name>/` with a `manifest.json`:
+
+```json
+{
+  "pack": "star-wars",
+  "version": "1.0",
+  "description": "Star Wars - lightsabers, Vader, Palpatine",
+  "chimes": {
+    "task_done": ["sw-hello-there.mp3", "sw-do-it.mp3"],
+    "stop": ["sw-imperial-march.mp3", "sw-duel-of-fates.mp3"],
+    "permission": ["sw-i-am-your-father.mp3", "sw-unlimited-power.mp3"],
+    "question": ["sw-its-a-trap.mp3", "sw-tusken-raider.mp3"],
+    "idle": ["sw-chewbacca-roar.mp3", "sw-battle-alarm.mp3"],
+    "auth": ["sw-lightsaber-sith.mp3", "sw-order-66.mp3"],
+    "default": ["sw-tie-blaster.mp3", "sw-seismic-charge.mp3"]
+  },
+  "sounds": {
+    "sw-hello-there.mp3": {
+      "label": "Hello There! - Obi-Wan",
+      "duration_ms": 1800,
+      "event": "task_done"
+    }
+  }
+}
+```
+
+The 7 semantic events:
+- **task_done** - A task completed successfully
+- **stop** - Claude finished all work
+- **permission** - Claude needs your approval
+- **question** - Claude is asking you something
+- **idle** - Waiting for your input
+- **auth** - Authentication completed
+- **default** - General notification
+
+### Switch pack
+
+Edit `~/.claude/cache/tts/tts_config.json`:
+```json
+{"sound_pack": "dune"}
+```
+Or use the system tray icon menu.
+
+### Create your own pack
+
+1. Create a folder in `~/.claude/cache/tts/sounds/my-pack/`
+2. Add MP3 files (short clips, 1-5 seconds ideal for notifications)
+3. Create `manifest.json` with chime mappings (see example above)
+4. Select the pack from tray icon or config - zero code changes needed
+
+### Download packs
+
+```bash
+python scripts/download_packs.py --pack all          # Download South Park + Horror + American Dad
+python scripts/generate_manifests.py                  # Regenerate manifests with ffprobe durations
+```
+
+### Pipeline for creating packs from YouTube
+
+```
+YouTube video
+  -> yt-dlp (download audio as MP3)
+  -> Whisper large-v3 (transcribe with timestamps)
+  -> ffmpeg silencedetect (find segment boundaries)
+  -> ffmpeg (cut individual clips with fade in/out)
+  -> manifest.json (semantic event mapping)
+  -> notify-tts.py auto-discovers the new pack
+```
+
 ## Project Structure
 
 ```
@@ -111,7 +209,14 @@ src/core/
       portaudio_driver.py
 
 scripts/
-  notify-tts.py         # Claude Code TTS hook (standalone)
+  notify-tts.py         # Claude Code TTS hook - data-driven chime system
+  download_packs.py     # Auto-download sound packs (South Park, Horror, American Dad)
+  generate_manifests.py # Generate manifest.json for packs with ffprobe metadata
+
+~/.claude/cache/tts/
+  tts_config.json       # Master config (voice, pack, volume, mode)
+  sounds/               # Sound packs (r2d2, south-park, dune, star-wars, ...)
+  dynamic/              # Cached TTS voice announcements
 ```
 
 ---
@@ -156,6 +261,54 @@ pip install edge-tts
 .\venv\Scripts\python.exe -m src.voice_bridge
 ```
 
+## Sistema Sound Pack
+
+Il sistema di notifiche TTS usa **sound pack data-driven** con mapping semantico degli eventi. Ogni pack e' una cartella con file MP3 e un `manifest.json` che mappa i suoni agli eventi.
+
+### Pack disponibili (188 suoni)
+
+| Pack | Suoni | Descrizione |
+|------|-------|-------------|
+| `r2d2` | 22 | Chime semantici R2-D2 |
+| `south-park` | 28 | Cartman, Kenny, Butters - Inglese |
+| `south-park-ita` | 25 | Cartman doppiaggio italiano, Trombino & Pompadour |
+| `american-dad` | 14 | Roger, Stan Smith & family |
+| `star-wars` | 17 | Spade laser, Vader, Palpatine, Chewbacca |
+| `dune` | 48 | Voce Bene Gesserit, vermi, scudi, Zimmer |
+| `maccio-capatonda` | 15 | Italiano Medio, SCOPAREEEEE, balletto |
+| `horror-zombie` | 19 | Zombie, horror stinger |
+
+### Cambiare pack
+
+Modifica `~/.claude/cache/tts/tts_config.json`:
+```json
+{"sound_pack": "dune"}
+```
+Oppure dal menu dell'icona nel system tray.
+
+### Creare un pack personalizzato
+
+1. Crea una cartella in `~/.claude/cache/tts/sounds/mio-pack/`
+2. Aggiungi file MP3 (clip brevi, 1-5 secondi ideali per notifiche)
+3. Crea `manifest.json` con il mapping dei chime (vedi sezione English per il formato)
+4. Seleziona il pack dal tray icon o dal config - zero codice da modificare
+
+### Pipeline per creare pack da YouTube
+
+```
+Video YouTube -> yt-dlp -> Whisper large-v3 (trascrizione) -> ffmpeg (taglio clip) -> manifest.json
+```
+
+## Tip: Dai un nome ai terminali
+
+Quando usi piu' terminali Claude Code in parallelo, inizia ogni sessione con un primo prompt che dichiara il ruolo del terminale, es.:
+
+```
+Sei il terminale "Frontend". Ti occupi dei componenti UI.
+```
+
+La voce guida annuncia il nome del progetto dalla `cwd`, ma dare un nome a ogni terminale ti aiuta a riconoscere immediatamente **quale agente sta parlando** quando senti una notifica.
+
 ---
 
 # Portugues BR
@@ -197,6 +350,24 @@ pip install edge-tts
 # ou
 .\venv\Scripts\python.exe -m src.voice_bridge
 ```
+
+## Sistema de Sound Packs
+
+O sistema de notificacoes TTS usa **sound packs data-driven** com mapeamento semantico de eventos. Cada pack e' uma pasta com arquivos MP3 e um `manifest.json`.
+
+8 packs disponiveis com 188 sons: `r2d2`, `south-park`, `south-park-ita`, `american-dad`, `star-wars`, `dune`, `maccio-capatonda`, `horror-zombie`.
+
+Trocar pack: edite `~/.claude/cache/tts/tts_config.json` ou use o menu do tray icon.
+
+## Dica: Nomeie seus terminais
+
+Quando usar varios terminais Claude Code em paralelo, comece cada sessao com um primeiro prompt que declare o papel do terminal, ex.:
+
+```
+Voce e o terminal "Frontend". Voce trabalha nos componentes de UI.
+```
+
+A voz guia anuncia o nome do projeto pelo `cwd`, mas nomear cada terminal ajuda a reconhecer imediatamente **qual agente esta falando** quando ouvir uma notificacao.
 
 ---
 
