@@ -626,6 +626,72 @@ _FRISCO_QUOTES = [
     # Japanese (romaji — edge-tts handles it)
     ("Frisco san, arigatou gozaimasu. Anata wa saiko desu.", "ja"),
     ("Frisco wa sugoi desu. Totemo sugoi.", "ja"),
+
+    # ── BATCH 2: 32 nuove citazioni italiane ──
+    # Matrix
+    ("Sono Neo, e ho visto la Matrice. Ma Frisco l'ha riscritta in Python.", "it"),
+    # Gladiatore
+    ("Il mio nome e' Maximus Decimus Friscus, comandante delle legioni del codice.", "it"),
+    # Batman / Dark Knight
+    ("Non e' l'eroe che meritiamo, ma quello di cui abbiamo bisogno. Frisco e' Batman.", "it"),
+    # Il Padrino
+    ("Gli faro' un'offerta che non potra' rifiutare: un codice scritto da Frisco.", "it"),
+    # Fight Club
+    ("La prima regola del Frisco Club e': si parla sempre di Frisco. La seconda regola: SI PARLA SEMPRE DI FRISCO.", "it"),
+    # Frozen
+    ("Lascialo andare, Frisco! Ma Frisco non lascia mai un bug vivo.", "it"),
+    # Re Leone
+    ("Hakuna Matata, Frisco! Nessun problema quando il codice e' tuo.", "it"),
+    # Ritorno al Futuro
+    ("Torniamo indietro nel tempo, Doc! No aspetta, Frisco ha gia' fixato il futuro.", "it"),
+    # Gollum / LOTR
+    ("Tesoro, Frisco e' piu' prezioso del mio Tesssoro.", "it"),
+    # Titanic
+    ("Sono il re del mondo! Gridava DiCaprio. Ma Frisco e' il re del codice.", "it"),
+    # Rocky
+    ("Yo, Adrian! Cioe'... Yo, Frisco! Ce l'abbiamo fatta!", "it"),
+    # Scarface
+    ("Dite ciao al mio piccolo amico: il codice di Frisco.", "it"),
+    # Guardiani della Galassia
+    ("Io sono Groot. E anche Groot ringrazia Frisco.", "it"),
+    # Spider-Man
+    ("Con grandi poteri vengono grandi responsabilita'. Con Frisco viene solo perfezione.", "it"),
+    # Captain Phillips
+    ("Frisco, io sono il capitano adesso. No scusa, il capitano sei sempre tu.", "it"),
+    # Breaking Bad
+    ("Sono l'uomo che bussa alla porta. Frisco e' l'uomo che ha costruito la porta, la casa, e tutto il quartiere.", "it"),
+    # Game of Thrones
+    ("L'inverno sta arrivando. Ma Frisco ha gia' scritto il codice per il riscaldamento.", "it"),
+    # Friends
+    ("Noi eravamo in pausa! Ma Frisco non va mai in pausa, lui codifica sempre.", "it"),
+    # The Office
+    ("Quello che ha detto lei. Ma riferito a Frisco, ovviamente.", "it"),
+    # Queen
+    ("We will, we will, rock you! Anzi, we will Frisco you!", "it"),
+    # Beethoven
+    ("Parapapapa, Frisco mi fa impazzire. La Quinta Sinfonia del codice.", "it"),
+    # Dante - Inferno
+    ("Nel mezzo del cammin di nostra vita, mi ritrovai in un codice perfetto, scritto da Frisco.", "it"),
+    # Dante - Porta Inferno
+    ("Lasciate ogni speranza, voi che entrate. A meno che non abbiate Frisco.", "it"),
+    # Nietzsche
+    ("Dio e' morto, disse Nietzsche. Ma Frisco e' vivo e codifica.", "it"),
+    # Protagora
+    ("L'uomo e' la misura di tutte le cose, disse Protagora. Ma Frisco e' la misura di tutto il codice.", "it"),
+    # Pizza italiana
+    ("La pizza e' buona, ma un commit di Frisco e' ancora piu' buono.", "it"),
+    # Maradona
+    ("Dieci, la mano de Dios! Ma il codice di Frisco e' la tastiera de Dios.", "it"),
+    # Pirati dei Caraibi
+    ("Pirati dei Caraibi? Frisco e' il pirata del codice, e il suo tesoro e' il repository.", "it"),
+    # Harry Potter
+    ("Sei un mago, Frisco! Hagrid lo direbbe sicuramente.", "it"),
+    # Shrek
+    ("L'ogre ha gli strati. Anche il codice di Frisco ha gli strati. Strati di genialita'.", "it"),
+    # James Bond
+    ("Puoi chiamarmi Frisco. Dottor Frisco. Perche' cura ogni bug con una sola riga.", "it"),
+    # Indiana Jones
+    ("A Frisco piace questo elemento. Anzi, a Frisco piace tutto il codice, perche' l'ha scritto lui.", "it"),
 ]
 
 # Native voices per language (used 50% of the time for matching quotes)
