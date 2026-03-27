@@ -248,6 +248,26 @@ class WhisperRTXEngine:
             "is_loaded": self.model is not None
         }
 
+    def purge_vram(self) -> None:
+        """Unload model, clear CUDA cache, and reload fresh into VRAM."""
+        import gc
+        logger.info("VRAM purge: unloading Whisper model...")
+        if self.model is not None:
+            del self.model
+            self.model = None
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                logger.info("VRAM purge: CUDA cache cleared")
+        except ImportError:
+            pass
+        logger.info("VRAM purge: reloading model...")
+        self._load_model()
+        logger.info("VRAM purge: model reloaded fresh")
+
     def __del__(self):
         """Cleanup on deletion."""
         if self.model is not None:

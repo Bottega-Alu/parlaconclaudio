@@ -91,6 +91,14 @@ class Transcriber:
             logger.error(f"Transcription failed: {e}")
             return ""
 
+    def purge_vram(self) -> None:
+        """Purge VRAM: unload model, clear CUDA cache, reload fresh."""
+        if self._engine is None:
+            logger.info("No engine loaded, nothing to purge")
+            return
+        self._engine.purge_vram()
+        logger.info("VRAM purge complete - model reloaded")
+
     def cleanup(self) -> None:
         """Release model resources."""
         if self._engine:

@@ -70,7 +70,7 @@ class VoiceBridge:
             on_release=self._on_hotkey_release,
             mode=self.config.hotkey_mode,
         )
-        self._tray = TrayIcon(on_exit=self.stop)
+        self._tray = TrayIcon(on_exit=self.stop, on_purge_vram=self._purge_vram)
 
     @property
     def state(self) -> BridgeState:
@@ -155,6 +155,14 @@ class VoiceBridge:
 
         logger.info("Voice Bridge ready! Hold hotkey to dictate.")
         logger.info("Press Ctrl+C to exit.")
+
+    def _purge_vram(self) -> None:
+        """Purge VRAM: unload Whisper model, clear CUDA cache, reload."""
+        if self._state != BridgeState.IDLE:
+            logger.warning("Cannot purge VRAM while recording/transcribing")
+            return
+        logger.info("VRAM purge requested via menu")
+        self._transcriber.purge_vram()
 
     def stop(self) -> None:
         """Stop the voice bridge and clean up."""

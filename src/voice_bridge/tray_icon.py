@@ -135,6 +135,52 @@ WHISPER_LANGUAGES = {
     "Japanese": "ja",
 }
 
+# === MENU EMOJI ===
+E_VOICE = "🎙️"
+E_PRESETS = "⚡"
+E_BROWSE = "📂"
+E_LANG = "🌐"
+E_TTS = "🔔"
+E_VOLUME = "🔊"
+E_PACK = "🎵"
+E_PREVIEW = "🎧"
+E_EXIT = "🚪"
+E_SELECTED = "🔘"
+E_UNSELECTED = "⚫"
+E_FEMALE = "👩"
+E_MALE = "👨"
+
+LANG_FLAGS = {
+    "Italiano": "🇮🇹",
+    "English US": "🇺🇸",
+    "English GB": "🇬🇧",
+    "Portugues BR": "🇧🇷",
+    "Espanol": "🇪🇸",
+    "Francais": "🇫🇷",
+    "Deutsch": "🇩🇪",
+    "Japanese": "🇯🇵",
+    "Auto-detect": "🌍",
+    "English": "🇺🇸",
+    "Portugues": "🇧🇷",
+}
+
+PACK_EMOJI = {
+    "r2d2": "🤖",
+    "south-park": "🎭",
+    "south-park-ita": "🎭",
+    "star-wars": "⚔️",
+    "dune": "🏜️",
+    "american-dad": "🇺🇸",
+    "horror-zombie": "🧟",
+    "maccio-capatonda": "🤡",
+}
+
+MODE_EMOJI = {"full": "📢", "semi-silent": "🔉", "silent": "🔇"}
+
+E_PURGE = "🧹"
+E_REPO = "🔗"
+REPO_URL = "https://github.com/fra-itc/parlaconclaudio"
+
 
 def _load_config() -> dict:
     try:
@@ -234,21 +280,28 @@ def _generate_marble_sphere(
             # Hue: base + marble variation
             h = (hue_offset + marble * hue_range * 0.15) % 1.0
             # Saturation: slightly less at edges for depth
-            s = saturation * (1.0 - norm_dist * 0.2)
+            s = saturation * (1.0 - norm_dist * 0.12)
             # Value: sphere shading
             v = brightness * light_factor
 
-            # Specular highlight near top-left
+            # Specular highlight near top-left (glass-like)
             spec_dist = math.sqrt((nx + 0.35) ** 2 + (ny + 0.35) ** 2)
-            if spec_dist < 0.3:
-                spec = (1.0 - spec_dist / 0.3) ** 2 * 0.4
+            if spec_dist < 0.38:
+                spec = (1.0 - spec_dist / 0.38) ** 2.5 * 0.65
                 v = min(1.0, v + spec)
-                s = max(0.0, s - spec * 0.5)
+                s = max(0.0, s - spec * 0.8)
+
+            # Secondary pinpoint specular (polished glass)
+            spec2_dist = math.sqrt((nx + 0.25) ** 2 + (ny + 0.50) ** 2)
+            if spec2_dist < 0.12:
+                spec2 = (1.0 - spec2_dist / 0.12) ** 4 * 0.35
+                v = min(1.0, v + spec2)
+                s = max(0.0, s - spec2)
 
             # Edge glow (rim lighting)
-            if norm_dist > 0.7:
-                rim = (norm_dist - 0.7) / 0.3
-                rim_glow = rim ** 2 * 0.15
+            if norm_dist > 0.65:
+                rim = (norm_dist - 0.65) / 0.35
+                rim_glow = rim ** 1.5 * 0.25
                 v = min(1.0, v + rim_glow)
 
             r, g, b = colorsys.hsv_to_rgb(h, s, v)
@@ -260,6 +313,10 @@ def _generate_marble_sphere(
 
             pixels[x, y] = (int(r * 255), int(g * 255), int(b * 255), alpha)
 
+    # Glass glow: blend with a slightly blurred copy for bloom effect
+    glow = img.filter(ImageFilter.GaussianBlur(radius=1.5))
+    img = Image.blend(img, glow, alpha=0.15)
+
     return img
 
 
@@ -268,8 +325,8 @@ _ANIM_PRESETS = {
     "idle": {
         "hue_speed": 0.008,       # Slow rainbow drift
         "hue_range": 0.25,
-        "saturation": 0.70,
-        "brightness": 0.90,
+        "saturation": 0.82,
+        "brightness": 0.95,
         "time_speed": 0.3,
         "interval": 0.15,         # 150ms per frame
     },
@@ -315,13 +372,16 @@ class _IconAnimator:
         if self._idle_frames is not None:
             return
         logger.info("Pre-generating marble sphere frames...")
+        preset = _ANIM_PRESETS["idle"]
         self._idle_frames = []
         for i in range(NUM_IDLE_FRAMES):
             hue = i / NUM_IDLE_FRAMES
             t = i * 0.5
             frame = _generate_marble_sphere(
                 ICON_SIZE, hue,
-                hue_range=0.25, saturation=0.70, brightness=0.90,
+                hue_range=preset["hue_range"],
+                saturation=preset["saturation"],
+                brightness=preset["brightness"],
                 time_val=t,
             )
             self._idle_frames.append(frame)
@@ -388,8 +448,9 @@ class _IconAnimator:
 class TrayIcon:
     """System tray icon with animated marble sphere and settings menu."""
 
-    def __init__(self, on_exit: Callable[[], None] | None = None):
+    def __init__(self, on_exit: Callable[[], None] | None = None, on_purge_vram: Callable[[], None] | None = None):
         self._on_exit = on_exit
+        self._on_purge_vram = on_purge_vram
         self._icon: "pystray.Icon | None" = None
         self._thread: threading.Thread | None = None
         self._animator = _IconAnimator()
@@ -410,17 +471,19 @@ class TrayIcon:
         """Build voice selection submenu organized by language."""
         lang_submenus = []
         for lang_name, voices in EDGE_VOICES.items():
+            flag = LANG_FLAGS.get(lang_name, "")
             voice_items = []
             for v in voices:
                 is_current = (v["id"] == current_voice_id)
-                gender_icon = "F" if v["gender"] == "F" else "M"
-                label = f"{'> ' if is_current else '  '}{v['name']} [{gender_icon}]"
+                gender = E_FEMALE if v["gender"] == "F" else E_MALE
+                sel = E_SELECTED if is_current else E_UNSELECTED
+                label = f"{sel} {gender} {v['name']}"
                 voice_items.append(pystray.MenuItem(
                     label,
                     self._make_set_voice(v["id"]),
                 ))
             lang_submenus.append(pystray.MenuItem(
-                lang_name,
+                f"{flag} {lang_name}",
                 pystray.Menu(*voice_items),
             ))
         return pystray.Menu(*lang_submenus)
@@ -436,8 +499,9 @@ class TrayIcon:
         preset_items = []
         for preset_name, preset_data in VOICE_PRESETS.items():
             is_current = (preset_data["voice"] == current_voice_id)
+            sel = E_SELECTED if is_current else E_UNSELECTED
             preset_items.append(pystray.MenuItem(
-                f"{'> ' if is_current else '  '}{preset_name}",
+                f"{sel} {preset_name}",
                 self._make_set_voice_preset(preset_name),
             ))
 
@@ -449,8 +513,10 @@ class TrayIcon:
         lang_items = []
         for label, code in WHISPER_LANGUAGES.items():
             checked = (current_lang == code)
+            sel = E_SELECTED if checked else E_UNSELECTED
+            flag = LANG_FLAGS.get(label, "")
             lang_items.append(pystray.MenuItem(
-                f"{'> ' if checked else '  '}{label}",
+                f"{sel} {flag} {label}",
                 self._make_set_language(code),
             ))
 
@@ -462,8 +528,10 @@ class TrayIcon:
                     pack_name = pack_dir.name
                     count = len(list(pack_dir.glob("*.mp3")))
                     checked = (pack_name == current_pack)
+                    sel = E_SELECTED if checked else E_UNSELECTED
+                    pe = PACK_EMOJI.get(pack_name, "📦")
                     pack_items.append(pystray.MenuItem(
-                        f"{'> ' if checked else '  '}{pack_name} ({count})",
+                        f"{sel} {pe} {pack_name} ({count})",
                         self._make_set_sound_pack(pack_name),
                     ))
 
@@ -472,8 +540,10 @@ class TrayIcon:
         mode_items = []
         for mode_label, mode_value in TTS_MODES.items():
             checked = (current_mode == mode_value)
+            sel = E_SELECTED if checked else E_UNSELECTED
+            me = MODE_EMOJI.get(mode_value, "")
             mode_items.append(pystray.MenuItem(
-                f"{'> ' if checked else '  '}{mode_label}",
+                f"{sel} {me} {mode_label}",
                 self._make_set_tts_mode(mode_value),
             ))
 
@@ -482,9 +552,10 @@ class TrayIcon:
         vol_items = []
         for level in VOLUME_LEVELS:
             checked = (level == current_vol)
-            pct = f"{level}%"
+            sel = E_SELECTED if checked else E_UNSELECTED
+            bar = "█" * (level // 50)
             vol_items.append(pystray.MenuItem(
-                f"{'> ' if checked else '  '}{pct}",
+                f"{sel} {level}% {bar}",
                 self._make_set_volume(level),
             ))
 
@@ -494,26 +565,28 @@ class TrayIcon:
         if pack_dir.is_dir():
             for mp3 in sorted(pack_dir.glob("*.mp3"))[:15]:
                 preview_items.append(pystray.MenuItem(
-                    f"  {mp3.stem}",
+                    f"  ▶️ {mp3.stem}",
                     self._make_preview_sound(str(mp3)),
                 ))
 
         return pystray.Menu(
-            pystray.MenuItem("Voice Bridge v0.8", None, enabled=False),
+            pystray.MenuItem("✨ Voice Bridge v0.9.8 ✨", None, enabled=False),
+            pystray.MenuItem(f"{E_REPO} GitHub Repo", self._open_repo),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(f"Voice [{voice_display}]", pystray.Menu(
-                pystray.MenuItem("Quick Presets", pystray.Menu(*preset_items)),
+            pystray.MenuItem(f"{E_VOICE} Voice [{voice_display}]", pystray.Menu(
+                pystray.MenuItem(f"{E_PRESETS} Quick Presets", pystray.Menu(*preset_items)),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Browse All", voice_browser),
+                pystray.MenuItem(f"{E_BROWSE} Browse All", voice_browser),
             )),
-            pystray.MenuItem("Whisper Language", pystray.Menu(*lang_items)),
+            pystray.MenuItem(f"{E_LANG} Whisper Language", pystray.Menu(*lang_items)),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(f"TTS Mode [{current_mode}]", pystray.Menu(*mode_items)),
-            pystray.MenuItem(f"Volume [{current_vol}%]", pystray.Menu(*vol_items)),
-            pystray.MenuItem("Sound Pack", pystray.Menu(*pack_items)),
-            pystray.MenuItem(f"Preview [{current_pack}]", pystray.Menu(*preview_items) if preview_items else None),
+            pystray.MenuItem(f"{E_TTS} TTS Mode [{current_mode}]", pystray.Menu(*mode_items)),
+            pystray.MenuItem(f"{E_VOLUME} Volume [{current_vol}%]", pystray.Menu(*vol_items)),
+            pystray.MenuItem(f"{E_PACK} Sound Pack", pystray.Menu(*pack_items)),
+            pystray.MenuItem(f"{E_PREVIEW} Preview [{current_pack}]", pystray.Menu(*preview_items) if preview_items else None),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Exit", self._exit_clicked),
+            pystray.MenuItem(f"{E_PURGE} Purge VRAM", self._purge_vram_clicked),
+            pystray.MenuItem(f"{E_EXIT} Exit", self._exit_clicked),
         )
 
     def _make_set_language(self, lang_code):
@@ -624,6 +697,19 @@ class TrayIcon:
         }
         self._animator.set_state(state)
         self._icon.title = title_map.get(state, f"Voice Bridge - {state}")
+
+    def _open_repo(self, icon, item):
+        """Open the GitHub repo in the default browser."""
+        import webbrowser
+        webbrowser.open(REPO_URL)
+
+    def _purge_vram_clicked(self, icon, item):
+        """Purge VRAM: unload model, clear CUDA cache, reload."""
+        if self._on_purge_vram:
+            threading.Thread(target=self._on_purge_vram, daemon=True).start()
+            logger.info("VRAM purge triggered from menu")
+        else:
+            logger.warning("VRAM purge not available (no callback registered)")
 
     def _exit_clicked(self, icon, item):
         if self._on_exit:
