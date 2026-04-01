@@ -237,30 +237,25 @@ def _inkblot(nx: float, ny: float, t: float) -> float:
 
     nx: abs(x/half), 0..1 — bilateral symmetry built-in.
     ny: y/half, -1..1.
-    Returns a value where higher = more ink.
+
+    Noise-dominant shape with light structural bias.
+    Medium frequencies for a few large organic blobs, not a solid mass.
     """
-    # Stretch for butterfly proportions: WIDER than tall
-    wx = nx * 0.6
-    wy = ny * 1.3
+    # Butterfly proportions: wider than tall
+    wx = nx * 0.7
+    wy = ny * 1.1
 
-    # Multi-octave organic noise — creates irregular edges
-    v = math.sin(wx * 7.0 + t * 0.25) * math.cos(wy * 5.5 - t * 0.18)
-    v += 0.55 * math.sin(wx * 11.0 + wy * 8.5 + t * 0.15)
-    v += 0.35 * math.cos(wx * 17.0 - wy * 13.0 + t * 0.22)
-    v += 0.25 * math.sin(wx * 23.0 + wy * 17.0 - t * 0.12)
-    v += 0.15 * math.cos(wx * 31.0 + wy * 25.0 + t * 0.08)
+    # PRIMARY: medium-frequency noise drives the shape
+    v = math.sin(wx * 4.0 + t * 0.08) * math.cos(wy * 3.0 - t * 0.06)
+    v += 0.5 * math.sin(wx * 6.5 + wy * 4.5 + t * 0.05)
+    v += 0.35 * math.cos(wx * 9.0 - wy * 7.0 + t * 0.07)
+    v += 0.2 * math.sin(wx * 12.0 + wy * 9.0 - t * 0.04)
 
-    # Wing envelope: extends OUTWARD from spine, widest at mid-height
-    wing = (1.0 - math.exp(-nx * 3.5)) * math.exp(-wy * wy * 1.2)
+    # LIGHT bias: gentle nudge toward butterfly shape, not solid fill
+    wing = (1.0 - math.exp(-nx * 3.0)) * math.exp(-wy * wy * 1.8) * 0.3
+    body = math.exp(-nx * nx * 25.0) * math.exp(-wy * wy * 3.0) * 0.2
 
-    # Body spine: narrow vertical connection
-    body = math.exp(-nx * nx * 30.0) * math.exp(-wy * wy * 2.0)
-
-    # Upper and lower wing tips — lobes that extend diagonally
-    tip_up = 0.3 * math.exp(-((nx - 0.5) ** 2 + (ny + 0.45) ** 2) * 8.0)
-    tip_dn = 0.3 * math.exp(-((nx - 0.5) ** 2 + (ny - 0.45) ** 2) * 8.0)
-
-    return v + wing * 0.9 + body * 0.55 + tip_up + tip_dn
+    return v + wing + body
 
 
 def _generate_butterfly(
@@ -299,9 +294,9 @@ def _generate_butterfly(
             # --- Inkblot butterfly ---
             ink_raw = _inkblot(nx, fy, time_val)
 
-            # Sharp sigmoid — crisp ink edges
-            threshold = 0.22 + 0.10 * math.sin(time_val * 0.08)
-            ink = 1.0 / (1.0 + math.exp(-14.0 * (ink_raw - threshold)))
+            # Sigmoid threshold — one big shape, not many small blobs
+            threshold = 0.22 + 0.08 * math.sin(time_val * 0.04)
+            ink = 1.0 / (1.0 + math.exp(-8.0 * (ink_raw - threshold)))
 
             # --- Ink color: deep saturated ---
             h_ink = (hue_offset + ink_raw * hue_range * 0.10) % 1.0
@@ -418,11 +413,11 @@ _ANIM_PRESETS = {
         "pulse": True,            # Pulsing hazard effect
     },
     "idle": {
-        "hue_speed": 0.008,       # Slow rainbow drift
+        "hue_speed": 0.006,       # Slow rainbow drift
         "hue_range": 0.25,
-        "saturation": 0.82,
-        "brightness": 0.95,
-        "time_speed": 0.3,
+        "saturation": 0.85,
+        "brightness": 0.92,
+        "time_speed": 0.15,       # Slow morph for fluid animation
         "interval": 0.15,         # 150ms per frame
     },
     "recording": {
@@ -471,7 +466,7 @@ class _IconAnimator:
         self._idle_frames = []
         for i in range(NUM_IDLE_FRAMES):
             hue = i / NUM_IDLE_FRAMES
-            t = i * 0.5
+            t = i * 0.25  # Small steps → smooth morphing loop
             frame = _generate_butterfly(
                 ICON_SIZE, hue,
                 hue_range=preset["hue_range"],
