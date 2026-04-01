@@ -1012,7 +1012,7 @@ class TrayIcon:
         self._icon = pystray.Icon(
             "voice_bridge",
             initial_img,
-            "Voice Bridge - Ready",
+            "parlaconclaudio - Ready",
             self._build_menu(),
         )
 
@@ -1029,13 +1029,13 @@ class TrayIcon:
         if not self._icon:
             return
         title_map = {
-            "loading": "Voice Bridge - Loading STT engine...",
-            "idle": "Voice Bridge - Ready",
-            "recording": "Voice Bridge - Recording...",
-            "transcribing": "Voice Bridge - Transcribing...",
+            "loading": "parlaconclaudio - Loading STT engine...",
+            "idle": "parlaconclaudio - Ready",
+            "recording": "parlaconclaudio - Recording...",
+            "transcribing": "parlaconclaudio - Transcribing...",
         }
         self._animator.set_state(state)
-        self._icon.title = title_map.get(state, f"Voice Bridge - {state}")
+        self._icon.title = title_map.get(state, f"parlaconclaudio - {state}")
 
     def _open_repo(self, icon, item):
         """Open the GitHub repo in the default browser."""
