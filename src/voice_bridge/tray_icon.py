@@ -373,7 +373,7 @@ _ANIM_PRESETS = {
     },
 }
 
-ICON_SIZE = 64
+ICON_SIZE = 128  # 128px for crisp high-DPI rendering
 NUM_IDLE_FRAMES = 36  # Pre-generated frames for idle animation
 
 
@@ -658,22 +658,27 @@ class TrayIcon:
             pystray.MenuItem(f"{E_KEY} Get Deepgram API Key", self._open_deepgram_console),
         )
 
+        # === Mode emoji for status ===
+        mode_icon = MODE_EMOJI.get(current_mode, "🔔")
+        pack_icon = PACK_EMOJI.get(current_pack, "📦")
+
         return pystray.Menu(
-            pystray.MenuItem("✨ Voice Bridge v0.9.9.0426 ✨", None, enabled=False),
+            pystray.MenuItem("✨ parlaconclaudio v0.9.9.0426 ✨", None, enabled=False),
             pystray.Menu.SEPARATOR,
-            # --- Status bar (always visible) ---
-            pystray.MenuItem(f"🧠 {engine_display}  ·  {lang_display}  ·  🎤 {mic_display}", None, enabled=False),
+            # --- Status dashboard (always visible, read-only) ---
+            pystray.MenuItem(f"  🧠 {engine_display}  │  {lang_display}  │  🎤 {mic_display}", None, enabled=False),
+            pystray.MenuItem(f"  {mode_icon} {current_mode}  │  🔊 {current_vol}%  │  {pack_icon} {current_pack}", None, enabled=False),
             pystray.Menu.SEPARATOR,
             # --- Quick access ---
-            pystray.MenuItem(f"{E_TTS} Mode [{current_mode}]", pystray.Menu(*mode_items)),
-            pystray.MenuItem(f"{E_VOLUME} Volume [{current_vol}%]", pystray.Menu(*vol_items)),
-            pystray.MenuItem(f"{E_PACK} Sound Pack", pystray.Menu(*pack_items)),
-            pystray.MenuItem(f"{E_PREVIEW} Preview [{current_pack}]", pystray.Menu(*preview_items) if preview_items else None),
+            pystray.MenuItem(f"🔔 Mode [{current_mode}]", pystray.Menu(*mode_items)),
+            pystray.MenuItem(f"🔊 Volume [{current_vol}%]", pystray.Menu(*vol_items)),
+            pystray.MenuItem(f"🎵 Sound Pack [{current_pack}]", pystray.Menu(*pack_items)),
+            pystray.MenuItem(f"🎧 Preview [{current_pack}]", pystray.Menu(*preview_items) if preview_items else None),
             pystray.Menu.SEPARATOR,
             # --- Settings & Info ---
             pystray.MenuItem("⚙️ Settings & Info", settings_menu),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(f"{E_EXIT} Exit", self._exit_clicked),
+            pystray.MenuItem("🚪 Exit", self._exit_clicked),
         )
 
     # ------------------------------------------------------------------
