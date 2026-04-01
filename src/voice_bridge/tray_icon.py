@@ -232,27 +232,35 @@ def _play_sound(filepath: str) -> None:
 # ANIMATED RORSCHACH SPHERE ICON
 # ══════════════════════════════════════════════════
 
-def _inkblot(sx: float, sy: float, t: float) -> float:
-    """Organic inkblot noise — bilaterally symmetric.
+def _inkblot(nx: float, ny: float, t: float) -> float:
+    """Rorschach butterfly noise in normalized coords.
 
-    Uses abs(x) so left mirrors right, like a folded ink print.
-    Multiple octaves create organic blob boundaries.
+    nx: abs(x/half), 0..1 — bilateral symmetry built-in.
+    ny: y/half, -1..1.
+    Returns a value where higher = more ink.
     """
-    ax = abs(sx)  # bilateral symmetry
+    # Stretch for butterfly proportions: WIDER than tall
+    wx = nx * 0.6
+    wy = ny * 1.3
 
-    # Large organic blobs — the main butterfly wings
-    v = math.sin(ax * 0.08 + t * 0.3) * math.sin(sy * 0.06 + t * 0.2)
-    # Wing shape — wider at middle, narrow at top/bottom
-    v += 0.7 * math.sin(ax * 0.12 - sy * sy * 0.0003 + t * 0.15)
-    # Organic tendrils extending outward
-    v += 0.5 * math.cos(ax * 0.18 + sy * 0.10 + t * 0.25)
-    # Fine detail — small lobes and appendages
-    v += 0.35 * math.sin(ax * 0.30 + sy * 0.22 - t * 0.18)
-    v += 0.25 * math.cos(ax * 0.22 - sy * 0.35 + t * 0.12)
-    # Central spine (vertical axis detail)
-    v += 0.3 * math.sin(sy * 0.14 + t * 0.1) * math.exp(-ax * 0.04)
+    # Multi-octave organic noise — creates irregular edges
+    v = math.sin(wx * 7.0 + t * 0.25) * math.cos(wy * 5.5 - t * 0.18)
+    v += 0.55 * math.sin(wx * 11.0 + wy * 8.5 + t * 0.15)
+    v += 0.35 * math.cos(wx * 17.0 - wy * 13.0 + t * 0.22)
+    v += 0.25 * math.sin(wx * 23.0 + wy * 17.0 - t * 0.12)
+    v += 0.15 * math.cos(wx * 31.0 + wy * 25.0 + t * 0.08)
 
-    return v
+    # Wing envelope: extends OUTWARD from spine, widest at mid-height
+    wing = (1.0 - math.exp(-nx * 3.5)) * math.exp(-wy * wy * 1.2)
+
+    # Body spine: narrow vertical connection
+    body = math.exp(-nx * nx * 30.0) * math.exp(-wy * wy * 2.0)
+
+    # Upper and lower wing tips — lobes that extend diagonally
+    tip_up = 0.3 * math.exp(-((nx - 0.5) ** 2 + (ny + 0.45) ** 2) * 8.0)
+    tip_dn = 0.3 * math.exp(-((nx - 0.5) ** 2 + (ny - 0.45) ** 2) * 8.0)
+
+    return v + wing * 0.9 + body * 0.55 + tip_up + tip_dn
 
 
 def _generate_butterfly(
@@ -263,14 +271,13 @@ def _generate_butterfly(
     brightness: float = 0.90,
     time_val: float = 0.0,
 ) -> "Image.Image":
-    """Generate a Rorschach butterfly filling the full icon area.
+    """Generate Rorschach butterfly filling the FULL SQUARE icon.
 
-    Dynamic contrasting background + dark ink butterfly on top.
-    The butterfly extends to the edges, not confined to a sphere.
+    No sphere, no circular clipping.  Dynamic contrasting background
+    with dark ink butterfly wings extending to the edges.
     """
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     pixels = img.load()
-    center = size / 2.0
     half = size / 2.0
 
     # Complementary hue for background contrast
@@ -278,45 +285,35 @@ def _generate_butterfly(
 
     for y in range(size):
         for x in range(size):
-            dx = x - center
-            dy = y - center
-            dist = math.sqrt(dx * dx + dy * dy)
-            norm_dist = dist / half
+            # Normalized coords: -1..1
+            fx = (x - half) / half
+            fy = (y - half) / half
+            nx = abs(fx)  # 0..1, bilateral
 
-            if norm_dist > 1.0:
-                continue
+            # --- Dynamic background (fills full square) ---
+            bg_swirl = math.sin(fx * 2.5 + time_val * 0.12) + math.cos(fy * 2.0 - time_val * 0.09)
+            h_bg = (h_bg_base + bg_swirl * 0.05 + fy * 0.03) % 1.0
+            s_bg = 0.22 + 0.08 * math.sin(fx * 1.5 + fy * 1.5 + time_val * 0.1)
+            v_bg = 0.93 + 0.04 * math.sin(fx * 2.0 - fy * 1.8 + time_val * 0.07)
 
-            # --- Dynamic background ---
-            # Slow swirling gradient that contrasts the ink
-            bg_swirl = math.sin(dx * 0.04 + time_val * 0.12) + math.cos(dy * 0.05 - time_val * 0.08)
-            h_bg = (h_bg_base + bg_swirl * 0.06) % 1.0
-            s_bg = 0.25 + 0.1 * math.sin(norm_dist * 3.0 + time_val * 0.15)
-            v_bg = 0.92 - norm_dist * 0.15 + 0.05 * math.sin(dx * 0.03 + dy * 0.03 + time_val * 0.1)
+            # --- Inkblot butterfly ---
+            ink_raw = _inkblot(nx, fy, time_val)
 
-            # --- Inkblot ---
-            ink_raw = _inkblot(dx, dy, time_val)
+            # Sharp sigmoid — crisp ink edges
+            threshold = 0.22 + 0.10 * math.sin(time_val * 0.08)
+            ink = 1.0 / (1.0 + math.exp(-14.0 * (ink_raw - threshold)))
 
-            # Sigmoid threshold — sharp blob edges
-            threshold = 0.20 + 0.10 * math.sin(time_val * 0.08)
-            ink = 1.0 / (1.0 + math.exp(-12.0 * (ink_raw - threshold)))
-
-            # Gentle fade only at icon corners (circular soft clip)
-            if norm_dist > 0.85:
-                corner_fade = 1.0 - (norm_dist - 0.85) / 0.15
-                ink *= max(0.0, corner_fade)
-
-            # --- Ink color: deep, saturated ---
-            h_ink = (hue_offset + ink_raw * hue_range * 0.12) % 1.0
+            # --- Ink color: deep saturated ---
+            h_ink = (hue_offset + ink_raw * hue_range * 0.10) % 1.0
             s_ink = min(1.0, saturation + 0.1)
-            v_ink = 0.10 + 0.15 * (1.0 - ink)  # very dark
+            v_ink = 0.06 + 0.10 * (1.0 - ink)
 
-            # Spine glow — bright line down the center
-            spine_dist = abs(dx) / half
+            # Spine glow — luminous center line
             spine_glow = 0.0
-            if spine_dist < 0.06 and ink > 0.3:
-                spine_glow = (1.0 - spine_dist / 0.06) * 0.4 * ink
+            if nx < 0.05 and ink > 0.3:
+                spine_glow = (1.0 - nx / 0.05) * 0.35 * ink
 
-            # --- Blend background + ink ---
+            # --- Blend ---
             h = h_bg + (h_ink - h_bg) * ink
             s = s_bg + (s_ink - s_bg) * ink
             v = v_bg + (v_ink - v_bg) * ink
@@ -325,10 +322,12 @@ def _generate_butterfly(
 
             r, g, b = colorsys.hsv_to_rgb(h % 1.0, max(0, min(1, s)), max(0, min(1, v)))
 
-            # Alpha: full inside, fade at circle edge
-            alpha = 255
-            if norm_dist > 0.88:
-                alpha = int(255 * max(0.0, (1.0 - (norm_dist - 0.88) / 0.12)))
+            # Alpha: full square, gentle fade only at very edge
+            edge = min(
+                max(0.0, (1.0 - abs(fx)) * 6.0),
+                max(0.0, (1.0 - abs(fy)) * 6.0),
+            )
+            alpha = int(255 * min(1.0, edge))
 
             pixels[x, y] = (int(r * 255), int(g * 255), int(b * 255), alpha)
 
