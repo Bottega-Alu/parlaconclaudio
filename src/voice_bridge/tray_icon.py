@@ -233,11 +233,17 @@ def _play_sound(filepath: str) -> None:
 # ══════════════════════════════════════════════════
 
 def _marble_noise(x: float, y: float, t: float) -> float:
-    """Generate marble-like noise pattern using layered sine waves."""
-    v = math.sin(x * 0.15 + t * 0.7)
-    v += 0.5 * math.sin(y * 0.22 - t * 0.5)
-    v += 0.3 * math.sin((x + y) * 0.18 + t * 1.1)
-    v += 0.2 * math.sin(math.sqrt(x * x + y * y) * 0.12 - t * 0.8)
+    """Rich multi-octave marble noise — chaotic veins and swirls."""
+    r = math.sqrt(x * x + y * y)
+    # Large swirling veins
+    v = math.sin(x * 0.12 + y * 0.08 + t * 0.6)
+    v += 0.6 * math.cos(x * 0.09 - y * 0.15 + t * 0.45)
+    # Turbulent mid-detail
+    v += 0.45 * math.sin((x + y) * 0.18 + math.sin(r * 0.06) * 3.0 + t * 0.8)
+    v += 0.35 * math.cos((x - y) * 0.14 + t * 1.1)
+    # Fine chaotic grain
+    v += 0.25 * math.sin(x * 0.28 + y * 0.35 - t * 0.9)
+    v += 0.15 * math.cos(x * 0.40 - y * 0.22 + t * 0.55)
     return v
 
 
@@ -276,8 +282,8 @@ def _generate_marble_sphere(
             # Marble veins
             marble = _marble_noise(x, y, time_val)
 
-            h = (hue_offset + marble * hue_range * 0.15) % 1.0
-            s = saturation * (1.0 - norm_dist * 0.12)
+            h = (hue_offset + marble * hue_range * 0.25) % 1.0
+            s = saturation * (1.0 - norm_dist * 0.08) * (0.85 + 0.15 * abs(marble))
             v = brightness * light_factor
 
             # Specular highlight (glass)
@@ -327,8 +333,8 @@ _ANIM_PRESETS = {
     },
     "idle": {
         "hue_speed": 0.008,       # Slow rainbow drift
-        "hue_range": 0.25,
-        "saturation": 0.82,
+        "hue_range": 0.45,        # Wide color variation in veins
+        "saturation": 0.88,
         "brightness": 0.95,
         "time_speed": 0.3,
         "interval": 0.15,
