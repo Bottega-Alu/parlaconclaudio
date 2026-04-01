@@ -232,17 +232,26 @@ def _play_sound(filepath: str) -> None:
 # ANIMATED RORSCHACH SPHERE ICON
 # ══════════════════════════════════════════════════
 
-def _rorschach_noise(ax: float, ay: float, t: float) -> float:
-    """Multi-octave noise for Rorschach inkblot patterns.
+def _inkblot(sx: float, sy: float, t: float) -> float:
+    """Organic inkblot noise — bilaterally symmetric.
 
-    Uses abs(x) for bilateral symmetry — the butterfly effect.
+    Uses abs(x) so left mirrors right, like a folded ink print.
+    Multiple octaves create organic blob boundaries.
     """
-    sx = abs(ax)  # Mirror: left == right
-    v = math.sin(sx * 0.20 + t * 0.6) * math.cos(ay * 0.15 - t * 0.4)
-    v += 0.6 * math.sin(sx * 0.35 + ay * 0.25 + t * 0.9)
-    v += 0.4 * math.cos((sx * sx + ay * ay) * 0.004 - t * 0.7)
-    v += 0.3 * math.sin(sx * 0.50 - ay * 0.40 + t * 1.3)
-    v += 0.2 * math.cos(sx * 0.12 + ay * 0.60 + t * 0.5)
+    ax = abs(sx)  # bilateral symmetry
+
+    # Large organic blobs — the main butterfly wings
+    v = math.sin(ax * 0.08 + t * 0.3) * math.sin(sy * 0.06 + t * 0.2)
+    # Wing shape — wider at middle, narrow at top/bottom
+    v += 0.7 * math.sin(ax * 0.12 - sy * sy * 0.0003 + t * 0.15)
+    # Organic tendrils extending outward
+    v += 0.5 * math.cos(ax * 0.18 + sy * 0.10 + t * 0.25)
+    # Fine detail — small lobes and appendages
+    v += 0.35 * math.sin(ax * 0.30 + sy * 0.22 - t * 0.18)
+    v += 0.25 * math.cos(ax * 0.22 - sy * 0.35 + t * 0.12)
+    # Central spine (vertical axis detail)
+    v += 0.3 * math.sin(sy * 0.14 + t * 0.1) * math.exp(-ax * 0.04)
+
     return v
 
 
@@ -254,20 +263,15 @@ def _generate_marble_sphere(
     brightness: float = 0.95,
     time_val: float = 0.0,
 ) -> "Image.Image":
-    """Generate a single frame of an animated Rorschach sphere.
+    """Generate Rorschach inkblot sphere — butterfly symmetry, no rotation.
 
-    Bilaterally symmetric inkblot patterns inside a glass sphere.
-    The patterns morph and rotate as time_val changes.
+    Dark organic ink patterns on a luminous colored sphere.
+    Patterns morph slowly over time, always bilaterally symmetric.
     """
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     pixels = img.load()
     center = size / 2.0
     radius = (size - 6) / 2.0
-
-    # Slow rotation angle — the whole inkblot rotates over time
-    rot = time_val * 0.15
-    cos_r = math.cos(rot)
-    sin_r = math.sin(rot)
 
     for y in range(size):
         for x in range(size):
@@ -279,71 +283,77 @@ def _generate_marble_sphere(
                 continue
 
             norm_dist = dist / radius
-
-            # Normalized sphere coords
             nx = dx / radius
             ny = dy / radius
             nz = math.sqrt(max(0, 1 - nx * nx - ny * ny))
 
-            # Rotate the sampling point for spinning inkblot
-            rx = nx * cos_r - ny * sin_r
-            ry = nx * sin_r + ny * cos_r
+            # Sample in ink space — no rotation, just direct coords
+            sx = dx
+            sy = dy
 
-            # Scale to noise space
-            ax = rx * size * 0.5
-            ay = ry * size * 0.5
+            # Raw inkblot value
+            ink_raw = _inkblot(sx, sy, time_val)
 
-            # Rorschach inkblot pattern (bilaterally symmetric)
-            ink = _rorschach_noise(ax, ay, time_val)
+            # Sharp threshold — creates defined blob edges like real inkblots
+            # Higher threshold = less ink, lower = more ink
+            ink_threshold = 0.3 + 0.15 * math.sin(time_val * 0.08)
+            ink = 1.0 / (1.0 + math.exp(-8.0 * (ink_raw - ink_threshold)))
 
-            # Create sharp ink edges — threshold the noise for blob shapes
-            ink_sharp = math.tanh(ink * 1.8) * 0.5 + 0.5  # 0..1, sharp transitions
+            # Fade ink near edges of sphere (ink lives in the center)
+            edge_fade = max(0.0, 1.0 - norm_dist * 1.1)
+            edge_fade = edge_fade ** 0.6
+            ink *= edge_fade
 
             # 3D sphere lighting
             light_dot = nx * (-0.3) + ny * (-0.4) + nz * 0.8
-            light_factor = max(0.15, min(1.0, 0.5 + light_dot * 0.6))
+            light_factor = max(0.2, min(1.0, 0.5 + light_dot * 0.55))
 
-            # Hue: base color + inkblot-driven variation
-            h = (hue_offset + ink * hue_range * 0.2) % 1.0
+            # Background: luminous colored sphere
+            h_bg = (hue_offset + norm_dist * 0.05) % 1.0
+            s_bg = saturation * 0.4 * (1.0 - norm_dist * 0.2)
+            v_bg = brightness * light_factor
 
-            # Saturation: ink areas are more saturated, background less
-            s = saturation * (0.5 + ink_sharp * 0.5) * (1.0 - norm_dist * 0.1)
+            # Ink: dark, deeply saturated color
+            h_ink = (hue_offset + 0.5 + ink_raw * hue_range * 0.08) % 1.0
+            s_ink = min(1.0, saturation * 1.2)
+            v_ink = 0.08 + 0.12 * light_factor  # very dark
 
-            # Value: ink areas darker, giving depth to the blot
-            ink_darkness = 1.0 - ink_sharp * 0.35
-            v = brightness * light_factor * ink_darkness
+            # Blend: background where no ink, dark where ink
+            h = h_bg + (h_ink - h_bg) * ink
+            s = s_bg + (s_ink - s_bg) * ink
+            v = v_bg + (v_ink - v_bg) * ink
 
-            # Specular highlight (glass sphere)
+            # Specular highlight (glass sphere — on top of everything)
             spec_dist = math.sqrt((nx + 0.35) ** 2 + (ny + 0.35) ** 2)
-            if spec_dist < 0.38:
-                spec = (1.0 - spec_dist / 0.38) ** 2.5 * 0.6
+            if spec_dist < 0.35:
+                spec = (1.0 - spec_dist / 0.35) ** 3.0 * 0.7
                 v = min(1.0, v + spec)
-                s = max(0.0, s - spec * 0.7)
+                s = max(0.0, s - spec * 0.8)
 
-            # Pinpoint specular
-            spec2_dist = math.sqrt((nx + 0.25) ** 2 + (ny + 0.50) ** 2)
-            if spec2_dist < 0.12:
-                spec2 = (1.0 - spec2_dist / 0.12) ** 4 * 0.3
+            # Small pinpoint specular
+            spec2_dist = math.sqrt((nx + 0.22) ** 2 + (ny + 0.48) ** 2)
+            if spec2_dist < 0.10:
+                spec2 = (1.0 - spec2_dist / 0.10) ** 4 * 0.4
                 v = min(1.0, v + spec2)
                 s = max(0.0, s - spec2)
 
-            # Rim lighting
-            if norm_dist > 0.65:
-                rim = (norm_dist - 0.65) / 0.35
-                v = min(1.0, v + rim ** 1.5 * 0.2)
+            # Rim glow
+            if norm_dist > 0.7:
+                rim = (norm_dist - 0.7) / 0.3
+                v = min(1.0, v + rim ** 2 * 0.15)
 
-            r, g, b = colorsys.hsv_to_rgb(h, s, v)
+            r, g, b = colorsys.hsv_to_rgb(h % 1.0, max(0, min(1, s)), max(0, min(1, v)))
 
-            # Alpha: smooth edge falloff
+            # Alpha: smooth edge
             alpha = 255
-            if norm_dist > 0.85:
-                alpha = int(255 * (1.0 - (norm_dist - 0.85) / 0.15))
+            if norm_dist > 0.88:
+                alpha = int(255 * (1.0 - (norm_dist - 0.88) / 0.12))
 
             pixels[x, y] = (int(r * 255), int(g * 255), int(b * 255), alpha)
 
-    # Bloom effect
-    glow = img.filter(ImageFilter.GaussianBlur(radius=2.0))
-    img = Image.blend(img, glow, alpha=0.18)
+    # Soft bloom
+    glow = img.filter(ImageFilter.GaussianBlur(radius=2.5))
+    img = Image.blend(img, glow, alpha=0.15)
 
     return img
 
