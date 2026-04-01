@@ -110,9 +110,21 @@ Add to `~/.claude/settings.json`:
 .\venv\Scripts\python.exe -m src.voice_bridge
 ```
 
+## How to Use
+
+1. **Launch** `VoiceBridge.bat` — the Rorschach sphere appears in the system tray
+2. **Press `Ctrl+Alt+Space`** to start recording (sphere turns red, you hear a beep)
+3. **Speak** your message
+4. **Press `Ctrl+Alt+Space` again** to stop recording (second beep)
+5. Your words are transcribed and **automatically pasted** into the active window (third beep)
+
+> **Hotkey:** `Ctrl+Alt+Space` (toggle mode — press once to start, once to stop)
+>
+> The text goes to clipboard and is pasted via `Ctrl+V`. In Claude Code CLI, you can also right-click to paste.
+
 ## Tray Menu
 
-Right-click the animated marble sphere in the system tray:
+Right-click the animated Rorschach sphere in the system tray:
 
 ```
 ✨ Voice Bridge v0.9.9.0426 ✨
@@ -276,9 +288,21 @@ pip install keyring
 .\venv\Scripts\python.exe -m src.voice_bridge
 ```
 
+## Come si Usa
+
+1. **Avvia** `VoiceBridge.bat` — la sfera Rorschach appare nel system tray
+2. **Premi `Ctrl+Alt+Spazio`** per iniziare la registrazione (sfera rossa, beep)
+3. **Parla** il tuo messaggio
+4. **Premi di nuovo `Ctrl+Alt+Spazio`** per fermare la registrazione (secondo beep)
+5. Le tue parole vengono trascritte e **incollate automaticamente** nella finestra attiva (terzo beep)
+
+> **Tasto rapido:** `Ctrl+Alt+Spazio` (modalita toggle — premi una volta per iniziare, una per fermare)
+>
+> Il testo va in clipboard e viene incollato con `Ctrl+V`. In Claude Code CLI puoi anche fare click destro per incollare.
+
 ## Menu Tray
 
-Click destro sulla sfera animata nel system tray:
+Click destro sulla sfera Rorschach nel system tray:
 
 ```
 ✨ Voice Bridge v0.9.9.0426 ✨
@@ -386,9 +410,21 @@ pip install keyring
 .\venv\Scripts\python.exe -m src.voice_bridge
 ```
 
+## Como Usar
+
+1. **Execute** `VoiceBridge.bat` — a esfera Rorschach aparece no system tray
+2. **Pressione `Ctrl+Alt+Espaco`** para comecar a gravar (esfera vermelha, beep)
+3. **Fale** sua mensagem
+4. **Pressione `Ctrl+Alt+Espaco` novamente** para parar a gravacao (segundo beep)
+5. Suas palavras sao transcritas e **coladas automaticamente** na janela ativa (terceiro beep)
+
+> **Tecla de atalho:** `Ctrl+Alt+Espaco` (modo toggle — pressione uma vez para iniciar, uma para parar)
+>
+> O texto vai para a area de transferencia e e colado com `Ctrl+V`. No Claude Code CLI voce tambem pode clicar com o botao direito para colar.
+
 ## Menu Tray
 
-Clique direito na esfera animada no system tray:
+Clique direito na esfera Rorschach no system tray:
 
 ```
 ✨ Voice Bridge v0.9.9.0426 ✨
