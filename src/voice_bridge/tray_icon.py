@@ -263,63 +263,78 @@ def _generate_butterfly(
     brightness: float = 0.90,
     time_val: float = 0.0,
 ) -> "Image.Image":
-    """Generate a Rorschach butterfly on transparent background.
+    """Generate a Rorschach butterfly filling the full icon area.
 
-    Pure inkblot — no sphere, no glass. The butterfly shape floats
-    with transparency around it, morphing slowly.
+    Dynamic contrasting background + dark ink butterfly on top.
+    The butterfly extends to the edges, not confined to a sphere.
     """
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     pixels = img.load()
     center = size / 2.0
-    max_r = size * 0.48
+    half = size / 2.0
+
+    # Complementary hue for background contrast
+    h_bg_base = (hue_offset + 0.5) % 1.0
 
     for y in range(size):
         for x in range(size):
             dx = x - center
             dy = y - center
             dist = math.sqrt(dx * dx + dy * dy)
+            norm_dist = dist / half
 
-            if dist > max_r:
+            if norm_dist > 1.0:
                 continue
 
-            # Raw inkblot
+            # --- Dynamic background ---
+            # Slow swirling gradient that contrasts the ink
+            bg_swirl = math.sin(dx * 0.04 + time_val * 0.12) + math.cos(dy * 0.05 - time_val * 0.08)
+            h_bg = (h_bg_base + bg_swirl * 0.06) % 1.0
+            s_bg = 0.25 + 0.1 * math.sin(norm_dist * 3.0 + time_val * 0.15)
+            v_bg = 0.92 - norm_dist * 0.15 + 0.05 * math.sin(dx * 0.03 + dy * 0.03 + time_val * 0.1)
+
+            # --- Inkblot ---
             ink_raw = _inkblot(dx, dy, time_val)
 
-            # Sharp sigmoid threshold — crisp blob edges
-            threshold = 0.25 + 0.12 * math.sin(time_val * 0.08)
-            ink = 1.0 / (1.0 + math.exp(-10.0 * (ink_raw - threshold)))
+            # Sigmoid threshold — sharp blob edges
+            threshold = 0.20 + 0.10 * math.sin(time_val * 0.08)
+            ink = 1.0 / (1.0 + math.exp(-12.0 * (ink_raw - threshold)))
 
-            # Fade at the outer edges
-            norm_dist = dist / max_r
-            edge_fade = max(0.0, 1.0 - norm_dist * 1.05) ** 0.5
-            ink *= edge_fade
+            # Gentle fade only at icon corners (circular soft clip)
+            if norm_dist > 0.85:
+                corner_fade = 1.0 - (norm_dist - 0.85) / 0.15
+                ink *= max(0.0, corner_fade)
 
-            if ink < 0.03:
-                continue  # transparent — skip
+            # --- Ink color: deep, saturated ---
+            h_ink = (hue_offset + ink_raw * hue_range * 0.12) % 1.0
+            s_ink = min(1.0, saturation + 0.1)
+            v_ink = 0.10 + 0.15 * (1.0 - ink)  # very dark
 
-            # Color: rich, saturated ink
-            h = (hue_offset + ink_raw * hue_range * 0.12) % 1.0
-            s = min(1.0, saturation + ink * 0.1)
-            # Darker at center of blobs, lighter at edges
-            v = brightness * (0.25 + 0.65 * (1.0 - ink * 0.7))
+            # Spine glow — bright line down the center
+            spine_dist = abs(dx) / half
+            spine_glow = 0.0
+            if spine_dist < 0.06 and ink > 0.3:
+                spine_glow = (1.0 - spine_dist / 0.06) * 0.4 * ink
 
-            # Subtle inner glow along the symmetry spine
-            spine_dist = abs(dx) / max_r
-            if spine_dist < 0.08:
-                glow_factor = (1.0 - spine_dist / 0.08) * 0.3
-                v = min(1.0, v + glow_factor)
-                s = max(0.0, s - glow_factor * 0.5)
+            # --- Blend background + ink ---
+            h = h_bg + (h_ink - h_bg) * ink
+            s = s_bg + (s_ink - s_bg) * ink
+            v = v_bg + (v_ink - v_bg) * ink
+            v = min(1.0, v + spine_glow)
+            s = max(0.0, s - spine_glow * 0.5)
 
             r, g, b = colorsys.hsv_to_rgb(h % 1.0, max(0, min(1, s)), max(0, min(1, v)))
 
-            # Alpha: ink density drives opacity
-            alpha = int(255 * min(1.0, ink * 1.5))
+            # Alpha: full inside, fade at circle edge
+            alpha = 255
+            if norm_dist > 0.88:
+                alpha = int(255 * max(0.0, (1.0 - (norm_dist - 0.88) / 0.12)))
 
             pixels[x, y] = (int(r * 255), int(g * 255), int(b * 255), alpha)
 
-    # Soft bloom for that dreamy inkblot look
-    glow = img.filter(ImageFilter.GaussianBlur(radius=3.0))
-    img = Image.blend(img, glow, alpha=0.2)
+    # Dreamy bloom
+    glow = img.filter(ImageFilter.GaussianBlur(radius=2.5))
+    img = Image.blend(img, glow, alpha=0.18)
 
     return img
 
