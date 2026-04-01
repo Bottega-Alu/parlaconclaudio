@@ -229,108 +229,16 @@ def _play_sound(filepath: str) -> None:
 
 
 # ══════════════════════════════════════════════════
-# ANIMATED RORSCHACH SPHERE ICON
+# ANIMATED MARBLE SPHERE ICON (original)
 # ══════════════════════════════════════════════════
 
-def _inkblot(nx: float, ny: float, t: float) -> float:
-    """Rorschach butterfly noise in normalized coords.
-
-    nx: abs(x/half), 0..1 — bilateral symmetry built-in.
-    ny: y/half, -1..1.
-
-    Noise-dominant shape with light structural bias.
-    Medium frequencies for a few large organic blobs, not a solid mass.
-    """
-    # Butterfly proportions: wider than tall
-    wx = nx * 0.7
-    wy = ny * 1.1
-
-    # PRIMARY: medium-frequency noise drives the shape
-    v = math.sin(wx * 4.0 + t * 0.08) * math.cos(wy * 3.0 - t * 0.06)
-    v += 0.5 * math.sin(wx * 6.5 + wy * 4.5 + t * 0.05)
-    v += 0.35 * math.cos(wx * 9.0 - wy * 7.0 + t * 0.07)
-    v += 0.2 * math.sin(wx * 12.0 + wy * 9.0 - t * 0.04)
-
-    # LIGHT bias: gentle nudge toward butterfly shape, not solid fill
-    wing = (1.0 - math.exp(-nx * 3.0)) * math.exp(-wy * wy * 1.8) * 0.3
-    body = math.exp(-nx * nx * 25.0) * math.exp(-wy * wy * 3.0) * 0.2
-
-    return v + wing + body
-
-
-def _generate_butterfly(
-    size: int,
-    hue_offset: float,
-    hue_range: float = 0.3,
-    saturation: float = 0.85,
-    brightness: float = 0.90,
-    time_val: float = 0.0,
-) -> "Image.Image":
-    """Generate Rorschach butterfly filling the FULL SQUARE icon.
-
-    No sphere, no circular clipping.  Dynamic contrasting background
-    with dark ink butterfly wings extending to the edges.
-    """
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    pixels = img.load()
-    half = size / 2.0
-
-    # Complementary hue for background contrast
-    h_bg_base = (hue_offset + 0.5) % 1.0
-
-    for y in range(size):
-        for x in range(size):
-            # Normalized coords: -1..1
-            fx = (x - half) / half
-            fy = (y - half) / half
-            nx = abs(fx)  # 0..1, bilateral
-
-            # --- Dynamic background (fills full square) ---
-            bg_swirl = math.sin(fx * 2.5 + time_val * 0.12) + math.cos(fy * 2.0 - time_val * 0.09)
-            h_bg = (h_bg_base + bg_swirl * 0.05 + fy * 0.03) % 1.0
-            s_bg = 0.22 + 0.08 * math.sin(fx * 1.5 + fy * 1.5 + time_val * 0.1)
-            v_bg = 0.93 + 0.04 * math.sin(fx * 2.0 - fy * 1.8 + time_val * 0.07)
-
-            # --- Inkblot butterfly ---
-            ink_raw = _inkblot(nx, fy, time_val)
-
-            # Sigmoid threshold — one big shape, not many small blobs
-            threshold = 0.22 + 0.08 * math.sin(time_val * 0.04)
-            ink = 1.0 / (1.0 + math.exp(-8.0 * (ink_raw - threshold)))
-
-            # --- Ink color: deep saturated ---
-            h_ink = (hue_offset + ink_raw * hue_range * 0.10) % 1.0
-            s_ink = min(1.0, saturation + 0.1)
-            v_ink = 0.06 + 0.10 * (1.0 - ink)
-
-            # Spine glow — luminous center line
-            spine_glow = 0.0
-            if nx < 0.05 and ink > 0.3:
-                spine_glow = (1.0 - nx / 0.05) * 0.35 * ink
-
-            # --- Blend ---
-            h = h_bg + (h_ink - h_bg) * ink
-            s = s_bg + (s_ink - s_bg) * ink
-            v = v_bg + (v_ink - v_bg) * ink
-            v = min(1.0, v + spine_glow)
-            s = max(0.0, s - spine_glow * 0.5)
-
-            r, g, b = colorsys.hsv_to_rgb(h % 1.0, max(0, min(1, s)), max(0, min(1, v)))
-
-            # Alpha: full square, gentle fade only at very edge
-            edge = min(
-                max(0.0, (1.0 - abs(fx)) * 6.0),
-                max(0.0, (1.0 - abs(fy)) * 6.0),
-            )
-            alpha = int(255 * min(1.0, edge))
-
-            pixels[x, y] = (int(r * 255), int(g * 255), int(b * 255), alpha)
-
-    # Dreamy bloom
-    glow = img.filter(ImageFilter.GaussianBlur(radius=2.5))
-    img = Image.blend(img, glow, alpha=0.18)
-
-    return img
+def _marble_noise(x: float, y: float, t: float) -> float:
+    """Generate marble-like noise pattern using layered sine waves."""
+    v = math.sin(x * 0.15 + t * 0.7)
+    v += 0.5 * math.sin(y * 0.22 - t * 0.5)
+    v += 0.3 * math.sin((x + y) * 0.18 + t * 1.1)
+    v += 0.2 * math.sin(math.sqrt(x * x + y * y) * 0.12 - t * 0.8)
+    return v
 
 
 def _generate_marble_sphere(
@@ -341,7 +249,7 @@ def _generate_marble_sphere(
     brightness: float = 0.95,
     time_val: float = 0.0,
 ) -> "Image.Image":
-    """Generate a classic marble sphere for recording/transcribing/loading states."""
+    """Generate a single frame of the animated marble sphere."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     pixels = img.load()
     center = size / 2.0
@@ -361,32 +269,37 @@ def _generate_marble_sphere(
             ny = dy / radius
             nz = math.sqrt(max(0, 1 - nx * nx - ny * ny))
 
-            # Marble veins
-            v_noise = math.sin(x * 0.15 + time_val * 0.7)
-            v_noise += 0.5 * math.sin(y * 0.22 - time_val * 0.5)
-            v_noise += 0.3 * math.sin((x + y) * 0.18 + time_val * 1.1)
-
             # 3D sphere lighting
             light_dot = nx * (-0.3) + ny * (-0.4) + nz * 0.8
             light_factor = max(0.15, min(1.0, 0.5 + light_dot * 0.6))
 
-            h = (hue_offset + v_noise * hue_range * 0.15) % 1.0
+            # Marble veins
+            marble = _marble_noise(x, y, time_val)
+
+            h = (hue_offset + marble * hue_range * 0.15) % 1.0
             s = saturation * (1.0 - norm_dist * 0.12)
             v = brightness * light_factor
 
-            # Specular
+            # Specular highlight (glass)
             spec_dist = math.sqrt((nx + 0.35) ** 2 + (ny + 0.35) ** 2)
             if spec_dist < 0.38:
                 spec = (1.0 - spec_dist / 0.38) ** 2.5 * 0.65
                 v = min(1.0, v + spec)
                 s = max(0.0, s - spec * 0.8)
 
-            # Rim
+            # Pinpoint specular
+            spec2_dist = math.sqrt((nx + 0.25) ** 2 + (ny + 0.50) ** 2)
+            if spec2_dist < 0.12:
+                spec2 = (1.0 - spec2_dist / 0.12) ** 4 * 0.35
+                v = min(1.0, v + spec2)
+                s = max(0.0, s - spec2)
+
+            # Rim lighting
             if norm_dist > 0.65:
                 rim = (norm_dist - 0.65) / 0.35
                 v = min(1.0, v + rim ** 1.5 * 0.25)
 
-            r, g, b = colorsys.hsv_to_rgb(h % 1.0, max(0, min(1, s)), max(0, min(1, v)))
+            r, g, b = colorsys.hsv_to_rgb(h, s, v)
 
             alpha = 255
             if norm_dist > 0.85:
@@ -403,41 +316,41 @@ def _generate_marble_sphere(
 # Animation presets per state
 _ANIM_PRESETS = {
     "loading": {
-        "hue_speed": 0.0,         # Locked to yellow/amber
-        "hue_range": 0.06,
-        "saturation": 0.95,
+        "hue_speed": 0.0,
+        "hue_range": 0.08,
+        "saturation": 0.90,
         "brightness": 0.90,
-        "time_speed": 2.0,        # Fast marble shift
+        "time_speed": 1.5,
         "interval": 0.10,
-        "base_hue": 0.13,         # Yellow-amber
-        "pulse": True,            # Pulsing hazard effect
+        "base_hue": 0.13,         # Yellow/amber — caution
+        "pulse": True,
     },
     "idle": {
-        "hue_speed": 0.006,       # Slow rainbow drift
+        "hue_speed": 0.008,       # Slow rainbow drift
         "hue_range": 0.25,
-        "saturation": 0.85,
-        "brightness": 0.92,
-        "time_speed": 0.15,       # Slow morph for fluid animation
-        "interval": 0.15,         # 150ms per frame
+        "saturation": 0.82,
+        "brightness": 0.95,
+        "time_speed": 0.3,
+        "interval": 0.15,
     },
     "recording": {
-        "hue_speed": 0.005,       # Slow drift around red
-        "hue_range": 0.15,        # Multicolor but red-dominant
-        "saturation": 0.88,
+        "hue_speed": 0.003,
+        "hue_range": 0.10,
+        "saturation": 0.92,
         "brightness": 0.95,
-        "time_speed": 1.5,        # Fast marble shift
-        "interval": 0.08,         # 80ms per frame (fast pulse)
-        "base_hue": 0.97,         # Near-red (warm spectrum)
+        "time_speed": 1.5,
+        "interval": 0.08,
+        "base_hue": 0.98,         # Red/magenta — recording
         "pulse": True,
     },
     "transcribing": {
-        "hue_speed": 0.02,
-        "hue_range": 0.12,
+        "hue_speed": 0.015,
+        "hue_range": 0.10,
         "saturation": 0.80,
         "brightness": 0.95,
         "time_speed": 1.0,
         "interval": 0.10,
-        "base_hue": 0.12,         # Golden/amber
+        "base_hue": 0.12,         # Golden — processing
     },
 }
 
@@ -458,16 +371,16 @@ class _IconAnimator:
         self._idle_frames: list | None = None  # Pre-generated cache
 
     def _pregenerate_idle_frames(self):
-        """Pre-generate Rorschach butterfly frames for idle animation."""
+        """Pre-generate marble sphere frames for smooth idle animation."""
         if self._idle_frames is not None:
             return
-        logger.info("Pre-generating Rorschach butterfly frames...")
+        logger.info("Pre-generating marble sphere frames...")
         preset = _ANIM_PRESETS["idle"]
         self._idle_frames = []
         for i in range(NUM_IDLE_FRAMES):
             hue = i / NUM_IDLE_FRAMES
-            t = i * 0.25  # Small steps → smooth morphing loop
-            frame = _generate_butterfly(
+            t = i * 0.5
+            frame = _generate_marble_sphere(
                 ICON_SIZE, hue,
                 hue_range=preset["hue_range"],
                 saturation=preset["saturation"],
@@ -475,7 +388,7 @@ class _IconAnimator:
                 time_val=t,
             )
             self._idle_frames.append(frame)
-        logger.info(f"Generated {NUM_IDLE_FRAMES} Rorschach butterfly frames")
+        logger.info(f"Generated {NUM_IDLE_FRAMES} marble sphere frames")
 
     def set_icon(self, icon):
         self._icon_ref = icon
