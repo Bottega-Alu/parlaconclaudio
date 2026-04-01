@@ -255,6 +255,75 @@ def _inkblot(sx: float, sy: float, t: float) -> float:
     return v
 
 
+def _generate_butterfly(
+    size: int,
+    hue_offset: float,
+    hue_range: float = 0.3,
+    saturation: float = 0.85,
+    brightness: float = 0.90,
+    time_val: float = 0.0,
+) -> "Image.Image":
+    """Generate a Rorschach butterfly on transparent background.
+
+    Pure inkblot — no sphere, no glass. The butterfly shape floats
+    with transparency around it, morphing slowly.
+    """
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    pixels = img.load()
+    center = size / 2.0
+    max_r = size * 0.48
+
+    for y in range(size):
+        for x in range(size):
+            dx = x - center
+            dy = y - center
+            dist = math.sqrt(dx * dx + dy * dy)
+
+            if dist > max_r:
+                continue
+
+            # Raw inkblot
+            ink_raw = _inkblot(dx, dy, time_val)
+
+            # Sharp sigmoid threshold — crisp blob edges
+            threshold = 0.25 + 0.12 * math.sin(time_val * 0.08)
+            ink = 1.0 / (1.0 + math.exp(-10.0 * (ink_raw - threshold)))
+
+            # Fade at the outer edges
+            norm_dist = dist / max_r
+            edge_fade = max(0.0, 1.0 - norm_dist * 1.05) ** 0.5
+            ink *= edge_fade
+
+            if ink < 0.03:
+                continue  # transparent — skip
+
+            # Color: rich, saturated ink
+            h = (hue_offset + ink_raw * hue_range * 0.12) % 1.0
+            s = min(1.0, saturation + ink * 0.1)
+            # Darker at center of blobs, lighter at edges
+            v = brightness * (0.25 + 0.65 * (1.0 - ink * 0.7))
+
+            # Subtle inner glow along the symmetry spine
+            spine_dist = abs(dx) / max_r
+            if spine_dist < 0.08:
+                glow_factor = (1.0 - spine_dist / 0.08) * 0.3
+                v = min(1.0, v + glow_factor)
+                s = max(0.0, s - glow_factor * 0.5)
+
+            r, g, b = colorsys.hsv_to_rgb(h % 1.0, max(0, min(1, s)), max(0, min(1, v)))
+
+            # Alpha: ink density drives opacity
+            alpha = int(255 * min(1.0, ink * 1.5))
+
+            pixels[x, y] = (int(r * 255), int(g * 255), int(b * 255), alpha)
+
+    # Soft bloom for that dreamy inkblot look
+    glow = img.filter(ImageFilter.GaussianBlur(radius=3.0))
+    img = Image.blend(img, glow, alpha=0.2)
+
+    return img
+
+
 def _generate_marble_sphere(
     size: int,
     hue_offset: float,
@@ -263,11 +332,7 @@ def _generate_marble_sphere(
     brightness: float = 0.95,
     time_val: float = 0.0,
 ) -> "Image.Image":
-    """Generate Rorschach inkblot sphere — butterfly symmetry, no rotation.
-
-    Dark organic ink patterns on a luminous colored sphere.
-    Patterns morph slowly over time, always bilaterally symmetric.
-    """
+    """Generate a classic marble sphere for recording/transcribing/loading states."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     pixels = img.load()
     center = size / 2.0
@@ -287,72 +352,40 @@ def _generate_marble_sphere(
             ny = dy / radius
             nz = math.sqrt(max(0, 1 - nx * nx - ny * ny))
 
-            # Sample in ink space — no rotation, just direct coords
-            sx = dx
-            sy = dy
-
-            # Raw inkblot value
-            ink_raw = _inkblot(sx, sy, time_val)
-
-            # Sharp threshold — creates defined blob edges like real inkblots
-            # Higher threshold = less ink, lower = more ink
-            ink_threshold = 0.3 + 0.15 * math.sin(time_val * 0.08)
-            ink = 1.0 / (1.0 + math.exp(-8.0 * (ink_raw - ink_threshold)))
-
-            # Fade ink near edges of sphere (ink lives in the center)
-            edge_fade = max(0.0, 1.0 - norm_dist * 1.1)
-            edge_fade = edge_fade ** 0.6
-            ink *= edge_fade
+            # Marble veins
+            v_noise = math.sin(x * 0.15 + time_val * 0.7)
+            v_noise += 0.5 * math.sin(y * 0.22 - time_val * 0.5)
+            v_noise += 0.3 * math.sin((x + y) * 0.18 + time_val * 1.1)
 
             # 3D sphere lighting
             light_dot = nx * (-0.3) + ny * (-0.4) + nz * 0.8
-            light_factor = max(0.2, min(1.0, 0.5 + light_dot * 0.55))
+            light_factor = max(0.15, min(1.0, 0.5 + light_dot * 0.6))
 
-            # Background: luminous colored sphere
-            h_bg = (hue_offset + norm_dist * 0.05) % 1.0
-            s_bg = saturation * 0.4 * (1.0 - norm_dist * 0.2)
-            v_bg = brightness * light_factor
+            h = (hue_offset + v_noise * hue_range * 0.15) % 1.0
+            s = saturation * (1.0 - norm_dist * 0.12)
+            v = brightness * light_factor
 
-            # Ink: dark, deeply saturated color
-            h_ink = (hue_offset + 0.5 + ink_raw * hue_range * 0.08) % 1.0
-            s_ink = min(1.0, saturation * 1.2)
-            v_ink = 0.08 + 0.12 * light_factor  # very dark
-
-            # Blend: background where no ink, dark where ink
-            h = h_bg + (h_ink - h_bg) * ink
-            s = s_bg + (s_ink - s_bg) * ink
-            v = v_bg + (v_ink - v_bg) * ink
-
-            # Specular highlight (glass sphere — on top of everything)
+            # Specular
             spec_dist = math.sqrt((nx + 0.35) ** 2 + (ny + 0.35) ** 2)
-            if spec_dist < 0.35:
-                spec = (1.0 - spec_dist / 0.35) ** 3.0 * 0.7
+            if spec_dist < 0.38:
+                spec = (1.0 - spec_dist / 0.38) ** 2.5 * 0.65
                 v = min(1.0, v + spec)
                 s = max(0.0, s - spec * 0.8)
 
-            # Small pinpoint specular
-            spec2_dist = math.sqrt((nx + 0.22) ** 2 + (ny + 0.48) ** 2)
-            if spec2_dist < 0.10:
-                spec2 = (1.0 - spec2_dist / 0.10) ** 4 * 0.4
-                v = min(1.0, v + spec2)
-                s = max(0.0, s - spec2)
-
-            # Rim glow
-            if norm_dist > 0.7:
-                rim = (norm_dist - 0.7) / 0.3
-                v = min(1.0, v + rim ** 2 * 0.15)
+            # Rim
+            if norm_dist > 0.65:
+                rim = (norm_dist - 0.65) / 0.35
+                v = min(1.0, v + rim ** 1.5 * 0.25)
 
             r, g, b = colorsys.hsv_to_rgb(h % 1.0, max(0, min(1, s)), max(0, min(1, v)))
 
-            # Alpha: smooth edge
             alpha = 255
-            if norm_dist > 0.88:
-                alpha = int(255 * (1.0 - (norm_dist - 0.88) / 0.12))
+            if norm_dist > 0.85:
+                alpha = int(255 * (1.0 - (norm_dist - 0.85) / 0.15))
 
             pixels[x, y] = (int(r * 255), int(g * 255), int(b * 255), alpha)
 
-    # Soft bloom
-    glow = img.filter(ImageFilter.GaussianBlur(radius=2.5))
+    glow = img.filter(ImageFilter.GaussianBlur(radius=1.5))
     img = Image.blend(img, glow, alpha=0.15)
 
     return img
@@ -379,13 +412,13 @@ _ANIM_PRESETS = {
         "interval": 0.15,         # 150ms per frame
     },
     "recording": {
-        "hue_speed": 0.0,         # Locked to red
-        "hue_range": 0.08,
-        "saturation": 0.90,
+        "hue_speed": 0.005,       # Slow drift around red
+        "hue_range": 0.15,        # Multicolor but red-dominant
+        "saturation": 0.88,
         "brightness": 0.95,
         "time_speed": 1.5,        # Fast marble shift
         "interval": 0.08,         # 80ms per frame (fast pulse)
-        "base_hue": 0.0,          # Red
+        "base_hue": 0.97,         # Near-red (warm spectrum)
         "pulse": True,
     },
     "transcribing": {
@@ -416,16 +449,16 @@ class _IconAnimator:
         self._idle_frames: list | None = None  # Pre-generated cache
 
     def _pregenerate_idle_frames(self):
-        """Pre-generate idle animation frames for smooth playback."""
+        """Pre-generate Rorschach butterfly frames for idle animation."""
         if self._idle_frames is not None:
             return
-        logger.info("Pre-generating marble sphere frames...")
+        logger.info("Pre-generating Rorschach butterfly frames...")
         preset = _ANIM_PRESETS["idle"]
         self._idle_frames = []
         for i in range(NUM_IDLE_FRAMES):
             hue = i / NUM_IDLE_FRAMES
             t = i * 0.5
-            frame = _generate_marble_sphere(
+            frame = _generate_butterfly(
                 ICON_SIZE, hue,
                 hue_range=preset["hue_range"],
                 saturation=preset["saturation"],
@@ -433,7 +466,7 @@ class _IconAnimator:
                 time_val=t,
             )
             self._idle_frames.append(frame)
-        logger.info(f"Generated {NUM_IDLE_FRAMES} marble sphere frames")
+        logger.info(f"Generated {NUM_IDLE_FRAMES} Rorschach butterfly frames")
 
     def set_icon(self, icon):
         self._icon_ref = icon
