@@ -360,8 +360,9 @@ _ANIM_PRESETS = {
     },
 }
 
-ICON_SIZE = 128  # 128px for crisp high-DPI rendering
+ICON_SIZE = 256  # Max resolution for crisp high-DPI rendering
 NUM_IDLE_FRAMES = 36  # Pre-generated frames for idle animation
+FRAME_CACHE_DIR = Path.home() / ".claude" / "cache" / "tts" / "icon_frames"
 
 
 class _IconAnimator:
@@ -377,10 +378,34 @@ class _IconAnimator:
         self._idle_frames: list | None = None  # Pre-generated cache
 
     def _pregenerate_idle_frames(self):
-        """Pre-generate marble sphere frames for smooth idle animation."""
+        """Load idle frames from disk cache, or generate + save on first run."""
         if self._idle_frames is not None:
             return
-        logger.info("Pre-generating marble sphere frames...")
+
+        FRAME_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_ok = True
+        frames = []
+
+        # Try loading from cache
+        for i in range(NUM_IDLE_FRAMES):
+            fpath = FRAME_CACHE_DIR / f"idle_{ICON_SIZE}_{i:02d}.png"
+            if fpath.is_file():
+                try:
+                    frames.append(Image.open(fpath).copy())
+                except Exception:
+                    cache_ok = False
+                    break
+            else:
+                cache_ok = False
+                break
+
+        if cache_ok and len(frames) == NUM_IDLE_FRAMES:
+            self._idle_frames = frames
+            logger.info(f"Loaded {NUM_IDLE_FRAMES} cached frames ({ICON_SIZE}px)")
+            return
+
+        # Generate and save to cache
+        logger.info(f"Generating {NUM_IDLE_FRAMES} marble sphere frames ({ICON_SIZE}px)...")
         preset = _ANIM_PRESETS["idle"]
         self._idle_frames = []
         for i in range(NUM_IDLE_FRAMES):
@@ -394,7 +419,11 @@ class _IconAnimator:
                 time_val=t,
             )
             self._idle_frames.append(frame)
-        logger.info(f"Generated {NUM_IDLE_FRAMES} marble sphere frames")
+            try:
+                frame.save(FRAME_CACHE_DIR / f"idle_{ICON_SIZE}_{i:02d}.png")
+            except Exception:
+                pass
+        logger.info(f"Generated and cached {NUM_IDLE_FRAMES} frames")
 
     def set_icon(self, icon):
         self._icon_ref = icon
