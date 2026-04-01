@@ -255,11 +255,17 @@ def _generate_marble_sphere(
     brightness: float = 0.95,
     time_val: float = 0.0,
 ) -> "Image.Image":
-    """Generate a single frame of the animated marble sphere."""
+    """Generate a single frame of the animated marble sphere.
+
+    Rich liquid-ink effect with deep shimmer and smooth color flow.
+    """
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     pixels = img.load()
     center = size / 2.0
     radius = (size - 6) / 2.0
+
+    # Per-frame shimmer: subtle brightness oscillation (like the red recording sphere)
+    shimmer = 0.03 * math.sin(time_val * 2.5)
 
     for y in range(size):
         for x in range(size):
@@ -279,14 +285,18 @@ def _generate_marble_sphere(
             light_dot = nx * (-0.3) + ny * (-0.4) + nz * 0.8
             light_factor = max(0.15, min(1.0, 0.5 + light_dot * 0.6))
 
-            # Marble veins
+            # Marble veins — liquid flow
             marble = _marble_noise(x, y, time_val)
 
+            # Hue: wide variation across veins for liquid-ink color blending
             h = (hue_offset + marble * hue_range * 0.25) % 1.0
+            # Saturation: veins are more vivid
             s = saturation * (1.0 - norm_dist * 0.08) * (0.85 + 0.15 * abs(marble))
-            v = brightness * light_factor
+            # Brightness: base + lighting + shimmer + marble-driven sparkle
+            sparkle = 0.04 * math.sin(marble * 8.0 + time_val * 3.0)
+            v = (brightness + shimmer + sparkle) * light_factor
 
-            # Specular highlight (glass)
+            # Main specular highlight (glass)
             spec_dist = math.sqrt((nx + 0.35) ** 2 + (ny + 0.35) ** 2)
             if spec_dist < 0.38:
                 spec = (1.0 - spec_dist / 0.38) ** 2.5 * 0.65
@@ -305,7 +315,7 @@ def _generate_marble_sphere(
                 rim = (norm_dist - 0.65) / 0.35
                 v = min(1.0, v + rim ** 1.5 * 0.25)
 
-            r, g, b = colorsys.hsv_to_rgb(h, s, v)
+            r, g, b = colorsys.hsv_to_rgb(h % 1.0, max(0, min(1, s)), max(0, min(1, v)))
 
             alpha = 255
             if norm_dist > 0.85:
@@ -313,7 +323,7 @@ def _generate_marble_sphere(
 
             pixels[x, y] = (int(r * 255), int(g * 255), int(b * 255), alpha)
 
-    glow = img.filter(ImageFilter.GaussianBlur(radius=1.5))
+    glow = img.filter(ImageFilter.GaussianBlur(radius=2.0))
     img = Image.blend(img, glow, alpha=0.15)
 
     return img
@@ -361,7 +371,7 @@ _ANIM_PRESETS = {
 }
 
 ICON_SIZE = 256  # Max resolution for crisp high-DPI rendering
-NUM_IDLE_FRAMES = 36  # Pre-generated frames for idle animation
+NUM_IDLE_FRAMES = 72  # More frames for liquid-smooth transitions
 FRAME_CACHE_DIR = Path.home() / ".claude" / "cache" / "tts" / "icon_frames"
 
 
@@ -405,12 +415,14 @@ class _IconAnimator:
             return
 
         # Generate and save to cache
-        logger.info(f"Generating {NUM_IDLE_FRAMES} marble sphere frames ({ICON_SIZE}px)...")
+        logger.info(f"Generating {NUM_IDLE_FRAMES} marble sphere frames ({ICON_SIZE}px) — first run only...")
         preset = _ANIM_PRESETS["idle"]
         self._idle_frames = []
         for i in range(NUM_IDLE_FRAMES):
+            # Slow hue drift — liquid color transition
             hue = i / NUM_IDLE_FRAMES
-            t = i * 0.5
+            # Tiny time steps for smooth marble flow between consecutive frames
+            t = i * 0.18
             frame = _generate_marble_sphere(
                 ICON_SIZE, hue,
                 hue_range=preset["hue_range"],
