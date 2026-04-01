@@ -116,7 +116,7 @@ EDGE_VOICES = {
     ],
 }
 
-VOLUME_LEVELS = [50, 75, 100, 125, 150, 200, 250, 300]
+VOLUME_LEVELS = [25, 50, 75, 100, 125, 150, 200, 250, 300]
 
 TTS_MODES = {
     "Full": "full",              # Chime + voice always
@@ -179,7 +179,19 @@ MODE_EMOJI = {"full": "📢", "semi-silent": "🔉", "silent": "🔇"}
 
 E_PURGE = "🧹"
 E_REPO = "🔗"
+E_ENGINE = "🧠"
+E_KEY = "🔑"
+E_STATUS = "📊"
+E_TEST = "🔗"
 REPO_URL = "https://github.com/fra-itc/parlaconclaudio"
+
+# STT mode labels for menu display
+STT_MODES = {
+    "auto": "Auto (recommended)",
+    "local": "Local GPU (NVIDIA CUDA)",
+    "cloud_groq": "Cloud: Groq (free)",
+    "cloud_deepgram": "Cloud: Deepgram",
+}
 
 
 def _load_config() -> dict:
@@ -322,6 +334,16 @@ def _generate_marble_sphere(
 
 # Animation presets per state
 _ANIM_PRESETS = {
+    "loading": {
+        "hue_speed": 0.0,         # Locked to yellow/amber
+        "hue_range": 0.06,
+        "saturation": 0.95,
+        "brightness": 0.90,
+        "time_speed": 2.0,        # Fast marble shift
+        "interval": 0.10,
+        "base_hue": 0.13,         # Yellow-amber
+        "pulse": True,            # Pulsing hazard effect
+    },
     "idle": {
         "hue_speed": 0.008,       # Slow rainbow drift
         "hue_range": 0.25,
@@ -448,9 +470,21 @@ class _IconAnimator:
 class TrayIcon:
     """System tray icon with animated marble sphere and settings menu."""
 
-    def __init__(self, on_exit: Callable[[], None] | None = None, on_purge_vram: Callable[[], None] | None = None):
+    def __init__(
+        self,
+        on_exit: Callable[[], None] | None = None,
+        on_purge_vram: Callable[[], None] | None = None,
+        on_stt_mode_changed: Callable[[str], None] | None = None,
+        on_mic_changed: Callable[[int | None], None] | None = None,
+        transcriber=None,
+        recorder=None,
+    ):
         self._on_exit = on_exit
         self._on_purge_vram = on_purge_vram
+        self._on_stt_mode_changed = on_stt_mode_changed
+        self._on_mic_changed = on_mic_changed
+        self._transcriber = transcriber
+        self._recorder = recorder
         self._icon: "pystray.Icon | None" = None
         self._thread: threading.Thread | None = None
         self._animator = _IconAnimator()
@@ -569,25 +603,329 @@ class TrayIcon:
                     self._make_preview_sound(str(mp3)),
                 ))
 
-        return pystray.Menu(
-            pystray.MenuItem("✨ Voice Bridge v0.9.8 ✨", None, enabled=False),
-            pystray.MenuItem(f"{E_REPO} GitHub Repo", self._open_repo),
+        # === Resolve status labels for top-level display ===
+        stt_status = self._get_stt_status(config)
+        stt_engine_item = self._build_stt_engine_menu(config)
+        mic_item = self._build_mic_menu(config)
+
+        # Language display
+        lang_display = "Auto"
+        if current_lang:
+            for label, code in WHISPER_LANGUAGES.items():
+                if code == current_lang:
+                    flag = LANG_FLAGS.get(label, "")
+                    lang_display = f"{flag} {label}"
+                    break
+
+        # Mic display
+        mic_device = config.get("mic_device_id")
+        mic_display = "Default"
+        if self._recorder and mic_device is not None:
+            try:
+                for dev in self._recorder.list_devices():
+                    if dev.device_id == mic_device:
+                        mic_display = dev.name[:25]
+                        break
+            except Exception:
+                mic_display = f"Device {mic_device}"
+
+        # Engine display
+        engine_display = stt_status["active_label"]
+
+        # === Build Settings submenu ===
+        settings_menu = pystray.Menu(
+            # STT Engine (cruscotto)
+            stt_engine_item,
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(f"{E_VOICE} Voice [{voice_display}]", pystray.Menu(
+            # Microphone
+            mic_item,
+            pystray.Menu.SEPARATOR,
+            # TTS Voice
+            pystray.MenuItem(f"{E_VOICE} TTS Voice [{voice_display}]", pystray.Menu(
                 pystray.MenuItem(f"{E_PRESETS} Quick Presets", pystray.Menu(*preset_items)),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem(f"{E_BROWSE} Browse All", voice_browser),
             )),
-            pystray.MenuItem(f"{E_LANG} Whisper Language", pystray.Menu(*lang_items)),
+            # STT Language
+            pystray.MenuItem(f"{E_LANG} STT Language [{lang_display}]", pystray.Menu(*lang_items)),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(f"{E_TTS} TTS Mode [{current_mode}]", pystray.Menu(*mode_items)),
+            # System
+            pystray.MenuItem(f"{E_PURGE} Purge VRAM", self._purge_vram_clicked),
+            pystray.Menu.SEPARATOR,
+            # Links
+            pystray.MenuItem(f"{E_REPO} GitHub Repo", self._open_repo),
+            pystray.MenuItem(f"{E_KEY} Get Groq API Key (free)", self._open_groq_console),
+            pystray.MenuItem(f"{E_KEY} Get Deepgram API Key", self._open_deepgram_console),
+        )
+
+        return pystray.Menu(
+            pystray.MenuItem("✨ Voice Bridge v0.9.9.0426 ✨", None, enabled=False),
+            pystray.Menu.SEPARATOR,
+            # --- Status bar (always visible) ---
+            pystray.MenuItem(f"🧠 {engine_display}  ·  {lang_display}  ·  🎤 {mic_display}", None, enabled=False),
+            pystray.Menu.SEPARATOR,
+            # --- Quick access ---
+            pystray.MenuItem(f"{E_TTS} Mode [{current_mode}]", pystray.Menu(*mode_items)),
             pystray.MenuItem(f"{E_VOLUME} Volume [{current_vol}%]", pystray.Menu(*vol_items)),
             pystray.MenuItem(f"{E_PACK} Sound Pack", pystray.Menu(*pack_items)),
             pystray.MenuItem(f"{E_PREVIEW} Preview [{current_pack}]", pystray.Menu(*preview_items) if preview_items else None),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(f"{E_PURGE} Purge VRAM", self._purge_vram_clicked),
+            # --- Settings & Info ---
+            pystray.MenuItem("⚙️ Settings & Info", settings_menu),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem(f"{E_EXIT} Exit", self._exit_clicked),
         )
+
+    # ------------------------------------------------------------------
+    # Microphone selector
+    # ------------------------------------------------------------------
+
+    def _build_mic_menu(self, config: dict) -> "pystray.MenuItem":
+        """Build microphone selection submenu."""
+        current_device = config.get("mic_device_id")  # None = default
+
+        mic_items = []
+        if self._recorder:
+            try:
+                devices = self._recorder.list_devices()
+                for dev in devices:
+                    is_current = (current_device == dev.device_id) or (current_device is None and dev.is_default)
+                    sel = E_SELECTED if is_current else E_UNSELECTED
+                    default_mark = " (default)" if dev.is_default else ""
+                    label = f"{sel} [{dev.device_id}] {dev.name}{default_mark}"
+                    mic_items.append(pystray.MenuItem(
+                        label,
+                        self._make_set_mic(dev.device_id),
+                    ))
+            except Exception as e:
+                logger.warning(f"Failed to list mic devices: {e}")
+
+        if not mic_items:
+            mic_items.append(pystray.MenuItem("  No devices found", None, enabled=False))
+
+        current_name = "Default"
+        if self._recorder and current_device is not None:
+            try:
+                for dev in self._recorder.list_devices():
+                    if dev.device_id == current_device:
+                        current_name = dev.name[:20]
+                        break
+            except Exception:
+                current_name = f"Device {current_device}"
+
+        return pystray.MenuItem(
+            f"🎤 Microphone [{current_name}]",
+            pystray.Menu(*mic_items),
+        )
+
+    def _make_set_mic(self, device_id: int):
+        def handler(icon, item):
+            config = _load_config()
+            config["mic_device_id"] = device_id
+            _save_config(config)
+            if self._on_mic_changed:
+                self._on_mic_changed(device_id)
+            logger.info(f"Microphone set to device {device_id}")
+            self._rebuild_menu()
+        return handler
+
+    # ------------------------------------------------------------------
+    # STT Engine cruscotto
+    # ------------------------------------------------------------------
+
+    def _get_stt_status(self, config: dict) -> dict:
+        """Gather STT engine status info for menu display."""
+        stt_mode = config.get("stt_mode", "auto")
+        active = self._transcriber.active_engine_name() if self._transcriber else "not_loaded"
+        gpu = self._transcriber.gpu_name() if self._transcriber else "Unknown"
+
+        # GPU state: "loaded" | "loading" | "not_detected" | "error"
+        if active == "whisper_local":
+            gpu_state = "loaded"
+        elif gpu == "Not detected":
+            gpu_state = "not_detected"
+        elif active == "not_loaded":
+            gpu_state = "loading"
+        else:
+            gpu_state = "cloud"  # GPU present but using cloud
+
+        # Determine display label for active backend
+        _labels = {
+            "whisper_local": "Local GPU",
+            "groq": "Groq",
+            "deepgram": "Deepgram",
+            "disabled": "Disabled",
+            "not_loaded": "Loading...",
+        }
+        active_label = _labels.get(active, active)
+
+        return {
+            "mode": stt_mode,
+            "active": active,
+            "active_label": active_label,
+            "gpu": gpu,
+            "gpu_state": gpu_state,
+        }
+
+    def _build_stt_engine_menu(self, config: dict) -> "pystray.MenuItem":
+        """Build the STT Engine cruscotto submenu."""
+        status = self._get_stt_status(config)
+        stt_mode = status["mode"]
+
+        # Title shows resolved backend: [Auto → Groq] or [Local GPU]
+        if stt_mode == "auto":
+            title_suffix = f"Auto → {status['active_label']}"
+        else:
+            title_suffix = status["active_label"]
+
+        # Mode selector items
+        mode_items = []
+        for mode_key, mode_label in STT_MODES.items():
+            is_current = (stt_mode == mode_key)
+            sel = E_SELECTED if is_current else E_UNSELECTED
+            mode_items.append(pystray.MenuItem(
+                f"{sel} {mode_label}",
+                self._make_set_stt_mode(mode_key),
+            ))
+
+        # Status dashboard (read-only)
+        gpu_state = status["gpu_state"]
+        gpu_icons = {"loaded": "✅", "loading": "⏳", "not_detected": "❌", "cloud": "☁️"}
+        gpu_mark = gpu_icons.get(gpu_state, "❓")
+
+        from ..core.stt_engine.key_manager import KeyManager
+        has_groq = bool(KeyManager.get_key("groq"))
+        has_deepgram = bool(KeyManager.get_key("deepgram"))
+        groq_mark = "✅" if has_groq else "❌"
+        deepgram_mark = "✅" if has_deepgram else "❌"
+
+        status_items = [
+            pystray.MenuItem(f"  Provider: {status['active_label']}", None, enabled=False),
+            pystray.MenuItem(f"  GPU: {gpu_mark} {status['gpu']}", None, enabled=False),
+            pystray.MenuItem(f"  Groq key: {groq_mark}", None, enabled=False),
+            pystray.MenuItem(f"  Deepgram key: {deepgram_mark}", None, enabled=False),
+        ]
+
+        # API key items
+        key_items = [
+            pystray.MenuItem(f"{E_KEY} Set Groq API Key...", self._ask_api_key_groq),
+            pystray.MenuItem(f"{E_KEY} Set Deepgram API Key...", self._ask_api_key_deepgram),
+        ]
+
+        # Test connection
+        test_item = pystray.MenuItem(f"{E_TEST} Test Connection", self._test_cloud_connection)
+
+        # Warning if disabled
+        warn_items = []
+        if status["active"] == "disabled":
+            warn_items.append(pystray.MenuItem("⚠️ Configure cloud STT below", None, enabled=False))
+
+        return pystray.MenuItem(
+            f"{E_ENGINE} STT Engine [{title_suffix}]",
+            pystray.Menu(
+                *warn_items,
+                *mode_items,
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem(f"{E_STATUS} Status", pystray.Menu(*status_items)),
+                pystray.Menu.SEPARATOR,
+                *key_items,
+                test_item,
+            ),
+        )
+
+    def _make_set_stt_mode(self, mode: str):
+        def handler(icon, item):
+            if self._on_stt_mode_changed:
+                self._on_stt_mode_changed(mode)
+            else:
+                # Direct config write if no callback
+                config = _load_config()
+                config["stt_mode"] = mode
+                _save_config(config)
+            logger.info(f"STT mode set to: {mode}")
+            self._rebuild_menu()
+        return handler
+
+    def _ask_api_key_groq(self, icon, item):
+        self._ask_api_key("groq", "Groq API Key", "Enter your Groq API key:\n(Get one free at console.groq.com)")
+
+    def _ask_api_key_deepgram(self, icon, item):
+        self._ask_api_key("deepgram", "Deepgram API Key", "Enter your Deepgram API key:\n(Get $200 free at console.deepgram.com)")
+
+    def _ask_api_key(self, provider: str, title: str, prompt: str):
+        def _run():
+            try:
+                import tkinter as tk
+                from tkinter import simpledialog
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes("-topmost", True)
+                key = simpledialog.askstring(title, prompt, show="*", parent=root)
+                root.destroy()
+                if key and key.strip():
+                    from ..core.stt_engine.key_manager import KeyManager
+                    store = KeyManager.set_key(provider, key.strip())
+                    logger.info(f"{provider} API key saved ({store})")
+                    self._rebuild_menu()
+            except Exception as e:
+                logger.error(f"API key dialog failed: {e}")
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _test_cloud_connection(self, icon, item):
+        """Quick validation of cloud STT connection (no actual transcription)."""
+        def _run():
+            from ..core.stt_engine.key_manager import KeyManager
+            import urllib.request
+            import urllib.error
+
+            results = []
+            groq_key = KeyManager.get_key("groq")
+            if groq_key:
+                try:
+                    req = urllib.request.Request(
+                        "https://api.groq.com/openai/v1/models",
+                        headers={"Authorization": f"Bearer {groq_key}", "User-Agent": "parlaconclaudio/1.0"},
+                    )
+                    with urllib.request.urlopen(req, timeout=5):
+                        results.append("Groq: ✓ Connected")
+                except urllib.error.HTTPError as e:
+                    results.append(f"Groq: ✗ HTTP {e.code}")
+                except Exception as e:
+                    results.append(f"Groq: ✗ {e}")
+            else:
+                results.append("Groq: no key")
+
+            deepgram_key = KeyManager.get_key("deepgram")
+            if deepgram_key:
+                try:
+                    req = urllib.request.Request(
+                        "https://api.deepgram.com/v1/projects",
+                        headers={"Authorization": f"Token {deepgram_key}", "User-Agent": "parlaconclaudio/1.0"},
+                    )
+                    with urllib.request.urlopen(req, timeout=5):
+                        results.append("Deepgram: ✓ Connected")
+                except urllib.error.HTTPError as e:
+                    results.append(f"Deepgram: ✗ HTTP {e.code}")
+                except Exception as e:
+                    results.append(f"Deepgram: ✗ {e}")
+            else:
+                results.append("Deepgram: no key")
+
+            msg = "\n".join(results)
+            logger.info(f"Cloud connection test:\n{msg}")
+
+            try:
+                import tkinter as tk
+                from tkinter import messagebox
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes("-topmost", True)
+                messagebox.showinfo("STT Cloud Connection Test", msg, parent=root)
+                root.destroy()
+            except Exception:
+                pass
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _make_set_language(self, lang_code):
         def handler(icon, item):
@@ -691,6 +1029,7 @@ class TrayIcon:
         if not self._icon:
             return
         title_map = {
+            "loading": "Voice Bridge - Loading STT engine...",
             "idle": "Voice Bridge - Ready",
             "recording": "Voice Bridge - Recording...",
             "transcribing": "Voice Bridge - Transcribing...",
@@ -702,6 +1041,14 @@ class TrayIcon:
         """Open the GitHub repo in the default browser."""
         import webbrowser
         webbrowser.open(REPO_URL)
+
+    def _open_groq_console(self, icon, item):
+        import webbrowser
+        webbrowser.open("https://console.groq.com/keys")
+
+    def _open_deepgram_console(self, icon, item):
+        import webbrowser
+        webbrowser.open("https://console.deepgram.com/")
 
     def _purge_vram_clicked(self, icon, item):
         """Purge VRAM: unload model, clear CUDA cache, reload."""

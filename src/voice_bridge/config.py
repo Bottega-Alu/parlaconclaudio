@@ -36,6 +36,10 @@ class VoiceBridgeConfig:
     sound_on_stop: bool = True
     sound_on_output: bool = True
 
+    # STT engine orchestration
+    stt_mode: str = "auto"            # "auto" | "local" | "cloud_groq" | "cloud_deepgram"
+    stt_auto_fallback: bool = True    # in mode "local", fallback to cloud if GPU unavailable
+
     # Sound frequencies (Hz) and durations (ms)
     sound_start_freq: int = 800
     sound_start_duration: int = 150

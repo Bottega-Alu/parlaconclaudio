@@ -8,32 +8,14 @@ Whisper Large V3 with FasterWhisper, optimized for RTX 5080 GPUs.
 import logging
 from typing import List, Dict, Optional, Union, Tuple
 from pathlib import Path
-from dataclasses import dataclass
 import numpy as np
+
+from .base import STTEngine, TranscriptionSegment, TranscriptionResult  # noqa: F401 — re-exported for backward compat
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class TranscriptionSegment:
-    """Represents a single transcription segment with timing information."""
-    text: str
-    start: float
-    end: float
-    confidence: Optional[float] = None
-    tokens: Optional[List[int]] = None
-
-
-@dataclass
-class TranscriptionResult:
-    """Complete transcription result with all segments."""
-    text: str
-    segments: List[TranscriptionSegment]
-    language: str
-    duration: Optional[float] = None
-
-
-class WhisperRTXEngine:
+class WhisperRTXEngine(STTEngine):
     """
     High-performance Whisper STT engine optimized for NVIDIA RTX GPUs.
 
@@ -44,6 +26,18 @@ class WhisperRTXEngine:
     - Timestamp-accurate transcription
     - VAD (Voice Activity Detection) filtering
     """
+
+    @property
+    def name(self) -> str:
+        return "whisper_local"
+
+    @property
+    def is_local(self) -> bool:
+        return True
+
+    @property
+    def supports_word_timestamps(self) -> bool:
+        return True
 
     def __init__(
         self,
@@ -182,7 +176,9 @@ class WhisperRTXEngine:
                 text=full_text,
                 segments=result_segments,
                 language=info.language,
-                duration=info.duration if hasattr(info, 'duration') else None
+                duration=info.duration if hasattr(info, 'duration') else None,
+                provider=self.name,
+                model=self.model_name,
             )
 
             logger.info(f"Transcription completed: {len(result_segments)} segments")

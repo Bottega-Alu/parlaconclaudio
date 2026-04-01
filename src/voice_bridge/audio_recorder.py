@@ -18,17 +18,21 @@ logger = logging.getLogger(__name__)
 class AudioRecorder:
     """Records microphone audio and returns numpy arrays for transcription."""
 
-    def __init__(self, sample_rate: int = 16000, channels: int = 1, chunk_size: int = 1024):
+    def __init__(self, sample_rate: int = 16000, channels: int = 1, chunk_size: int = 1024, device_id: int | None = None):
+        self._sample_rate = sample_rate
+        self._channels = channels
+        self._chunk_size = chunk_size
+        self._device_id = device_id
         self._config = AudioCaptureConfig(
             sample_rate=sample_rate,
             channels=channels,
             chunk_size=chunk_size,
+            device_id=device_id,
         )
         self._driver: PortAudioDriver | None = None
         self._chunks: list[bytes] = []
         self._lock = threading.Lock()
         self._recording = False
-        self._sample_rate = sample_rate
 
     def _ensure_driver(self) -> None:
         """Lazily initialize the PortAudio driver."""
@@ -74,6 +78,29 @@ class AudioRecorder:
         duration = len(audio_float32) / self._sample_rate
         logger.info(f"Recording stopped: {duration:.2f}s, {len(audio_float32)} samples")
         return audio_float32
+
+    def set_device(self, device_id: int | None) -> None:
+        """Switch microphone device. Takes effect on next start()."""
+        self._device_id = device_id
+        self._config = AudioCaptureConfig(
+            sample_rate=self._sample_rate,
+            channels=self._channels,
+            chunk_size=self._chunk_size,
+            device_id=device_id,
+        )
+        # Force driver re-init on next recording
+        if self._driver:
+            try:
+                self._driver.stop()
+            except Exception:
+                pass
+            self._driver = None
+        logger.info(f"Microphone device set to: {device_id}")
+
+    def list_devices(self) -> list:
+        """List available input devices via PortAudio."""
+        self._ensure_driver()
+        return self._driver.list_devices()
 
     def cleanup(self) -> None:
         """Release audio resources."""

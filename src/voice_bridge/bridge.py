@@ -48,11 +48,15 @@ class VoiceBridge:
         self._running = False
         self._lock = threading.Lock()
 
+        # Read mic device from shared config
+        self._mic_device_id = self._read_mic_device()
+
         # Components (lazy init for heavy ones like Whisper)
         self._recorder = AudioRecorder(
             sample_rate=self.config.sample_rate,
             channels=self.config.channels,
             chunk_size=self.config.chunk_size,
+            device_id=self._mic_device_id,
         )
         self._transcriber = Transcriber(
             model_name=self.config.whisper_model,
@@ -70,7 +74,14 @@ class VoiceBridge:
             on_release=self._on_hotkey_release,
             mode=self.config.hotkey_mode,
         )
-        self._tray = TrayIcon(on_exit=self.stop, on_purge_vram=self._purge_vram)
+        self._tray = TrayIcon(
+            on_exit=self.stop,
+            on_purge_vram=self._purge_vram,
+            on_stt_mode_changed=self._on_stt_mode_changed,
+            on_mic_changed=self._on_mic_changed,
+            transcriber=self._transcriber,
+            recorder=self._recorder,
+        )
 
     @property
     def state(self) -> BridgeState:
@@ -140,21 +151,62 @@ class VoiceBridge:
         logger.info(f"  Hotkey: {self.config.hotkey}")
         logger.info(f"  Mode: {self.config.mode}")
         logger.info(f"  Model: {self.config.whisper_model} ({self.config.whisper_device})")
+        logger.info(f"  STT Mode: {self.config.stt_mode}")
         logger.info(f"  Output: {self.config.output_mode}")
         logger.info("=" * 50)
 
-        # Pre-load Whisper model at startup
-        logger.info("Pre-loading Whisper model (this may take a moment)...")
-        self._transcriber._ensure_engine()
-        logger.info("Model ready!")
-
-        # Start components
+        # Start tray first so user sees loading animation
         self._tray.start()
+        self._tray.set_state("loading")
+
+        # Pre-load STT engine at startup (may skip for cloud engines)
+        logger.info("Initializing STT engine...")
+        try:
+            self._transcriber._ensure_engine()
+            logger.info(f"STT engine ready: {self._transcriber.active_engine_name()}")
+        except Exception as e:
+            logger.warning(f"STT engine pre-load failed: {e} — will retry on first transcription")
+
+        # Start hotkey listener
         self._hotkey.start()
         self._set_state(BridgeState.IDLE)
 
+        # Rebuild menu now that engine is loaded (fixes "Not Loaded" status)
+        self._tray._rebuild_menu()
+
         logger.info("Voice Bridge ready! Hold hotkey to dictate.")
         logger.info("Press Ctrl+C to exit.")
+
+    @staticmethod
+    def _read_mic_device() -> int | None:
+        """Read mic_device_id from tts_config.json."""
+        import json
+        from pathlib import Path
+        try:
+            config_path = Path.home() / ".claude" / "cache" / "tts" / "tts_config.json"
+            if config_path.is_file():
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                val = config.get("mic_device_id")
+                return int(val) if val is not None else None
+        except Exception:
+            pass
+        return None
+
+    def _on_mic_changed(self, device_id: int | None) -> None:
+        """Handle microphone change from tray menu."""
+        if self._state != BridgeState.IDLE:
+            logger.warning("Cannot switch microphone while recording")
+            return
+        self._recorder.set_device(device_id)
+        logger.info(f"Microphone switched to device {device_id}")
+
+    def _on_stt_mode_changed(self, mode: str) -> None:
+        """Handle STT mode switch from tray menu."""
+        if self._state != BridgeState.IDLE:
+            logger.warning("Cannot switch STT mode while recording/transcribing")
+            return
+        logger.info(f"STT mode change requested: {mode}")
+        self._transcriber.switch_engine(mode)
 
     def _purge_vram(self) -> None:
         """Purge VRAM: unload Whisper model, clear CUDA cache, reload."""
