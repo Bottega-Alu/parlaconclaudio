@@ -1,0 +1,137 @@
+{
+  "pack": "south-park-ita",
+  "version": "1.0",
+  "description": "Custom sound pack: south-park-ita",
+  "sound_count": 25,
+  "chimes": {
+    "default": [
+      "spit-biggie-11.mp3",
+      "spit-biggie-12.mp3",
+      "spit-biggie-13.mp3",
+      "spit-biggie-14.mp3",
+      "spit-biggie-15.mp3",
+      "spit-cartman-ita-01.mp3",
+      "spit-cartman-ita-02.mp3",
+      "spit-cartman-ita-03.mp3",
+      "spit-cartman-ita-04.mp3",
+      "spit-cartman-ita-05.mp3",
+      "spit-chiesa-06.mp3",
+      "spit-chiesa-07.mp3",
+      "spit-chiesa-08.mp3",
+      "spit-chiesa-09.mp3",
+      "spit-chiesa-10.mp3",
+      "spit-ebrei-16.mp3",
+      "spit-ebrei-17.mp3",
+      "spit-ebrei-18.mp3",
+      "spit-ebrei-19.mp3",
+      "spit-ebrei-20.mp3",
+      "spit-trombino-21.mp3",
+      "spit-trombino-22.mp3",
+      "spit-trombino-23.mp3",
+      "spit-trombino-24.mp3",
+      "spit-trombino-25.mp3"
+    ]
+  },
+  "sounds": {
+    "spit-biggie-11.mp3": {
+      "duration_ms": 2820,
+      "event": "default"
+    },
+    "spit-biggie-12.mp3": {
+      "duration_ms": 2800,
+      "event": "default"
+    },
+    "spit-biggie-13.mp3": {
+      "duration_ms": 3220,
+      "event": "default"
+    },
+    "spit-biggie-14.mp3": {
+      "duration_ms": 2648,
+      "event": "default"
+    },
+    "spit-biggie-15.mp3": {
+      "duration_ms": 3320,
+      "event": "default"
+    },
+    "spit-cartman-ita-01.mp3": {
+      "duration_ms": 3060,
+      "event": "default"
+    },
+    "spit-cartman-ita-02.mp3": {
+      "duration_ms": 3160,
+      "event": "default"
+    },
+    "spit-cartman-ita-03.mp3": {
+      "duration_ms": 3180,
+      "event": "default"
+    },
+    "spit-cartman-ita-04.mp3": {
+      "duration_ms": 3300,
+      "event": "default"
+    },
+    "spit-cartman-ita-05.mp3": {
+      "duration_ms": 3300,
+      "event": "default"
+    },
+    "spit-chiesa-06.mp3": {
+      "duration_ms": 3040,
+      "event": "default"
+    },
+    "spit-chiesa-07.mp3": {
+      "duration_ms": 3140,
+      "event": "default"
+    },
+    "spit-chiesa-08.mp3": {
+      "duration_ms": 3260,
+      "event": "default"
+    },
+    "spit-chiesa-09.mp3": {
+      "duration_ms": 2700,
+      "event": "default"
+    },
+    "spit-chiesa-10.mp3": {
+      "duration_ms": 2600,
+      "event": "default"
+    },
+    "spit-ebrei-16.mp3": {
+      "duration_ms": 3020,
+      "event": "default"
+    },
+    "spit-ebrei-17.mp3": {
+      "duration_ms": 3040,
+      "event": "default"
+    },
+    "spit-ebrei-18.mp3": {
+      "duration_ms": 3220,
+      "event": "default"
+    },
+    "spit-ebrei-19.mp3": {
+      "duration_ms": 3240,
+      "event": "default"
+    },
+    "spit-ebrei-20.mp3": {
+      "duration_ms": 2720,
+      "event": "default"
+    },
+    "spit-trombino-21.mp3": {
+      "duration_ms": 3000,
+      "event": "default"
+    },
+    "spit-trombino-22.mp3": {
+      "duration_ms": 3060,
+      "event": "default"
+    },
+    "spit-trombino-23.mp3": {
+      "duration_ms": 2920,
+      "event": "default"
+    },
+    "spit-trombino-24.mp3": {
+      "duration_ms": 3100,
+      "event": "default"
+    },
+    "spit-trombino-25.mp3": {
+      "duration_ms": 3180,
+      "event": "default"
+    }
+  }
+}

@@ -1,0 +1,46 @@
+[tool.poetry]
+name = "parlaconclaudio"
+version = "0.9.9"
+description = "Voice bridge for Claude Code: push-to-talk STT + TTS notifications"
+authors = ["Fra"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# Audio capture
+numpy = "^1.26.0"
+pyaudio = "^0.2.14"
+
+# Hotkey & clipboard
+pynput = "^1.7.6"
+pyperclip = "^1.8.2"
+
+# System tray
+pystray = "^0.19.5"
+Pillow = "^10.0.0"
+
+# STT engine
+faster-whisper = "^1.0.0"
+ctranslate2 = "^4.0.0"
+
+# GPU (CUDA)
+torch = "^2.7.0"
+torchaudio = "^2.7.0"
+
+# Windows paste simulation
+pywin32 = {version = "^306", markers = "sys_platform == 'win32'"}
+
+# TTS (for notify-tts.py hook)
+edge-tts = "^6.1.0"
+
+[[tool.poetry.source]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu128"
+priority = "explicit"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

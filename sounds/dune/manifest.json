@@ -1,0 +1,181 @@
+{
+  "pack": "dune",
+  "version": "2.0",
+  "description": "Dune - Bene Gesserit, sandworms, shields, Zimmer score (cleaned)",
+  "chimes": {
+    "default": [
+      "dune-arena-announcer-extended-short.mp3",
+      "dune-arena-announcer-short.mp3",
+      "dune-arena-door-short.mp3",
+      "dune-atomic-short.mp3",
+      "dune-atreides-ship-short.mp3",
+      "dune-atreides-ship.mp3",
+      "dune-baron-ceiling-short.mp3",
+      "dune-bene-ship-short.mp3",
+      "dune-bene-ship-thunder-short.mp3",
+      "dune-bene-thing-must-leave-short.mp3",
+      "dune-bene-thing-must-leave.mp3",
+      "dune-bodies-floor-short.mp3",
+      "dune-chani-explosion-short.mp3",
+      "dune-emperor-ship-short.mp3",
+      "dune-feyd-growl-short.mp3",
+      "dune-god-emperor-voice-short.mp3",
+      "dune-hunter-seeker-short.mp3",
+      "dune-hunter-seeker.mp3",
+      "dune-margot-voice-short.mp3",
+      "dune-missile-shields-full-short.mp3",
+      "dune-missile-shields-short.mp3",
+      "dune-muaddib-mouse-short.mp3",
+      "dune-ornithopter-takeoff-short.mp3",
+      "dune-ornithopter-turrets-short.mp3",
+      "dune-piscador-clicking-short.mp3",
+      "dune-piscador-clicking.mp3",
+      "dune-sand-compactor-short.mp3",
+      "dune-sand-music-short.mp3",
+      "dune-sand-swallow-short.mp3",
+      "dune-shields-short.mp3",
+      "dune-spider-eating-short.mp3",
+      "dune-spider-eating.mp3",
+      "dune-worm-speaks-short.mp3",
+      "dune-worm-vibration-short.mp3"
+    ]
+  },
+  "sounds": {
+    "dune-arena-announcer-extended-short.mp3": {
+      "label": "Arena Announcer Extended Short",
+      "event": "default"
+    },
+    "dune-arena-announcer-short.mp3": {
+      "label": "Arena Announcer Short",
+      "event": "default"
+    },
+    "dune-arena-door-short.mp3": {
+      "label": "Arena Door Short",
+      "event": "default"
+    },
+    "dune-atomic-short.mp3": {
+      "label": "Atomic Short",
+      "event": "default"
+    },
+    "dune-atreides-ship-short.mp3": {
+      "label": "Atreides Ship Short",
+      "event": "default"
+    },
+    "dune-atreides-ship.mp3": {
+      "label": "Atreides Ship",
+      "event": "default"
+    },
+    "dune-baron-ceiling-short.mp3": {
+      "label": "Baron Ceiling Short",
+      "event": "default"
+    },
+    "dune-bene-ship-short.mp3": {
+      "label": "Bene Ship Short",
+      "event": "default"
+    },
+    "dune-bene-ship-thunder-short.mp3": {
+      "label": "Bene Ship Thunder Short",
+      "event": "default"
+    },
+    "dune-bene-thing-must-leave-short.mp3": {
+      "label": "Bene Thing Must Leave Short",
+      "event": "default"
+    },
+    "dune-bene-thing-must-leave.mp3": {
+      "label": "Bene Thing Must Leave",
+      "event": "default"
+    },
+    "dune-bodies-floor-short.mp3": {
+      "label": "Bodies Floor Short",
+      "event": "default"
+    },
+    "dune-chani-explosion-short.mp3": {
+      "label": "Chani Explosion Short",
+      "event": "default"
+    },
+    "dune-emperor-ship-short.mp3": {
+      "label": "Emperor Ship Short",
+      "event": "default"
+    },
+    "dune-feyd-growl-short.mp3": {
+      "label": "Feyd Growl Short",
+      "event": "default"
+    },
+    "dune-god-emperor-voice-short.mp3": {
+      "label": "God Emperor Voice Short",
+      "event": "default"
+    },
+    "dune-hunter-seeker-short.mp3": {
+      "label": "Hunter Seeker Short",
+      "event": "default"
+    },
+    "dune-hunter-seeker.mp3": {
+      "label": "Hunter Seeker",
+      "event": "default"
+    },
+    "dune-margot-voice-short.mp3": {
+      "label": "Margot Voice Short",
+      "event": "default"
+    },
+    "dune-missile-shields-full-short.mp3": {
+      "label": "Missile Shields Full Short",
+      "event": "default"
+    },
+    "dune-missile-shields-short.mp3": {
+      "label": "Missile Shields Short",
+      "event": "default"
+    },
+    "dune-muaddib-mouse-short.mp3": {
+      "label": "Muaddib Mouse Short",
+      "event": "default"
+    },
+    "dune-ornithopter-takeoff-short.mp3": {
+      "label": "Ornithopter Takeoff Short",
+      "event": "default"
+    },
+    "dune-ornithopter-turrets-short.mp3": {
+      "label": "Ornithopter Turrets Short",
+      "event": "default"
+    },
+    "dune-piscador-clicking-short.mp3": {
+      "label": "Piscador Clicking Short",
+      "event": "default"
+    },
+    "dune-piscador-clicking.mp3": {
+      "label": "Piscador Clicking",
+      "event": "default"
+    },
+    "dune-sand-compactor-short.mp3": {
+      "label": "Sand Compactor Short",
+      "event": "default"
+    },
+    "dune-sand-music-short.mp3": {
+      "label": "Sand Music Short",
+      "event": "default"
+    },
+    "dune-sand-swallow-short.mp3": {
+      "label": "Sand Swallow Short",
+      "event": "default"
+    },
+    "dune-shields-short.mp3": {
+      "label": "Shields Short",
+      "event": "default"
+    },
+    "dune-spider-eating-short.mp3": {
+      "label": "Spider Eating Short",
+      "event": "default"
+    },
+    "dune-spider-eating.mp3": {
+      "label": "Spider Eating",
+      "event": "default"
+    },
+    "dune-worm-speaks-short.mp3": {
+      "label": "Worm Speaks Short",
+      "event": "default"
+    },
+    "dune-worm-vibration-short.mp3": {
+      "label": "Worm Vibration Short",
+      "event": "default"
+    }
+  }
+}

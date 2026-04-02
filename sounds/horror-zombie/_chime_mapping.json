@@ -1,0 +1,35 @@
+{
+  "task_done": [
+    "md-task-done-1.mp3",
+    "md-task-done-2.mp3",
+    "md-task-done-3.mp3"
+  ],
+  "stop": [
+    "md-stop-1.mp3",
+    "md-stop-2.mp3",
+    "md-stop-3.mp3"
+  ],
+  "permission": [
+    "md-permission-1.mp3",
+    "md-permission-2.mp3"
+  ],
+  "question": [
+    "md-question-1.mp3",
+    "md-question-2.mp3",
+    "md-question-3.mp3"
+  ],
+  "idle": [
+    "md-idle-1.mp3",
+    "md-idle-2.mp3",
+    "md-idle-3.mp3"
+  ],
+  "auth": [
+    "md-auth-1.mp3",
+    "md-auth-2.mp3"
+  ],
+  "default": [
+    "md-default-1.mp3",
+    "md-default-2.mp3",
+    "md-default-3.mp3"
+  ]
+}

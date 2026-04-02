@@ -1,0 +1,256 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+.conda/
+
+# Poetry
+poetry.lock
+.poetry/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.hypothesis/
+.pytest_cache/
+cover/
+test-results/
+.test_data/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# pyenv
+.python-version
+
+# Environments
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+.env.test
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# pytype
+.pytype/
+
+# Cython
+*.c
+*.cpp
+*.h
+cython_debug/
+
+# ML Models (large files)
+models/
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.onnx
+*.tflite
+*.h5
+*.pb
+*.safetensors
+
+# Audio files (test/temp only — sound packs in sounds/ are tracked)
+*.wav
+*.flac
+*.ogg
+*.m4a
+audio_samples/
+test_audio/
+
+# Logs
+logs/
+*.log
+log_*.txt
+*.log.*
+
+# Redis
+dump.rdb
+appendonly.aof
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Kubernetes
+*.kubeconfig
+
+# Monitoring data
+prometheus_data/
+grafana_data/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+
+# Project specific
+worktrees/
+sessions/
+transcripts/
+summaries/
+.session_data/
+
+# Generated files
+generated/
+output/
+results/
+cache/
+
+# Documentation build
+site/
+docs/_build/
+docs/.doctrees/
+
+# Profiling
+*.prof
+*.lprof
+*.pyprof
+
+# ORCHIDEA telemetry (sensitive data)
+telemetry/
+metrics_raw/
+agent_logs/
+
+# Credentials and secrets
+credentials.json
+*.pem
+*.key
+*.crt
+secrets/
+.secrets/
+
+# Node.js (for Electron frontend)
+node_modules/
+package-lock.json
+yarn.lock
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Electron
+out/
+dist-electron/
+*.dmg
+*.exe
+*.AppImage
+
+# Build artifacts
+*.o
+*.a
+*.lib
+*.dll
+*.dylib
+*.so
+
+# gRPC generated files (regenerate from .proto)
+*_pb2.py
+*_pb2.pyi
+*_pb2_grpc.py
+
+# Coverage reports
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+
+# Backup files
+*.backup
+*.orig
+
+# GPU cache
+.nv/
+.nvidia/
+.triton/
+
+# Voice Bridge specific
+nul
+*.jpg
+*.png
+*.ico
+voice_bridge.spec
