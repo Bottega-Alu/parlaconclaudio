@@ -233,17 +233,10 @@ def _play_sound(filepath: str) -> None:
 # ══════════════════════════════════════════════════
 
 def _marble_noise(x: float, y: float, t: float) -> float:
-    """Rich multi-octave marble noise — chaotic veins and swirls."""
-    r = math.sqrt(x * x + y * y)
-    # Large swirling veins
+    """Smooth marble noise — soft veins, no grain."""
     v = math.sin(x * 0.12 + y * 0.08 + t * 0.6)
-    v += 0.6 * math.cos(x * 0.09 - y * 0.15 + t * 0.45)
-    # Turbulent mid-detail
-    v += 0.45 * math.sin((x + y) * 0.18 + math.sin(r * 0.06) * 3.0 + t * 0.8)
-    v += 0.35 * math.cos((x - y) * 0.14 + t * 1.1)
-    # Fine chaotic grain
-    v += 0.25 * math.sin(x * 0.28 + y * 0.35 - t * 0.9)
-    v += 0.15 * math.cos(x * 0.40 - y * 0.22 + t * 0.55)
+    v += 0.5 * math.cos(x * 0.09 - y * 0.15 + t * 0.45)
+    v += 0.3 * math.sin((x + y) * 0.14 + t * 0.8)
     return v
 
 
@@ -288,12 +281,12 @@ def _generate_marble_sphere(
             # Marble veins — liquid flow
             marble = _marble_noise(x, y, time_val)
 
-            # Hue: wide variation across veins for liquid-ink color blending
-            h = (hue_offset + marble * hue_range * 0.25) % 1.0
-            # Saturation: veins are more vivid
-            s = saturation * (1.0 - norm_dist * 0.08) * (0.85 + 0.15 * abs(marble))
-            # Brightness: base + lighting + shimmer + marble-driven sparkle
-            sparkle = 0.04 * math.sin(marble * 8.0 + time_val * 3.0)
+            # Hue: uniform base + very subtle vein variation
+            h = (hue_offset + marble * hue_range * 0.08) % 1.0
+            # Saturation: smooth, uniform
+            s = saturation * (1.0 - norm_dist * 0.10)
+            # Brightness: base + lighting + shimmer
+            sparkle = 0.02 * math.sin(marble * 4.0 + time_val * 2.5)
             v = (brightness + shimmer + sparkle) * light_factor
 
             # Main specular highlight (glass)
@@ -343,12 +336,12 @@ _ANIM_PRESETS = {
     },
     "idle": {
         "hue_speed": 0.006,       # Slow rainbow drift
-        "hue_range": 0.45,        # Wide color variation in veins
-        "saturation": 0.88,
+        "hue_range": 0.08,        # Uniform color — subtle veins only, like recording
+        "saturation": 0.90,
         "brightness": 0.95,
-        "time_speed": 0.5,        # Marble flow speed
-        "interval": 0.05,         # Fast cycle — generation time is the bottleneck
-        "pulse": True,            # Shimmer like recording
+        "time_speed": 0.5,
+        "interval": 0.05,
+        "pulse": True,
     },
     "recording": {
         "hue_speed": 0.003,
