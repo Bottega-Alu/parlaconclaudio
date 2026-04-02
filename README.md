@@ -25,9 +25,13 @@
 
 ## What is parlaconclaudio?
 
-A local voice bridge for **Claude Code** on Windows. Two components:
+A voice bridge that started as a way to **talk to Claude Code** — and turned out to be a **better dictation tool than Windows built-in speech recognition**. Faster, more accurate, works in any language, and pastes into any window. Not just for developers.
 
-1. **Voice Bridge (STT)** - Press `Ctrl+Alt+Space`, speak, and your words are transcribed and pasted into the active terminal. Works with local GPU (Whisper large-v3) or cloud providers (Groq, Deepgram) with automatic fallback.
+> We built it to dictate prompts to Claude Code hands-free. Then we realized Whisper large-v3 on a local GPU crushes Windows Speech Recognition in accuracy, speed, and multilingual support. So now we use it for everything — emails, documents, chat, notes. It just works.
+
+Two components:
+
+1. **Voice Bridge (STT)** - Press `Ctrl+Alt+Space`, speak, and your words are transcribed and pasted into the active window. Works with local GPU (Whisper large-v3) or cloud providers (Groq, Deepgram) with automatic fallback. Works everywhere — Claude Code, browsers, Office, any app.
 
 2. **TTS Notifications** - A Claude Code hook that announces task completions, permission requests, and status changes with natural voices (edge-tts). Walk away from the screen and still know what Claude is doing.
 
@@ -232,9 +236,13 @@ scripts/
 
 ## Cos'e parlaconclaudio?
 
-Un bridge vocale per **Claude Code** su Windows. Due componenti:
+Un bridge vocale nato per **parlare con Claude Code** — e che si e' rivelato un **sistema di dettatura migliore di quello integrato in Windows**. Piu' veloce, piu' preciso, multilingua, e incolla in qualsiasi finestra. Non solo per sviluppatori.
 
-1. **Voice Bridge (STT)** - Premi `Ctrl+Alt+Space`, parla, e le tue parole vengono trascritte e incollate nel terminale attivo. Funziona con GPU locale (Whisper large-v3) o provider cloud (Groq, Deepgram) con fallback automatico.
+> L'abbiamo costruito per dettare prompt a Claude Code a mani libere. Poi ci siamo resi conto che Whisper large-v3 su GPU locale distrugge il riconoscimento vocale di Windows in precisione, velocita' e supporto multilingua. Ora lo usiamo per tutto — email, documenti, chat, appunti. Funziona e basta.
+
+Due componenti:
+
+1. **Voice Bridge (STT)** - Premi `Ctrl+Alt+Spazio`, parla, e le tue parole vengono trascritte e incollate nella finestra attiva. Funziona con GPU locale (Whisper large-v3) o provider cloud (Groq, Deepgram) con fallback automatico. Funziona ovunque — Claude Code, browser, Office, qualsiasi app.
 
 2. **Notifiche TTS** - Un hook di Claude Code che annuncia il completamento dei task, richieste di permesso e cambi di stato con voci naturali (edge-tts).
 
@@ -354,9 +362,13 @@ La voce guida annuncia il nome del progetto, ma dare un nome a ogni terminale ti
 
 ## O que e parlaconclaudio?
 
-Um bridge vocal para o **Claude Code** no Windows. Dois componentes:
+Um bridge vocal que comecou como uma forma de **falar com o Claude Code** — e se revelou uma **ferramenta de ditado melhor que o reconhecimento de voz do Windows**. Mais rapido, mais preciso, funciona em qualquer idioma, e cola em qualquer janela. Nao e so para desenvolvedores.
 
-1. **Voice Bridge (STT)** - Pressione `Ctrl+Alt+Space`, fale, e suas palavras sao transcritas e coladas no terminal ativo. Funciona com GPU local (Whisper large-v3) ou provedores cloud (Groq, Deepgram) com fallback automatico.
+> Construimos para ditar prompts ao Claude Code sem as maos. Depois percebemos que o Whisper large-v3 na GPU local esmaga o reconhecimento de voz do Windows em precisao, velocidade e suporte multilingual. Agora usamos para tudo — emails, documentos, chat, anotacoes. Simplesmente funciona.
+
+Dois componentes:
+
+1. **Voice Bridge (STT)** - Pressione `Ctrl+Alt+Espaco`, fale, e suas palavras sao transcritas e coladas na janela ativa. Funciona com GPU local (Whisper large-v3) ou provedores cloud (Groq, Deepgram) com fallback automatico. Funciona em qualquer lugar — Claude Code, navegadores, Office, qualquer app.
 
 2. **Notificacoes TTS** - Um hook do Claude Code que anuncia conclusoes de tarefas, pedidos de permissao e mudancas de status com vozes naturais (edge-tts).
 
