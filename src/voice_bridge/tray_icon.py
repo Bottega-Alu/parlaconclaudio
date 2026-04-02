@@ -257,9 +257,6 @@ def _generate_marble_sphere(
     center = size / 2.0
     radius = (size - 6) / 2.0
 
-    # Per-frame shimmer: subtle brightness oscillation (like the red recording sphere)
-    shimmer = 0.03 * math.sin(time_val * 2.5)
-
     for y in range(size):
         for x in range(size):
             dx = x - center
@@ -278,16 +275,16 @@ def _generate_marble_sphere(
             light_dot = nx * (-0.3) + ny * (-0.4) + nz * 0.8
             light_factor = max(0.15, min(1.0, 0.5 + light_dot * 0.6))
 
-            # Marble veins — liquid flow
-            marble = _marble_noise(x, y, time_val)
+            # Marble veins — rotate sampling point around Y axis (like Earth)
+            rot_offset = time_val * 12.0  # horizontal scroll speed in pixels
+            marble = _marble_noise(x + rot_offset, y, 0.0)
 
             # Hue: uniform base + very subtle vein variation
             h = (hue_offset + marble * hue_range * 0.08) % 1.0
             # Saturation: smooth, uniform
             s = saturation * (1.0 - norm_dist * 0.10)
-            # Brightness: base + lighting + shimmer
-            sparkle = 0.02 * math.sin(marble * 4.0 + time_val * 2.5)
-            v = (brightness + shimmer + sparkle) * light_factor
+            # Brightness: base + lighting (no pulse/shimmer in idle)
+            v = brightness * light_factor
 
             # Main specular highlight (glass)
             spec_dist = math.sqrt((nx + 0.35) ** 2 + (ny + 0.35) ** 2)
@@ -339,10 +336,9 @@ _ANIM_PRESETS = {
         "hue_range": 0.08,
         "saturation": 0.90,
         "brightness": 0.95,
-        "time_speed": 0.5,
+        "time_speed": 0.4,        # Marble flow = rotation illusion
         "interval": 0.05,
-        "pulse": True,
-        "hue_min": 0.08,          # Skip red zone (0.0-0.08 and 0.92-1.0)
+        "hue_min": 0.08,          # Skip red zone
         "hue_max": 0.92,
     },
     "recording": {
