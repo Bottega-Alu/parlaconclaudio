@@ -111,9 +111,8 @@ models/
 *.pb
 *.safetensors
 
-# Audio files (test data)
+# Audio files (test/temp only — sound packs in sounds/ are tracked)
 *.wav
-*.mp3
 *.flac
 *.ogg
 *.m4a

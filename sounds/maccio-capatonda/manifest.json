@@ -1,0 +1,87 @@
+{
+  "pack": "maccio-capatonda",
+  "version": "1.0",
+  "description": "Custom sound pack: maccio-capatonda",
+  "sound_count": 15,
+  "chimes": {
+    "default": [
+      "maccio-balletto-1.mp3",
+      "maccio-balletto-2.mp3",
+      "maccio-balletto-3.mp3",
+      "maccio-balletto-4.mp3",
+      "maccio-balletto-5.mp3",
+      "maccio-balletto-6.mp3",
+      "maccio-buonanotte.mp3",
+      "maccio-buttato.mp3",
+      "maccio-diesel.mp3",
+      "maccio-scemo-di-merda.mp3",
+      "maccio-scopare.mp3",
+      "maccio-scopareee-1.mp3",
+      "maccio-scopareee-2.mp3",
+      "maccio-scopareee-3.mp3",
+      "maccio-scopareee-4.mp3"
+    ]
+  },
+  "sounds": {
+    "maccio-balletto-1.mp3": {
+      "duration_ms": 5000,
+      "event": "default"
+    },
+    "maccio-balletto-2.mp3": {
+      "duration_ms": 5000,
+      "event": "default"
+    },
+    "maccio-balletto-3.mp3": {
+      "duration_ms": 5000,
+      "event": "default"
+    },
+    "maccio-balletto-4.mp3": {
+      "duration_ms": 5000,
+      "event": "default"
+    },
+    "maccio-balletto-5.mp3": {
+      "duration_ms": 5000,
+      "event": "default"
+    },
+    "maccio-balletto-6.mp3": {
+      "duration_ms": 5000,
+      "event": "default"
+    },
+    "maccio-buonanotte.mp3": {
+      "duration_ms": 10161,
+      "event": "default"
+    },
+    "maccio-buttato.mp3": {
+      "duration_ms": 2020,
+      "event": "default"
+    },
+    "maccio-diesel.mp3": {
+      "duration_ms": 4912,
+      "event": "default"
+    },
+    "maccio-scemo-di-merda.mp3": {
+      "duration_ms": 1712,
+      "event": "default"
+    },
+    "maccio-scopare.mp3": {
+      "duration_ms": 1282,
+      "event": "default"
+    },
+    "maccio-scopareee-1.mp3": {
+      "duration_ms": 5000,
+      "event": "default"
+    },
+    "maccio-scopareee-2.mp3": {
+      "duration_ms": 5000,
+      "event": "default"
+    },
+    "maccio-scopareee-3.mp3": {
+      "duration_ms": 5000,
+      "event": "default"
+    },
+    "maccio-scopareee-4.mp3": {
+      "duration_ms": 5000,
+      "event": "default"
+    }
+  }
+}

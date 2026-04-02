@@ -1,0 +1,144 @@
+{
+  "pack": "r2d2",
+  "version": "1.0",
+  "description": "R2-D2 semantic chimes - robot beeps and boops",
+  "sound_count": 22,
+  "chimes": {
+    "task_done": [
+      "acknowledged.mp3",
+      "acknowledged-2.mp3"
+    ],
+    "stop": [
+      "excited.mp3",
+      "excited-2.mp3"
+    ],
+    "permission": [
+      "worried.mp3",
+      "8.mp3"
+    ],
+    "question": [
+      "chat.mp3",
+      "3.mp3"
+    ],
+    "idle": [
+      "12.mp3",
+      "19.mp3"
+    ],
+    "auth": [
+      "7.mp3",
+      "18.mp3"
+    ],
+    "default": [
+      "13.mp3",
+      "6.mp3"
+    ]
+  },
+  "sounds": {
+    "1-screaming.mp3": {
+      "duration_ms": 1619,
+      "event": "unmapped",
+      "label": "R2-D2 Screaming",
+      "mood": "alert"
+    },
+    "11.mp3": {
+      "duration_ms": 3082,
+      "event": "unmapped"
+    },
+    "12.mp3": {
+      "duration_ms": 626,
+      "event": "idle"
+    },
+    "13.mp3": {
+      "duration_ms": 1306,
+      "event": "default"
+    },
+    "14.mp3": {
+      "duration_ms": 2168,
+      "event": "unmapped"
+    },
+    "15.mp3": {
+      "duration_ms": 2142,
+      "event": "unmapped"
+    },
+    "18.mp3": {
+      "duration_ms": 888,
+      "event": "auth"
+    },
+    "19.mp3": {
+      "duration_ms": 862,
+      "event": "idle"
+    },
+    "21.mp3": {
+      "duration_ms": 4597,
+      "event": "unmapped"
+    },
+    "22.mp3": {
+      "duration_ms": 4284,
+      "event": "unmapped"
+    },
+    "3.mp3": {
+      "duration_ms": 966,
+      "event": "question"
+    },
+    "6.mp3": {
+      "duration_ms": 3186,
+      "event": "default"
+    },
+    "7.mp3": {
+      "duration_ms": 888,
+      "event": "auth"
+    },
+    "8.mp3": {
+      "duration_ms": 1149,
+      "event": "permission"
+    },
+    "acknowledged-2.mp3": {
+      "duration_ms": 757,
+      "event": "task_done",
+      "label": "R2-D2 Acknowledged 2",
+      "mood": "positive"
+    },
+    "acknowledged.mp3": {
+      "duration_ms": 1306,
+      "event": "task_done",
+      "label": "R2-D2 Acknowledged",
+      "mood": "positive"
+    },
+    "chat.mp3": {
+      "duration_ms": 1280,
+      "event": "question",
+      "label": "R2-D2 Chat",
+      "mood": "curious"
+    },
+    "excited-2.mp3": {
+      "duration_ms": 2168,
+      "event": "stop",
+      "label": "R2-D2 Excited 2",
+      "mood": "excited"
+    },
+    "excited.mp3": {
+      "duration_ms": 1018,
+      "event": "stop",
+      "label": "R2-D2 Excited",
+      "mood": "excited"
+    },
+    "r2d2-sing-sound-effect.mp3": {
+      "duration_ms": 3134,
+      "event": "unmapped",
+      "label": "R2-D2 Singing",
+      "mood": "happy"
+    },
+    "shout.mp3": {
+      "duration_ms": 1619,
+      "event": "unmapped",
+      "label": "R2-D2 Shout",
+      "mood": "alert"
+    },
+    "worried.mp3": {
+      "duration_ms": 1149,
+      "event": "permission",
+      "label": "R2-D2 Worried",
+      "mood": "worried"
+    }
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "pack": "american-dad",
+  "version": "1.0",
+  "description": "Custom sound pack: american-dad",
+  "sound_count": 14,
+  "chimes": {
+    "default": [
+      "ad-default-1.mp3",
+      "ad-idle-1.mp3",
+      "ad-permission-1.mp3",
+      "ad-permission-2.mp3",
+      "ad-question-1.mp3",
+      "ad-stop-1.mp3",
+      "ad-stop-2.mp3",
+      "ad-task-done-1.mp3",
+      "ad-task-done-2.mp3",
+      "distracted.mp3",
+      "haley-wake-up.mp3",
+      "happy-hour.mp3",
+      "oh-my-god.mp3",
+      "roger-elections.mp3"
+    ]
+  },
+  "sounds": {
+    "ad-default-1.mp3": {
+      "duration_ms": 5148,
+      "event": "default"
+    },
+    "ad-idle-1.mp3": {
+      "duration_ms": 5172,
+      "event": "default"
+    },
+    "ad-permission-1.mp3": {
+      "duration_ms": 3004,
+      "event": "default"
+    },
+    "ad-permission-2.mp3": {
+      "duration_ms": 5172,
+      "event": "default"
+    },
+    "ad-question-1.mp3": {
+      "duration_ms": 3500,
+      "event": "default"
+    },
+    "ad-stop-1.mp3": {
+      "duration_ms": 2011,
+      "event": "default"
+    },
+    "ad-stop-2.mp3": {
+      "duration_ms": 5800,
+      "event": "default"
+    },
+    "ad-task-done-1.mp3": {
+      "duration_ms": 5148,
+      "event": "default"
+    },
+    "ad-task-done-2.mp3": {
+      "duration_ms": 1410,
+      "event": "default"
+    },
+    "distracted.mp3": {
+      "duration_ms": 3395,
+      "event": "default"
+    },
+    "haley-wake-up.mp3": {
+      "duration_ms": 4414,
+      "event": "default"
+    },
+    "happy-hour.mp3": {
+      "duration_ms": 3474,
+      "event": "default"
+    },
+    "oh-my-god.mp3": {
+      "duration_ms": 6008,
+      "event": "default"
+    },
+    "roger-elections.mp3": {
+      "duration_ms": 2272,
+      "event": "default"
+    }
+  }
+}

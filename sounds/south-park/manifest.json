@@ -1,0 +1,157 @@
+{
+  "pack": "south-park",
+  "version": "1.0",
+  "description": "South Park character sounds - Cartman, Kenny, Butters & friends",
+  "sound_count": 28,
+  "chimes": {
+    "task_done": [
+      "sp-task-done-1.mp3",
+      "sp-task-done-2.mp3",
+      "sp-task-done-3.mp3"
+    ],
+    "stop": [
+      "sp-stop-1.mp3",
+      "sp-stop-2.mp3",
+      "sp-stop-3.mp3"
+    ],
+    "permission": [
+      "sp-permission-1.mp3",
+      "sp-permission-2.mp3",
+      "sp-permission-3.mp3"
+    ],
+    "question": [
+      "sp-question-1.mp3",
+      "sp-question-2.mp3"
+    ],
+    "idle": [
+      "sp-idle-1.mp3",
+      "sp-idle-2.mp3",
+      "sp-idle-3.mp3",
+      "sp-idle-4.mp3",
+      "sp-idle-5.mp3"
+    ],
+    "auth": [
+      "sp-auth-1.mp3",
+      "sp-auth-2.mp3"
+    ],
+    "default": [
+      "sp-default-1.mp3",
+      "sp-default-2.mp3",
+      "sp-default-3.mp3"
+    ]
+  },
+  "sounds": {
+    "a-young-homosexual-boy-known-only-as-tweek.mp3": {
+      "duration_ms": 2773,
+      "event": "unmapped"
+    },
+    "aah-okay-jesus-christ.mp3": {
+      "duration_ms": 2240,
+      "event": "unmapped"
+    },
+    "about-a-superhero-called-the-coon.mp3": {
+      "duration_ms": 1834,
+      "event": "unmapped"
+    },
+    "about-columbus-in-the-past.mp3": {
+      "duration_ms": 2688,
+      "event": "unmapped"
+    },
+    "about-maybe-being-a-vegan-with-me.mp3": {
+      "duration_ms": 1642,
+      "event": "unmapped"
+    },
+    "about-that-nigger-thing.mp3": {
+      "duration_ms": 1472,
+      "event": "unmapped"
+    },
+    "about-these-goddamn-drug-dealers.mp3": {
+      "duration_ms": 2538,
+      "event": "unmapped"
+    },
+    "sp-auth-1.mp3": {
+      "duration_ms": 1704,
+      "event": "auth"
+    },
+    "sp-auth-2.mp3": {
+      "duration_ms": 2011,
+      "event": "auth"
+    },
+    "sp-default-1.mp3": {
+      "duration_ms": 3274,
+      "event": "default"
+    },
+    "sp-default-2.mp3": {
+      "duration_ms": 2743,
+      "event": "default"
+    },
+    "sp-default-3.mp3": {
+      "duration_ms": 2272,
+      "event": "default"
+    },
+    "sp-idle-1.mp3": {
+      "duration_ms": 3186,
+      "event": "idle"
+    },
+    "sp-idle-2.mp3": {
+      "duration_ms": 1724,
+      "event": "idle"
+    },
+    "sp-idle-3.mp3": {
+      "duration_ms": 1509,
+      "event": "idle"
+    },
+    "sp-idle-4.mp3": {
+      "duration_ms": 870,
+      "event": "idle"
+    },
+    "sp-idle-5.mp3": {
+      "duration_ms": 2043,
+      "event": "idle"
+    },
+    "sp-permission-1.mp3": {
+      "duration_ms": 4176,
+      "event": "permission"
+    },
+    "sp-permission-2.mp3": {
+      "duration_ms": 940,
+      "event": "permission"
+    },
+    "sp-permission-3.mp3": {
+      "duration_ms": 2324,
+      "event": "permission"
+    },
+    "sp-question-1.mp3": {
+      "duration_ms": 3376,
+      "event": "question"
+    },
+    "sp-question-2.mp3": {
+      "duration_ms": 2716,
+      "event": "question"
+    },
+    "sp-stop-1.mp3": {
+      "duration_ms": 5093,
+      "event": "stop"
+    },
+    "sp-stop-2.mp3": {
+      "duration_ms": 3096,
+      "event": "stop"
+    },
+    "sp-stop-3.mp3": {
+      "duration_ms": 2658,
+      "event": "stop"
+    },
+    "sp-task-done-1.mp3": {
+      "duration_ms": 902,
+      "event": "task_done"
+    },
+    "sp-task-done-2.mp3": {
+      "duration_ms": 19095,
+      "event": "task_done"
+    },
+    "sp-task-done-3.mp3": {
+      "duration_ms": 19095,
+      "event": "task_done"
+    }
+  }
+}

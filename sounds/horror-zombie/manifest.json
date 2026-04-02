@@ -1,0 +1,119 @@
+{
+  "pack": "horror-zombie",
+  "version": "1.0",
+  "description": "Horror/zombie themed sounds - grunts, stingers, groans",
+  "sound_count": 19,
+  "chimes": {
+    "task_done": [
+      "md-task-done-1.mp3",
+      "md-task-done-2.mp3",
+      "md-task-done-3.mp3"
+    ],
+    "stop": [
+      "md-stop-1.mp3",
+      "md-stop-2.mp3",
+      "md-stop-3.mp3"
+    ],
+    "permission": [
+      "md-permission-1.mp3",
+      "md-permission-2.mp3"
+    ],
+    "question": [
+      "md-question-1.mp3",
+      "md-question-2.mp3",
+      "md-question-3.mp3"
+    ],
+    "idle": [
+      "md-idle-1.mp3",
+      "md-idle-2.mp3",
+      "md-idle-3.mp3"
+    ],
+    "auth": [
+      "md-auth-1.mp3",
+      "md-auth-2.mp3"
+    ],
+    "default": [
+      "md-default-1.mp3",
+      "md-default-2.mp3",
+      "md-default-3.mp3"
+    ]
+  },
+  "sounds": {
+    "md-auth-1.mp3": {
+      "duration_ms": 1720,
+      "event": "auth"
+    },
+    "md-auth-2.mp3": {
+      "duration_ms": 1350,
+      "event": "auth"
+    },
+    "md-default-1.mp3": {
+      "duration_ms": 16995,
+      "event": "default"
+    },
+    "md-default-2.mp3": {
+      "duration_ms": 13962,
+      "event": "default"
+    },
+    "md-default-3.mp3": {
+      "duration_ms": 1170,
+      "event": "default"
+    },
+    "md-idle-1.mp3": {
+      "duration_ms": 2279,
+      "event": "idle"
+    },
+    "md-idle-2.mp3": {
+      "duration_ms": 2231,
+      "event": "idle"
+    },
+    "md-idle-3.mp3": {
+      "duration_ms": 0,
+      "event": "idle"
+    },
+    "md-permission-1.mp3": {
+      "duration_ms": 21733,
+      "event": "permission"
+    },
+    "md-permission-2.mp3": {
+      "duration_ms": 0,
+      "event": "permission"
+    },
+    "md-question-1.mp3": {
+      "duration_ms": 0,
+      "event": "question"
+    },
+    "md-question-2.mp3": {
+      "duration_ms": 0,
+      "event": "question"
+    },
+    "md-question-3.mp3": {
+      "duration_ms": 4409,
+      "event": "question"
+    },
+    "md-stop-1.mp3": {
+      "duration_ms": 7131,
+      "event": "stop"
+    },
+    "md-stop-2.mp3": {
+      "duration_ms": 4623,
+      "event": "stop"
+    },
+    "md-stop-3.mp3": {
+      "duration_ms": 3813,
+      "event": "stop"
+    },
+    "md-task-done-1.mp3": {
+      "duration_ms": 2000,
+      "event": "task_done"
+    },
+    "md-task-done-2.mp3": {
+      "duration_ms": 2131,
+      "event": "task_done"
+    },
+    "md-task-done-3.mp3": {
+      "duration_ms": 2984,
+      "event": "task_done"
+    }
+  }
+}

@@ -143,8 +143,26 @@ class VoiceBridge:
                 self._set_state(BridgeState.IDLE)
             self._hotkey.reset_toggle()
 
+    @staticmethod
+    def _install_sound_packs() -> None:
+        """Copy bundled sound packs to ~/.claude/cache/tts/sounds/ if not present."""
+        import shutil
+        from pathlib import Path
+        src = Path(__file__).resolve().parent.parent.parent / "sounds"
+        dst = Path.home() / ".claude" / "cache" / "tts" / "sounds"
+        if not src.is_dir():
+            return
+        dst.mkdir(parents=True, exist_ok=True)
+        for pack_dir in src.iterdir():
+            if pack_dir.is_dir():
+                target = dst / pack_dir.name
+                if not target.is_dir():
+                    shutil.copytree(pack_dir, target)
+                    logger.info(f"Installed sound pack: {pack_dir.name}")
+
     def start(self) -> None:
         """Start the voice bridge."""
+        self._install_sound_packs()
         self._running = True
         logger.info("=" * 50)
         logger.info("Voice Bridge starting...")

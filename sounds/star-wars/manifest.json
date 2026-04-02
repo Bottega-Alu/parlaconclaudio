@@ -1,0 +1,97 @@
+{
+  "pack": "star-wars",
+  "version": "1.0",
+  "description": "Custom sound pack: star-wars",
+  "sound_count": 17,
+  "chimes": {
+    "default": [
+      "sw-battle-alarm.mp3",
+      "sw-chewbacca-roar.mp3",
+      "sw-do-it.mp3",
+      "sw-duel-of-fates.mp3",
+      "sw-hello-there.mp3",
+      "sw-i-am-your-father.mp3",
+      "sw-imperial-march.mp3",
+      "sw-its-a-trap.mp3",
+      "sw-lightsaber-hum.mp3",
+      "sw-lightsaber-on.mp3",
+      "sw-lightsaber-sith.mp3",
+      "sw-order-66.mp3",
+      "sw-r2d2.mp3",
+      "sw-seismic-charge.mp3",
+      "sw-tie-blaster.mp3",
+      "sw-tusken-raider.mp3",
+      "sw-unlimited-power.mp3"
+    ]
+  },
+  "sounds": {
+    "sw-battle-alarm.mp3": {
+      "duration_ms": 16613,
+      "event": "default"
+    },
+    "sw-chewbacca-roar.mp3": {
+      "duration_ms": 1337,
+      "event": "default"
+    },
+    "sw-do-it.mp3": {
+      "duration_ms": 486,
+      "event": "default"
+    },
+    "sw-duel-of-fates.mp3": {
+      "duration_ms": 6826,
+      "event": "default"
+    },
+    "sw-hello-there.mp3": {
+      "duration_ms": 1945,
+      "event": "default"
+    },
+    "sw-i-am-your-father.mp3": {
+      "duration_ms": 2528,
+      "event": "default"
+    },
+    "sw-imperial-march.mp3": {
+      "duration_ms": 18677,
+      "event": "default"
+    },
+    "sw-its-a-trap.mp3": {
+      "duration_ms": 2403,
+      "event": "default"
+    },
+    "sw-lightsaber-hum.mp3": {
+      "duration_ms": 14303,
+      "event": "default"
+    },
+    "sw-lightsaber-on.mp3": {
+      "duration_ms": 2768,
+      "event": "default"
+    },
+    "sw-lightsaber-sith.mp3": {
+      "duration_ms": 2273,
+      "event": "default"
+    },
+    "sw-order-66.mp3": {
+      "duration_ms": 7151,
+      "event": "default"
+    },
+    "sw-r2d2.mp3": {
+      "duration_ms": 8793,
+      "event": "default"
+    },
+    "sw-seismic-charge.mp3": {
+      "duration_ms": 4088,
+      "event": "default"
+    },
+    "sw-tie-blaster.mp3": {
+      "duration_ms": 1044,
+      "event": "default"
+    },
+    "sw-tusken-raider.mp3": {
+      "duration_ms": 3390,
+      "event": "default"
+    },
+    "sw-unlimited-power.mp3": {
+      "duration_ms": 15203,
+      "event": "default"
+    }
+  }
+}
