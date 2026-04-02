@@ -342,12 +342,13 @@ _ANIM_PRESETS = {
         "pulse": True,
     },
     "idle": {
-        "hue_speed": 0.008,       # Slow rainbow drift
+        "hue_speed": 0.006,       # Slow rainbow drift
         "hue_range": 0.45,        # Wide color variation in veins
         "saturation": 0.88,
         "brightness": 0.95,
-        "time_speed": 0.3,
-        "interval": 0.15,
+        "time_speed": 0.5,        # Marble flow speed
+        "interval": 0.05,         # Fast cycle — generation time is the bottleneck
+        "pulse": True,            # Shimmer like recording
     },
     "recording": {
         "hue_speed": 0.003,
@@ -370,79 +371,28 @@ _ANIM_PRESETS = {
     },
 }
 
-ICON_SIZE = 256  # Max resolution for crisp high-DPI rendering
-NUM_IDLE_FRAMES = 72  # More frames for liquid-smooth transitions
-FRAME_CACHE_DIR = Path.home() / ".claude" / "cache" / "tts" / "icon_frames"
+ICON_SIZE = 192  # Crisp + fast enough for on-the-fly generation (~90ms/frame)
 
 
 class _IconAnimator:
-    """Background thread that animates the tray icon."""
+    """Background thread that animates the tray icon.
+
+    ALL states are generated on-the-fly for smooth, fluid animation.
+    """
 
     def __init__(self):
         self._state = "idle"
         self._running = False
         self._thread: threading.Thread | None = None
-        self._icon_ref = None  # Reference to pystray.Icon
-        self._frame_idx = 0
+        self._icon_ref = None
         self._time_val = 0.0
-        self._idle_frames: list | None = None  # Pre-generated cache
-
-    def _pregenerate_idle_frames(self):
-        """Load idle frames from disk cache, or generate + save on first run."""
-        if self._idle_frames is not None:
-            return
-
-        FRAME_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_ok = True
-        frames = []
-
-        # Try loading from cache
-        for i in range(NUM_IDLE_FRAMES):
-            fpath = FRAME_CACHE_DIR / f"idle_{ICON_SIZE}_{i:02d}.png"
-            if fpath.is_file():
-                try:
-                    frames.append(Image.open(fpath).copy())
-                except Exception:
-                    cache_ok = False
-                    break
-            else:
-                cache_ok = False
-                break
-
-        if cache_ok and len(frames) == NUM_IDLE_FRAMES:
-            self._idle_frames = frames
-            logger.info(f"Loaded {NUM_IDLE_FRAMES} cached frames ({ICON_SIZE}px)")
-            return
-
-        # Generate and save to cache
-        logger.info(f"Generating {NUM_IDLE_FRAMES} marble sphere frames ({ICON_SIZE}px) — first run only...")
-        preset = _ANIM_PRESETS["idle"]
-        self._idle_frames = []
-        for i in range(NUM_IDLE_FRAMES):
-            # Slow hue drift — liquid color transition
-            hue = i / NUM_IDLE_FRAMES
-            # Tiny time steps for smooth marble flow between consecutive frames
-            t = i * 0.18
-            frame = _generate_marble_sphere(
-                ICON_SIZE, hue,
-                hue_range=preset["hue_range"],
-                saturation=preset["saturation"],
-                brightness=preset["brightness"],
-                time_val=t,
-            )
-            self._idle_frames.append(frame)
-            try:
-                frame.save(FRAME_CACHE_DIR / f"idle_{ICON_SIZE}_{i:02d}.png")
-            except Exception:
-                pass
-        logger.info(f"Generated and cached {NUM_IDLE_FRAMES} frames")
+        self._base_hue = 0.0
 
     def set_icon(self, icon):
         self._icon_ref = icon
 
     def set_state(self, state: str):
         self._state = state
-        self._frame_idx = 0
 
     def start(self):
         self._running = True
@@ -453,38 +403,28 @@ class _IconAnimator:
         self._running = False
 
     def _animation_loop(self):
-        """Main animation loop - updates icon at preset intervals."""
-        self._pregenerate_idle_frames()
-        base_hue = 0.0
-
+        """Main animation loop — all states generated on-the-fly."""
         while self._running:
             preset = _ANIM_PRESETS.get(self._state, _ANIM_PRESETS["idle"])
             interval = preset["interval"]
 
             try:
-                if self._state == "idle" and self._idle_frames:
-                    # Use pre-generated frames for idle (smooth, low CPU)
-                    frame = self._idle_frames[self._frame_idx % NUM_IDLE_FRAMES]
-                    self._frame_idx += 1
-                else:
-                    # Generate on-the-fly for recording/transcribing
-                    self._time_val += preset["time_speed"]
-                    base_hue = preset.get("base_hue", base_hue + preset["hue_speed"])
-                    hue = base_hue % 1.0
+                self._time_val += preset["time_speed"]
+                self._base_hue = preset.get("base_hue", self._base_hue + preset["hue_speed"])
+                hue = self._base_hue % 1.0
 
-                    # Pulse effect for recording: oscillate brightness
-                    brightness = preset["brightness"]
-                    if preset.get("pulse"):
-                        pulse = 0.5 + 0.5 * math.sin(self._time_val * 3.0)
-                        brightness = 0.55 + pulse * 0.45
+                brightness = preset["brightness"]
+                if preset.get("pulse"):
+                    pulse = 0.5 + 0.5 * math.sin(self._time_val * 3.0)
+                    brightness = 0.60 + pulse * 0.40
 
-                    frame = _generate_marble_sphere(
-                        ICON_SIZE, hue,
-                        hue_range=preset["hue_range"],
-                        saturation=preset["saturation"],
-                        brightness=brightness,
-                        time_val=self._time_val,
-                    )
+                frame = _generate_marble_sphere(
+                    ICON_SIZE, hue,
+                    hue_range=preset["hue_range"],
+                    saturation=preset["saturation"],
+                    brightness=brightness,
+                    time_val=self._time_val,
+                )
 
                 if self._icon_ref:
                     self._icon_ref.icon = frame
