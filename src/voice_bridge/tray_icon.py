@@ -335,13 +335,15 @@ _ANIM_PRESETS = {
         "pulse": True,
     },
     "idle": {
-        "hue_speed": 0.006,       # Slow rainbow drift
-        "hue_range": 0.08,        # Uniform color — subtle veins only, like recording
+        "hue_speed": 0.006,       # Slow drift through non-red spectrum
+        "hue_range": 0.08,
         "saturation": 0.90,
         "brightness": 0.95,
         "time_speed": 0.5,
         "interval": 0.05,
         "pulse": True,
+        "hue_min": 0.08,          # Skip red zone (0.0-0.08 and 0.92-1.0)
+        "hue_max": 0.92,
     },
     "recording": {
         "hue_speed": 0.003,
@@ -403,8 +405,17 @@ class _IconAnimator:
 
             try:
                 self._time_val += preset["time_speed"]
-                self._base_hue = preset.get("base_hue", self._base_hue + preset["hue_speed"])
+                if "base_hue" in preset:
+                    self._base_hue = preset["base_hue"] + preset["hue_speed"] * self._time_val
+                else:
+                    self._base_hue += preset["hue_speed"]
                 hue = self._base_hue % 1.0
+
+                # Clamp to allowed hue range (e.g. skip red zone for idle)
+                hue_min = preset.get("hue_min")
+                hue_max = preset.get("hue_max")
+                if hue_min is not None and hue_max is not None:
+                    hue = hue_min + (hue % 1.0) * (hue_max - hue_min)
 
                 brightness = preset["brightness"]
                 if preset.get("pulse"):
