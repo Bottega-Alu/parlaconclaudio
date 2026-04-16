@@ -71,6 +71,7 @@ class PortAudioDriver(AudioCaptureBase):
         self._capture_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._audio_queue: Queue = Queue(maxsize=100)
+        self._capture_channels: int = 1  # actual channels opened on the device
 
         # Initialize PyAudio
         try:
@@ -210,16 +211,45 @@ class PortAudioDriver(AudioCaptureBase):
                 default_device = self.get_default_device()
                 device_id = default_device.device_id if default_device else None
 
-            # Open audio stream
-            self._stream = self._pa.open(
-                format=pyaudio.paInt16,
-                channels=self.config.channels,
-                rate=self.config.sample_rate,
-                input=True,
-                input_device_index=device_id,
-                frames_per_buffer=self.config.chunk_size,
-                stream_callback=None  # We'll use blocking mode
-            )
+            # Open audio stream — some devices don't support mono; fall back to
+            # device's maxInputChannels and downmix in the capture loop.
+            requested_channels = self.config.channels
+            channels_to_try = [requested_channels]
+            try:
+                dev_info = self._pa.get_device_info_by_index(device_id) if device_id is not None else None
+                max_ch = int(dev_info['maxInputChannels']) if dev_info else 0
+                if max_ch > 0 and max_ch not in channels_to_try:
+                    channels_to_try.append(max_ch)
+            except Exception:
+                pass
+            if 2 not in channels_to_try:
+                channels_to_try.append(2)
+
+            last_error: Optional[Exception] = None
+            for ch in channels_to_try:
+                try:
+                    self._stream = self._pa.open(
+                        format=pyaudio.paInt16,
+                        channels=ch,
+                        rate=self.config.sample_rate,
+                        input=True,
+                        input_device_index=device_id,
+                        frames_per_buffer=self.config.chunk_size,
+                        stream_callback=None  # We'll use blocking mode
+                    )
+                    self._capture_channels = ch
+                    if ch != requested_channels:
+                        logger.warning(
+                            f"Device does not support {requested_channels}ch; "
+                            f"opened with {ch}ch (will downmix to {requested_channels}ch)"
+                        )
+                    last_error = None
+                    break
+                except Exception as e:
+                    last_error = e
+                    self._stream = None
+            if last_error is not None:
+                raise last_error
 
             # Start capture thread
             self._capture_thread = threading.Thread(
@@ -303,6 +333,17 @@ class PortAudioDriver(AudioCaptureBase):
                         self.config.chunk_size,
                         exception_on_overflow=False
                     )
+
+                    # Downmix to requested channel count if device gave us more
+                    if self._capture_channels != self.config.channels and self.config.channels == 1:
+                        try:
+                            import numpy as _np
+                            samples = _np.frombuffer(audio_data, dtype=_np.int16)
+                            samples = samples.reshape(-1, self._capture_channels)
+                            mono = samples.mean(axis=1).astype(_np.int16)
+                            audio_data = mono.tobytes()
+                        except Exception as e:
+                            logger.error(f"Downmix failed: {e}")
 
                     # Update metrics
                     self.metrics.chunks_captured += 1

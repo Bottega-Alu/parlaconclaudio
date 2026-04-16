@@ -117,21 +117,21 @@ class HotkeyListener:
                 self._hotkey_active = True
                 logger.debug("Toggle ON - starting recording")
                 if self._on_press:
-                    self._on_press()
+                    threading.Thread(target=self._on_press, daemon=True).start()
             else:
                 # Stop recording
                 self._recording = False
                 self._hotkey_active = False
                 logger.debug("Toggle OFF - stopping recording")
                 if self._on_release:
-                    self._on_release()
+                    threading.Thread(target=self._on_release, daemon=True).start()
         else:
             # Push-to-talk: start on press
             if not self._hotkey_active:
                 self._hotkey_active = True
                 logger.debug("Hotkey pressed - starting recording")
                 if self._on_press:
-                    self._on_press()
+                    threading.Thread(target=self._on_press, daemon=True).start()
 
     def _on_key_release(self, key) -> None:
         """Handle key release events."""
@@ -147,7 +147,7 @@ class HotkeyListener:
             self._hotkey_active = False
             logger.debug("Hotkey released - stopping recording")
             if self._on_release:
-                self._on_release()
+                threading.Thread(target=self._on_release, daemon=True).start()
 
     def start(self) -> None:
         """Start listening for hotkey events (non-blocking)."""
