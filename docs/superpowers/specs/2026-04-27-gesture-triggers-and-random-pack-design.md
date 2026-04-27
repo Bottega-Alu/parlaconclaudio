@@ -62,16 +62,19 @@ Fallback: se la chain non viene trovata o il bottone non c'è (icona in overflow
 - Sezione "🎵 Sound Pack" del menu: aggiungere come prima voce `🎲 Random (mix all packs)` con callback che imposta `pack="random"` in config; check selected se `pack=="random"`.
 - Dashboard read-only: quando `pack=="random"` mostrare `🎲 random` al posto del nome pack reale.
 
-### Modifica `src/voice_bridge/sounds.py`
+### Modifica `scripts/notify-tts.py` (random pack resolver)
 
-- Validare `pack=="random"` come valore valido per la chiave config `pack`.
-- In `play_event(event_name)`:
-  - se `current_pack == "random"`:
-    1. enumera lista pack installati (cache con TTL 30 s)
-    2. esclude `"random"` stesso
-    3. se lista vuota → fallback a `"default"` + warning una volta sola
-    4. estrae `random.choice(...)` per quell'evento e suona
-  - altrimenti → comportamento attuale invariato.
+I sound pack reali (MP3) vivono nell'hook handler Claude Code, non nel bridge. Config storage: `~/.claude/cache/tts/tts_config.json` chiave `sound_pack`.
+
+- Estendere `get_sound_pack()`:
+  - se `tts_config["sound_pack"] == "random"`:
+    1. enumera directory pack installati in `~/.claude/cache/tts/sounds/`
+    2. esclude entries non-directory e nomi che iniziano per `_`
+    3. se lista vuota → fallback `"r2d2"` + log warning una volta sola
+    4. ritorna `random.choice(...)` (nuova scelta ad ogni invocazione del hook → ogni evento usa pack diverso)
+  - altrimenti → comportamento attuale invariato (ritorna stringa fissa).
+
+Nessuna cache: ogni invocazione del hook è un processo separato (Claude Code spawna `python notify-tts.py` per ogni evento), quindi la "random per evento" è automatica.
 
 ### Modifica `src/voice_bridge/bridge.py`
 
