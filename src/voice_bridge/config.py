@@ -50,3 +50,10 @@ class VoiceBridgeConfig:
     sound_stop_duration: int = 150
     sound_output_freq: int = 1000
     sound_output_duration: int = 100
+
+    # Gesture triggers (mouse on tray sphere + Caps Lock long-press)
+    gesture_enabled: bool = True
+    gesture_mouse_long_press_ms: int = 480
+    gesture_caps_long_press_ms: int = 660
+    gesture_double_click_ms: int = 350
+    gesture_debounce_ms: int = 200
