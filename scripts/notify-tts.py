@@ -71,40 +71,13 @@ def get_volume() -> int:
     return load_config().get("volume", 200)
 
 
-_RANDOM_FALLBACK_LOGGED = False
-
-
 def get_sound_pack() -> str:
-    """Return the configured sound pack name.
+    """Return the configured sound pack name as stored in config.
 
-    If config value is "random", picks a random installed pack from
-    SOUNDS_DIR (excluding non-directory entries and names starting
-    with "_"). Falls back to "r2d2" if no packs are installed.
-
-    Each call returns a fresh random pick — since notify-tts.py runs
-    as a fresh subprocess per Claude Code event, this naturally
-    rotates the pack per event.
+    May return the literal "random" — callers that want a real pack
+    must resolve that themselves (see play_chime cross-pack logic).
     """
-    global _RANDOM_FALLBACK_LOGGED
-    configured = load_config().get("sound_pack", "r2d2")
-    if configured != "random":
-        return configured
-
-    if not SOUNDS_DIR.is_dir():
-        return "r2d2"
-
-    candidates = [
-        p.name for p in SOUNDS_DIR.iterdir()
-        if p.is_dir() and not p.name.startswith("_")
-    ]
-    if not candidates:
-        if not _RANDOM_FALLBACK_LOGGED:
-            print("[notify-tts] random pack: no packs installed, "
-                  "falling back to 'r2d2'", file=sys.stderr)
-            _RANDOM_FALLBACK_LOGGED = True
-        return "r2d2"
-
-    return random.choice(candidates)
+    return load_config().get("sound_pack", "r2d2")
 
 
 def load_pack_manifest(pack_name: str) -> dict | None:
@@ -216,8 +189,46 @@ def smart_select_chime(pool: list[str], chime_key: str, manifest: dict,
     return chosen
 
 
+def _pick_cross_pack_chime(chime_key: str) -> Path | None:
+    """Pick a single chime sample uniformly across all installed packs.
+
+    Used when sound_pack is set to "random". Aggregates the chime_key
+    pool across every pack that has a manifest, then picks one sample
+    file at random. Returns None if no candidates were found anywhere.
+    """
+    if not SOUNDS_DIR.is_dir():
+        return None
+    all_candidates: list[Path] = []
+    for pack_dir in SOUNDS_DIR.iterdir():
+        if not pack_dir.is_dir() or pack_dir.name.startswith("_"):
+            continue
+        manifest = load_pack_manifest(pack_dir.name)
+        if not manifest:
+            continue
+        chime_map = manifest.get("chimes", {})
+        pool = chime_map.get(chime_key, chime_map.get("default", []))
+        for sound in pool:
+            fpath = pack_dir / sound
+            if fpath.is_file():
+                all_candidates.append(fpath)
+    if not all_candidates:
+        return None
+    return random.choice(all_candidates)
+
+
 def play_chime(chime_key: str, progress: float = 0.0) -> None:
     pack_name = get_sound_pack()
+
+    # "random" means: pick one chime uniformly across every installed
+    # pack, not "pick one pack and use it for the whole event".
+    if pack_name == "random":
+        chosen_path = _pick_cross_pack_chime(chime_key)
+        if chosen_path is not None:
+            play_mp3_sync(str(chosen_path))
+            return
+        # No candidates anywhere — fall back to r2d2 as a last resort
+        pack_name = "r2d2"
+
     pack_dir = SOUNDS_DIR / pack_name
 
     manifest = load_pack_manifest(pack_name)
@@ -231,7 +242,7 @@ def play_chime(chime_key: str, progress: float = 0.0) -> None:
                 play_mp3_sync(str(filepath))
                 return
 
-    # Fallback: random sound from pack directory
+    # Fallback: random MP3 from the chosen pack directory
     if pack_dir.is_dir():
         sounds = [f for f in pack_dir.glob("*.mp3") if not f.name.startswith("_")]
         if sounds:
