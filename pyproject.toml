@@ -36,6 +36,9 @@ pywin32 = {version = "^306", markers = "sys_platform == 'win32'"}
 # TTS (for notify-tts.py hook)
 edge-tts = "^6.1.0"
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+
 [[tool.poetry.source]]
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cu128"
