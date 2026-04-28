@@ -23,6 +23,7 @@ from .transcriber import Transcriber
 from .output_handler import OutputHandler
 from .hotkey_listener import HotkeyListener
 from .tray_icon import TrayIcon
+from .gesture_listener import GestureListener
 
 from pathlib import Path as _Path
 _log_path = _Path(__file__).resolve().parent.parent.parent / "voicebridge.log"
@@ -52,6 +53,8 @@ class VoiceBridge:
         self._state = BridgeState.IDLE
         self._running = False
         self._lock = threading.Lock()
+        self._toggle_lock = threading.Lock()
+        self._last_toggle_ts = 0.0
 
         # Read mic device from shared config
         self._mic_device_id = self._read_mic_device()
@@ -87,6 +90,15 @@ class VoiceBridge:
             transcriber=self._transcriber,
             recorder=self._recorder,
         )
+
+        self._gesture: GestureListener | None = None
+        if self.config.gesture_enabled:
+            self._gesture = GestureListener(
+                on_toggle_rec=self._gesture_toggle_recording,
+                mouse_long_press_ms=self.config.gesture_mouse_long_press_ms,
+                caps_long_press_ms=self.config.gesture_caps_long_press_ms,
+                double_click_ms=self.config.gesture_double_click_ms,
+            )
 
     @property
     def state(self) -> BridgeState:
@@ -150,6 +162,28 @@ class VoiceBridge:
 
         # Transcribe in background thread to not block hotkey listener
         threading.Thread(target=self._transcribe_and_output, args=(audio,), daemon=True).start()
+
+    def _gesture_toggle_recording(self) -> None:
+        """Toggle REC from gesture trigger (mouse long-press, double-click,
+        or Caps Lock long-press). Same effect as a hotkey toggle press.
+
+        Debounced + locked to prevent double-fires when multiple sources
+        (e.g. hotkey + gesture) trigger nearly simultaneously.
+        """
+        with self._toggle_lock:
+            now = time.monotonic()
+            debounce_s = self.config.gesture_debounce_ms / 1000
+            if now - self._last_toggle_ts < debounce_s:
+                logger.debug("Gesture toggle debounced")
+                return
+            self._last_toggle_ts = now
+
+        if self._state == BridgeState.IDLE:
+            self._on_hotkey_press()
+        elif self._state == BridgeState.RECORDING:
+            self._on_hotkey_release()
+        else:
+            logger.debug(f"Gesture toggle ignored (state={self._state.value})")
 
     def _transcribe_and_output(self, audio) -> None:
         """Transcribe audio and deliver output."""
@@ -245,6 +279,11 @@ class VoiceBridge:
 
         # Start hotkey listener
         self._hotkey.start()
+
+        # Start gesture listener (mouse on tray + Caps Lock long-press)
+        if self._gesture:
+            self._gesture.start()
+
         self._set_state(BridgeState.IDLE)
 
         # Rebuild menu now that engine is loaded (fixes "Not Loaded" status)
@@ -298,6 +337,8 @@ class VoiceBridge:
         self._running = False
         logger.info("Shutting down voice bridge...")
         self._hotkey.stop()
+        if self._gesture:
+            self._gesture.stop()
         self._recorder.cleanup()
         self._transcriber.cleanup()
         self._tray.stop()
