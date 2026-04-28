@@ -186,6 +186,11 @@ class GestureListener:
         self._caps_timer: threading.Timer | None = None
         self._kbd_controller = keyboard.Controller()
         self._tray_warning_logged = False
+        # Counter to filter out our own synthetic Caps Lock events
+        # emitted by _compensate_caps via Controller().tap(). The tap
+        # generates one press + one release that the global listener
+        # would otherwise re-process and trigger a second toggle.
+        self._ignore_caps_events = 0
 
     # ─── public lifecycle ───
 
@@ -233,9 +238,15 @@ class GestureListener:
 
     def _compensate_caps(self) -> None:
         try:
+            # Set the ignore counter BEFORE tapping so the synthetic
+            # press + release that we are about to emit are skipped
+            # by the global listener (would otherwise re-arm timer
+            # and could trigger a phantom second toggle).
+            self._ignore_caps_events = 2
             self._kbd_controller.tap(keyboard.Key.caps_lock)
-            logger.debug("Caps Lock state compensated")
+            logger.info("Caps Lock state compensated")
         except Exception as e:
+            self._ignore_caps_events = 0
             logger.warning(f"Caps Lock compensation failed: {e}")
 
     # ─── mouse callback ───
@@ -244,9 +255,11 @@ class GestureListener:
         if button != mouse.Button.left:
             return
         if pressed:
-            if not _win32_tray.is_inside_tray_icon(x, y):
-                if not self._tray_warning_logged and \
-                        _win32_tray._get_cached_rect(_win32_tray.TOOLTIP_PREFIX) is None:
+            inside = _win32_tray.is_inside_tray_icon(x, y)
+            rect = _win32_tray._get_cached_rect(_win32_tray.TOOLTIP_PREFIX)
+            logger.debug(f"MOUSE DOWN x={x} y={y} inside_tray={inside} rect={rect}")
+            if not inside:
+                if not self._tray_warning_logged and rect is None:
                     logger.warning(
                         "Tray icon not found in notification area — "
                         "mouse long-press / double-click disabled. "
@@ -256,18 +269,23 @@ class GestureListener:
                 return
             now = time.monotonic()
             self._mouse_state.on_press(now)
-            # Arm long-press timer
-            if self._mouse_timer:
-                self._mouse_timer.cancel()
+            # Arm long-press timer (ignore concurrent press if timer already armed)
+            if self._mouse_timer is not None:
+                logger.debug("Mouse press while timer already armed — ignored")
+                return
             delay_s = self._mouse_state._long_ms / 1000
             self._mouse_timer = threading.Timer(
                 delay_s,
-                lambda: self._mouse_state.on_timer_fire(time.monotonic()),
+                lambda: (
+                    logger.debug("Mouse long-press timer FIRED"),
+                    self._mouse_state.on_timer_fire(time.monotonic()),
+                ),
             )
             self._mouse_timer.daemon = True
             self._mouse_timer.start()
         else:
             now = time.monotonic()
+            logger.debug(f"MOUSE UP x={x} y={y}")
             self._mouse_state.on_release(now)
             if self._mouse_timer:
                 self._mouse_timer.cancel()
@@ -278,15 +296,27 @@ class GestureListener:
     def _on_kbd_press(self, key) -> None:
         if key != keyboard.Key.caps_lock:
             return
+        # Filter synthetic events emitted by our own _compensate_caps
+        if self._ignore_caps_events > 0:
+            self._ignore_caps_events -= 1
+            logger.debug(f"Caps press ignored (synthetic) — remaining={self._ignore_caps_events}")
+            return
+        # Ignore re-presses while timer is already armed (autorepeat-ish guard)
+        if self._caps_timer is not None:
+            logger.debug("Caps press while timer already armed — ignored")
+            return
         now = time.monotonic()
-        self._caps_state.on_press(now, caps_state_before=_get_caps_state())
-        if self._caps_timer:
-            self._caps_timer.cancel()
+        caps_before = _get_caps_state()
+        logger.info(f"CAPS DOWN — armed timer (caps_before={caps_before})")
+        self._caps_state.on_press(now, caps_state_before=caps_before)
         delay_s = self._caps_state._long_ms / 1000
         self._caps_timer = threading.Timer(
             delay_s,
-            lambda: self._caps_state.on_timer_fire(
-                time.monotonic(), caps_state_now=_get_caps_state()
+            lambda: (
+                logger.info("Caps long-press timer FIRED"),
+                self._caps_state.on_timer_fire(
+                    time.monotonic(), caps_state_now=_get_caps_state()
+                ),
             ),
         )
         self._caps_timer.daemon = True
@@ -295,7 +325,12 @@ class GestureListener:
     def _on_kbd_release(self, key) -> None:
         if key != keyboard.Key.caps_lock:
             return
+        if self._ignore_caps_events > 0:
+            self._ignore_caps_events -= 1
+            logger.debug(f"Caps release ignored (synthetic) — remaining={self._ignore_caps_events}")
+            return
         now = time.monotonic()
+        logger.info("CAPS UP — cancel timer")
         self._caps_state.on_release(now)
         if self._caps_timer:
             self._caps_timer.cancel()
