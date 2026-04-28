@@ -125,6 +125,73 @@ class AudioRecorder:
             self._driver = None
         logger.info(f"Microphone device set to: {device_id}")
 
+    def health_check(self, test_duration: float = 0.5) -> dict:
+        """Record briefly and verify the device produces plausible data.
+
+        Returns dict with keys:
+            ok: bool — device is healthy
+            device_id: int|None
+            wall_sec: float — actual test duration
+            audio_sec: float — audio duration from samples
+            ratio: float — audio_sec / wall_sec (healthy ≈ 1.0)
+            error: str|None — error message if not ok
+        """
+        self._ensure_driver()
+        chunks: list[bytes] = []
+        lock = threading.Lock()
+
+        def on_audio(data: bytes) -> None:
+            with lock:
+                chunks.append(data)
+
+        result = {
+            "ok": False, "device_id": self._device_id,
+            "wall_sec": 0.0, "audio_sec": 0.0, "ratio": 0.0, "error": None,
+        }
+
+        try:
+            self._driver.start(callback=on_audio)
+            t0 = time.monotonic()
+            time.sleep(test_duration)
+            wall = time.monotonic() - t0
+            self._driver.stop()
+
+            with lock:
+                raw = b"".join(chunks)
+
+            n_samples = len(raw) // 2  # int16
+            audio_sec = n_samples / self._sample_rate if self._sample_rate else 0
+            ratio = audio_sec / wall if wall > 0 else 0
+
+            result["wall_sec"] = round(wall, 3)
+            result["audio_sec"] = round(audio_sec, 3)
+            result["ratio"] = round(ratio, 2)
+
+            if n_samples == 0:
+                result["error"] = "No audio data received from device"
+            elif ratio > 3.0:
+                result["error"] = (
+                    f"Device flooding: {audio_sec:.1f}s audio from {wall:.1f}s "
+                    f"(ratio {ratio:.1f}x) — device may be virtual/loopback"
+                )
+            elif ratio < 0.3:
+                result["error"] = (
+                    f"Device underflow: {audio_sec:.1f}s audio from {wall:.1f}s "
+                    f"(ratio {ratio:.1f}x) — device may be disconnected"
+                )
+            else:
+                result["ok"] = True
+
+        except Exception as e:
+            result["error"] = str(e)
+            # Make sure driver is stopped
+            try:
+                self._driver.stop()
+            except Exception:
+                pass
+
+        return result
+
     def list_devices(self) -> list:
         """List available input devices via PortAudio."""
         self._ensure_driver()
