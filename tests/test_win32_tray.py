@@ -8,6 +8,7 @@ import time
 from src.voice_bridge import _win32_tray
 
 
+
 def test_is_inside_tray_icon_returns_false_when_no_icon(monkeypatch):
     """When the tooltip target is missing, return False instead of raising."""
     # Force the rect lookup to return None (icon not found)
@@ -42,3 +43,24 @@ def test_is_inside_tray_icon_returns_true_when_inside(monkeypatch):
     assert _win32_tray.is_inside_tray_icon(110, 210) is True
     assert _win32_tray.is_inside_tray_icon(99, 210) is False
     assert _win32_tray.is_inside_tray_icon(110, 199) is False
+
+
+def test_is_inside_tray_icon_refetches_after_ttl_expiry(monkeypatch):
+    """When the cached entry is expired, lookup should run again."""
+    calls = {"count": 0}
+
+    def fake_find(tooltip):
+        calls["count"] += 1
+        return (100, 200, 120, 220)
+
+    monkeypatch.setattr(_win32_tray, "_find_tray_icon_rect", fake_find)
+
+    # Pre-seed with an already-expired entry
+    _win32_tray._RECT_CACHE.clear()
+    _win32_tray._RECT_CACHE[_win32_tray.TOOLTIP_PREFIX] = (
+        (100, 200, 120, 220),
+        time.monotonic() - 1.0,  # expired 1s ago
+    )
+
+    _win32_tray.is_inside_tray_icon(110, 210)
+    assert calls["count"] == 1, "Expired cache should trigger refetch"
