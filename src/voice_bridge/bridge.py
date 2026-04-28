@@ -17,17 +17,22 @@ import time
 from enum import Enum
 
 from .config import VoiceBridgeConfig
-from .sounds import beep_start, beep_stop, beep_output
+from .sounds import beep_start, beep_stop, beep_output, beep_ready
 from .audio_recorder import AudioRecorder
 from .transcriber import Transcriber
 from .output_handler import OutputHandler
 from .hotkey_listener import HotkeyListener
 from .tray_icon import TrayIcon
 
+from pathlib import Path as _Path
+_log_path = _Path(__file__).resolve().parent.parent.parent / "voicebridge.log"
+_fh = logging.FileHandler(_log_path, mode="w", encoding="utf-8")
+_fh.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S"))
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     datefmt="%H:%M:%S",
+    handlers=[logging.StreamHandler(), _fh],
 )
 logger = logging.getLogger("voice_bridge")
 
@@ -105,6 +110,31 @@ class VoiceBridge:
 
         self._recorder.start()
 
+        # Start recording watchdog
+        threading.Thread(
+            target=self._recording_watchdog,
+            daemon=True,
+        ).start()
+
+    def _recording_watchdog(self) -> None:
+        """Auto-stop recording after timeout. Prevents stuck recording sessions."""
+        timeout = self.config.recording_timeout
+        poll_interval = 5.0
+        elapsed = 0.0
+        while elapsed < timeout:
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+            with self._lock:
+                if self._state != BridgeState.RECORDING:
+                    return  # recording ended normally
+        # Still recording after timeout — force stop
+        with self._lock:
+            if self._state != BridgeState.RECORDING:
+                return
+        logger.warning(f"Recording timeout ({timeout}s) — auto-stopping")
+        beep_stop(self.config.sound_stop_freq, self.config.sound_stop_duration)
+        self._on_hotkey_release()
+
     def _on_hotkey_release(self) -> None:
         """Called when push-to-talk hotkey is released."""
         with self._lock:
@@ -173,6 +203,34 @@ class VoiceBridge:
         logger.info(f"  Output: {self.config.output_mode}")
         logger.info("=" * 50)
 
+        # Mic health check — detect flooding/broken devices before user tries to record
+        logger.info(f"Mic health check (device {self._mic_device_id})...")
+        hc = self._recorder.health_check(test_duration=0.5)
+        if hc["ok"]:
+            logger.info(
+                f"Mic OK: {hc['audio_sec']:.2f}s audio from {hc['wall_sec']:.2f}s "
+                f"(ratio {hc['ratio']:.2f}x)"
+            )
+        else:
+            logger.warning(f"Mic FAILED: {hc['error']}")
+            # Try default device as fallback
+            if self._mic_device_id is not None:
+                logger.info("Trying default system microphone as fallback...")
+                self._recorder.set_device(None)
+                hc2 = self._recorder.health_check(test_duration=0.5)
+                if hc2["ok"]:
+                    logger.info(
+                        f"Default mic OK: {hc2['audio_sec']:.2f}s audio "
+                        f"(ratio {hc2['ratio']:.2f}x) — using default device"
+                    )
+                else:
+                    logger.error(
+                        f"Default mic also failed: {hc2['error']}. "
+                        "Recording may not work — check audio devices."
+                    )
+                    # Restore original device so user can fix via tray menu
+                    self._recorder.set_device(self._mic_device_id)
+
         # Start tray first so user sees loading animation
         self._tray.start()
         self._tray.set_state("loading")
@@ -194,6 +252,7 @@ class VoiceBridge:
 
         logger.info("Voice Bridge ready! Hold hotkey to dictate.")
         logger.info("Press Ctrl+C to exit.")
+        beep_ready()
 
     @staticmethod
     def _read_mic_device() -> int | None:
@@ -242,6 +301,13 @@ class VoiceBridge:
         self._recorder.cleanup()
         self._transcriber.cleanup()
         self._tray.stop()
+        # Remove PID lockfile
+        from pathlib import Path
+        pid_file = Path.home() / ".claude" / "cache" / "tts" / "voicebridge.pid"
+        try:
+            pid_file.unlink(missing_ok=True)
+        except OSError:
+            pass
         logger.info("Voice bridge stopped.")
 
     def run_forever(self) -> None:
@@ -256,7 +322,83 @@ class VoiceBridge:
             self.stop()
 
 
+def _kill_orphan_instances() -> None:
+    """Find and kill stale VoiceBridge processes from previous runs.
+
+    Uses a PID lockfile at ~/.claude/cache/tts/voicebridge.pid.
+    Also scans for any python process running voice_bridge module.
+    """
+    import os
+    import subprocess
+    from pathlib import Path
+
+    pid_file = Path.home() / ".claude" / "cache" / "tts" / "voicebridge.pid"
+    my_pid = os.getpid()
+    # Also get parent PID to avoid killing the shell that launched us
+    my_ppid = os.getppid()
+    safe_pids = {my_pid, my_ppid}
+
+    logger.debug(f"Orphan scan: my PID={my_pid}, parent PID={my_ppid}")
+
+    # 1. Check lockfile from previous run
+    if pid_file.is_file():
+        try:
+            old_pid = int(pid_file.read_text().strip())
+            if old_pid not in safe_pids and old_pid > 0:
+                _try_kill_pid(old_pid, "lockfile")
+        except (ValueError, OSError):
+            pass
+
+    # 2. Scan for any python processes running voice_bridge
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" "
+             "| Where-Object { $_.CommandLine -like '*voice_bridge*' } "
+             "| Select-Object -ExpandProperty ProcessId"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.strip().splitlines():
+            try:
+                pid = int(line.strip())
+                if pid in safe_pids:
+                    logger.debug(f"Skipping own process PID {pid}")
+                    continue
+                _try_kill_pid(pid, "process scan")
+            except ValueError:
+                continue
+    except Exception as e:
+        logger.debug(f"Orphan scan via powershell failed: {e}")
+
+    # 3. Write our PID
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text(str(my_pid))
+    logger.info(f"PID lockfile written: {my_pid}")
+
+
+def _try_kill_pid(pid: int, source: str) -> None:
+    """Attempt to terminate a process by PID using taskkill (Windows).
+
+    No pre-check: os.kill(pid, 0) on Windows maps to TerminateProcess and
+    is destructive (can crash with WinError 87 / SystemError). taskkill
+    /F is idempotent — exit code 128 if PID not found, no-op otherwise.
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["taskkill", "/F", "/PID", str(pid)],
+            capture_output=True, timeout=5,
+        )
+        if result.returncode == 0:
+            logger.warning(f"Killed orphan VoiceBridge (PID {pid}, found via {source})")
+            time.sleep(0.3)
+        # else: PID not found or access denied — silent no-op
+    except Exception as e:
+        logger.warning(f"Failed to kill PID {pid}: {e}")
+
+
 def main():
+    _kill_orphan_instances()
     config = VoiceBridgeConfig()
     bridge = VoiceBridge(config)
 
