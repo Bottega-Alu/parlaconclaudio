@@ -71,8 +71,40 @@ def get_volume() -> int:
     return load_config().get("volume", 200)
 
 
+_RANDOM_FALLBACK_LOGGED = False
+
+
 def get_sound_pack() -> str:
-    return load_config().get("sound_pack", "r2d2")
+    """Return the configured sound pack name.
+
+    If config value is "random", picks a random installed pack from
+    SOUNDS_DIR (excluding non-directory entries and names starting
+    with "_"). Falls back to "r2d2" if no packs are installed.
+
+    Each call returns a fresh random pick — since notify-tts.py runs
+    as a fresh subprocess per Claude Code event, this naturally
+    rotates the pack per event.
+    """
+    global _RANDOM_FALLBACK_LOGGED
+    configured = load_config().get("sound_pack", "r2d2")
+    if configured != "random":
+        return configured
+
+    if not SOUNDS_DIR.is_dir():
+        return "r2d2"
+
+    candidates = [
+        p.name for p in SOUNDS_DIR.iterdir()
+        if p.is_dir() and not p.name.startswith("_")
+    ]
+    if not candidates:
+        if not _RANDOM_FALLBACK_LOGGED:
+            print("[notify-tts] random pack: no packs installed, "
+                  "falling back to 'r2d2'", file=sys.stderr)
+            _RANDOM_FALLBACK_LOGGED = True
+        return "r2d2"
+
+    return random.choice(candidates)
 
 
 def load_pack_manifest(pack_name: str) -> dict | None:
