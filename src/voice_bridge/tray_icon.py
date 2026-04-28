@@ -569,8 +569,17 @@ class TrayIcon:
             ))
 
         # --- Preview Sounds submenu ---
+        # When pack=random, preview shows mp3s from a deterministic pack
+        # so the menu doesn't reshuffle every rebuild.
+        preview_pack = current_pack
+        if preview_pack == "random" and SOUNDS_DIR.is_dir():
+            real_packs = sorted(
+                p.name for p in SOUNDS_DIR.iterdir()
+                if p.is_dir() and not p.name.startswith("_")
+            )
+            preview_pack = real_packs[0] if real_packs else current_pack
         preview_items = []
-        pack_dir = SOUNDS_DIR / current_pack
+        pack_dir = SOUNDS_DIR / preview_pack
         if pack_dir.is_dir():
             for mp3 in sorted(pack_dir.glob("*.mp3"))[:15]:
                 preview_items.append(pystray.MenuItem(
