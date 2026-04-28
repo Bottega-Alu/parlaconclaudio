@@ -137,3 +137,17 @@ def test_caps_release_after_long_press_is_noop():
     state.on_release(t=1.000)
     # No additional fires
     assert fired == ["toggle"]
+
+
+def test_gesture_listener_imports_and_constructs():
+    """Smoke test: GestureListener can be constructed without starting hooks."""
+    from src.voice_bridge.gesture_listener import GestureListener
+    fired = []
+    gl = GestureListener(
+        on_toggle_rec=lambda: fired.append("t"),
+        mouse_long_press_ms=100,
+        caps_long_press_ms=200,
+        double_click_ms=50,
+    )
+    assert gl is not None
+    # Don't call start() — would install global OS hooks during test run.
