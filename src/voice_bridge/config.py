@@ -40,6 +40,9 @@ class VoiceBridgeConfig:
     stt_mode: str = "auto"            # "auto" | "local" | "cloud_groq" | "cloud_deepgram"
     stt_auto_fallback: bool = True    # in mode "local", fallback to cloud if GPU unavailable
 
+    # Recording timeout: auto-stop if recording exceeds this (seconds)
+    recording_timeout: int = 180  # 3 minutes
+
     # Sound frequencies (Hz) and durations (ms)
     sound_start_freq: int = 800
     sound_start_duration: int = 150
