@@ -330,6 +330,11 @@ def get_cached_path(text: str, profile: dict) -> Path:
     return DYNAMIC_CACHE_DIR / f"dyn_{text_hash}.mp3"
 
 
+# Minimum size for a valid TTS MP3 — anything smaller is treated as a
+# silent failure (edge-tts can save zero-byte files on transient errors).
+_MIN_TTS_MP3_BYTES = 512
+
+
 async def generate_tts(text: str, profile: dict, output_path: Path) -> bool:
     try:
         import edge_tts
@@ -340,17 +345,29 @@ async def generate_tts(text: str, profile: dict, output_path: Path) -> bool:
             pitch=profile.get("pitch", "+0Hz"),
         )
         await communicate.save(str(output_path))
+        # Edge-tts may exit cleanly while writing 0 bytes on rate limits or
+        # transient network errors. Treat that as failure and clean up so
+        # the next call retries instead of caching a silent file forever.
+        if output_path.is_file() and output_path.stat().st_size < _MIN_TTS_MP3_BYTES:
+            output_path.unlink(missing_ok=True)
+            return False
         return True
     except Exception:
+        # If the file was partially written, drop it so we don't cache garbage.
+        if output_path.is_file() and output_path.stat().st_size < _MIN_TTS_MP3_BYTES:
+            output_path.unlink(missing_ok=True)
         return False
 
 
 def resolve_audio(text: str, profile: dict) -> str | None:
     cached = get_cached_path(text, profile)
-    if cached.is_file():
+    # Treat empty/tiny cached files as a miss — they cause silent playback.
+    if cached.is_file() and cached.stat().st_size >= _MIN_TTS_MP3_BYTES:
         return str(cached)
+    if cached.is_file():
+        cached.unlink(missing_ok=True)  # remove the bad cached file
     ok = asyncio.run(generate_tts(text, profile, cached))
-    if ok and cached.is_file():
+    if ok and cached.is_file() and cached.stat().st_size >= _MIN_TTS_MP3_BYTES:
         return str(cached)
     return None
 
