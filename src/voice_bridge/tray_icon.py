@@ -524,9 +524,16 @@ class TrayIcon:
 
         # --- Sound Pack submenu ---
         pack_items = []
+        # Random meta-entry first
+        random_checked = (current_pack == "random")
+        random_sel = E_SELECTED if random_checked else E_UNSELECTED
+        pack_items.append(pystray.MenuItem(
+            f"{random_sel} 🎲 Random (mix all packs)",
+            self._make_set_sound_pack("random"),
+        ))
         if SOUNDS_DIR.is_dir():
             for pack_dir in sorted(SOUNDS_DIR.iterdir()):
-                if pack_dir.is_dir():
+                if pack_dir.is_dir() and not pack_dir.name.startswith("_"):
                     pack_name = pack_dir.name
                     count = len(list(pack_dir.glob("*.mp3")))
                     checked = (pack_name == current_pack)
@@ -628,19 +635,27 @@ class TrayIcon:
 
         # === Mode emoji for status ===
         mode_icon = MODE_EMOJI.get(current_mode, "🔔")
-        pack_icon = PACK_EMOJI.get(current_pack, "📦")
+        if current_pack == "random":
+            pack_icon = "🎲"
+            pack_display = "random"
+        else:
+            pack_icon = PACK_EMOJI.get(current_pack, "📦")
+            pack_display = current_pack
 
         return pystray.Menu(
             pystray.MenuItem("✨ parlaconclaudio v0.9.9.0426 ✨", None, enabled=False),
             pystray.Menu.SEPARATOR,
             # --- Status dashboard (always visible, read-only) ---
             pystray.MenuItem(f"  🧠 {engine_display}  │  {lang_display}  │  🎤 {mic_display}", None, enabled=False),
-            pystray.MenuItem(f"  {mode_icon} {current_mode}  │  🔊 {current_vol}%  │  {pack_icon} {current_pack}", None, enabled=False),
+            pystray.MenuItem(f"  {mode_icon} {current_mode}  │  🔊 {current_vol}%  │  {pack_icon} {pack_display}", None, enabled=False),
             pystray.Menu.SEPARATOR,
             # --- Quick access ---
             pystray.MenuItem(f"🔔 Mode [{current_mode}]", pystray.Menu(*mode_items)),
             pystray.MenuItem(f"🔊 Volume [{current_vol}%]", pystray.Menu(*vol_items)),
-            pystray.MenuItem(f"🎵 Sound Pack [{current_pack}]", pystray.Menu(*pack_items)),
+            pystray.MenuItem(
+                f"🎵 Sound Pack [{'🎲 random' if current_pack == 'random' else current_pack}]",
+                pystray.Menu(*pack_items),
+            ),
             pystray.MenuItem(f"🎧 Preview [{current_pack}]", pystray.Menu(*preview_items) if preview_items else None),
             pystray.Menu.SEPARATOR,
             # --- Settings & Info ---
