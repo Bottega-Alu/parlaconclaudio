@@ -66,6 +66,7 @@ class FileResult:
     italian: str = ""
     portuguese: str = ""
     saved_files: list[Path] = field(default_factory=list)
+    dub_files: list[Path] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
 
@@ -152,6 +153,63 @@ _LANG_NAMES = {
     "en": "English",
 }
 
+# Default voices for the TTS dub round-trip (one per target language).
+# Edge-TTS supports many alternatives; these are picked from the same
+# catalogue used in tray_icon.py.
+DUB_VOICES = {
+    "it": "it-IT-IsabellaNeural",
+    "pt": "pt-BR-ThalitaMultilingualNeural",
+    "en": "en-US-AvaMultilingualNeural",
+}
+
+
+def _is_dub_enabled() -> bool:
+    """Read transcribe_tts_dub flag from tts_config.json (default True)."""
+    try:
+        if TTS_CONFIG.is_file():
+            cfg = json.loads(TTS_CONFIG.read_text(encoding="utf-8"))
+            val = cfg.get("transcribe_tts_dub", True)
+            return bool(val)
+    except Exception:
+        pass
+    return True
+
+
+def _synthesize_dub(text: str, voice: str, output_path: Path) -> bool:
+    """Synthesize one TTS dub file via edge-tts. Returns True on success.
+
+    Empty text is treated as success-with-nothing-to-do (no file written).
+    Output files smaller than 512 bytes are removed (silent failures).
+    """
+    if not text.strip():
+        return True
+    try:
+        import asyncio
+        import edge_tts
+    except Exception as e:
+        logger.warning(f"edge-tts not available: {e}")
+        return False
+    try:
+        async def _run():
+            comm = edge_tts.Communicate(text, voice, rate="+0%", pitch="+0Hz")
+            await comm.save(str(output_path))
+        asyncio.run(_run())
+    except Exception as e:
+        logger.warning(f"edge-tts synth failed for {output_path.name}: {e}")
+        if output_path.is_file() and output_path.stat().st_size < 512:
+            try:
+                output_path.unlink()
+            except Exception:
+                pass
+        return False
+    if not output_path.is_file() or output_path.stat().st_size < 512:
+        try:
+            output_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+    return True
+
 
 class AudioFileProcessor:
     """Drive the four-output pipeline for one or more audio files.
@@ -230,6 +288,12 @@ class AudioFileProcessor:
 
         # 4) Persist .txt files alongside the source
         result.saved_files = self._save_outputs(result)
+
+        # 5) TTS round-trip: synthesize spoken versions for each non-empty
+        # translation in a language different from the source.
+        if _is_dub_enabled():
+            result.dub_files = self._synthesize_dubs(result)
+
         return result
 
     def process_files(
@@ -247,6 +311,37 @@ class AudioFileProcessor:
                     pass
             batch.files.append(self.process_file(p))
         return batch
+
+    @staticmethod
+    def _synthesize_dubs(result: FileResult) -> list[Path]:
+        """Generate <stem>.<lang>.mp3 for IT/PT/EN translations.
+
+        Skips the language that matches the detected source language
+        (no point re-synthesizing the original), and any empty text.
+        """
+        base = result.source.with_suffix("")
+        produced: list[Path] = []
+        targets = (
+            ("it", result.italian),
+            ("pt", result.portuguese),
+            ("en", result.english),
+        )
+        for lang_code, text in targets:
+            if not text:
+                continue
+            if result.detected_language == lang_code:
+                # Source language already covered by the source audio.
+                continue
+            voice = DUB_VOICES.get(lang_code)
+            if not voice:
+                continue
+            out = Path(str(base) + f".{lang_code}.mp3")
+            ok = _synthesize_dub(text, voice, out)
+            if ok and out.is_file():
+                produced.append(out)
+            else:
+                result.errors.append(f"{lang_code} TTS dub failed")
+        return produced
 
     @staticmethod
     def _save_outputs(result: FileResult) -> list[Path]:
@@ -282,6 +377,8 @@ class AudioFileProcessor:
                 chunks.append(f"[IT]\n{fr.italian}")
             if fr.portuguese and fr.portuguese != fr.original:
                 chunks.append(f"[PT]\n{fr.portuguese}")
+            if fr.dub_files:
+                chunks.append("[DUB FILES]\n" + "\n".join(str(p) for p in fr.dub_files))
             if fr.errors:
                 chunks.append("[ERRORS]\n" + "\n".join(fr.errors))
             chunks.append("")

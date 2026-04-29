@@ -1133,9 +1133,10 @@ class TrayIcon:
 
         # 5) Restore tray title with one-liner summary
         saved_total = sum(len(f.saved_files) for f in batch.files)
+        dub_total = sum(len(f.dub_files) for f in batch.files)
         summary = (
             f"Trascrizione: {batch.ok_count}/{batch.total} file, "
-            f"{saved_total} .txt salvati"
+            f"{saved_total} .txt + {dub_total} .mp3 salvati"
         )
         logger.info(summary)
         if self._icon:
