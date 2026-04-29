@@ -29,6 +29,13 @@ SOUNDS_DIR = CACHE_DIR / "sounds"
 TTS_CONFIG = CACHE_DIR / "tts_config.json"
 TRACKER_FILE = CACHE_DIR / "subtask_tracker.json"
 CHIME_STATE_FILE = CACHE_DIR / "chime_state.json"
+NOTIFY_BURST_FILE = CACHE_DIR / "notify_burst.txt"
+
+# Burst suppression: when several hooks fire in quick succession only
+# the last invocation actually plays audio. Each invocation writes its
+# UUID, sleeps a short wait, and proceeds only if its UUID is still the
+# latest on disk.
+BURST_WAIT_MS = 300
 
 # Cache cleanup settings
 CACHE_TTL_DAYS = 7
@@ -847,6 +854,30 @@ def update_tracker(data: dict) -> tuple[int, int]:
 # MAIN
 # ══════════════════════════════════════════════════
 
+def burst_check_should_play() -> bool:
+    """Last-wins burst suppression.
+
+    Each invocation writes a fresh UUID to NOTIFY_BURST_FILE, sleeps a
+    short window, and only proceeds to play audio if its UUID is still
+    the latest one on disk. When several hooks fire in quick succession
+    (parallel subtasks finishing together) only the last one survives —
+    the earlier ones see the file overwritten and exit silently.
+    """
+    import uuid
+    my_id = uuid.uuid4().hex
+    try:
+        NOTIFY_BURST_FILE.parent.mkdir(parents=True, exist_ok=True)
+        NOTIFY_BURST_FILE.write_text(my_id, encoding="utf-8")
+    except Exception:
+        return True  # if we can't write, just play
+    time.sleep(BURST_WAIT_MS / 1000)
+    try:
+        latest = NOTIFY_BURST_FILE.read_text(encoding="utf-8").strip()
+    except Exception:
+        return True
+    return latest == my_id
+
+
 def main() -> None:
     try:
         raw = sys.stdin.read()
@@ -854,6 +885,10 @@ def main() -> None:
             return
         data = json.loads(raw)
     except (json.JSONDecodeError, Exception):
+        return
+
+    # Last-wins burst suppression — skip if a newer hook overlapped us.
+    if not burst_check_should_play():
         return
 
     # Run cache cleanup (fast, non-blocking)
