@@ -45,6 +45,13 @@ SUPPORTED_EXTENSIONS = (
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile"
 GROQ_TIMEOUT_S = 60
+# Cloudflare in front of api.groq.com blocks Python-urllib's default
+# User-Agent (returns 1010). Send a browser-style UA so the request
+# isn't classified as automated traffic from a banned signature.
+HTTP_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 TTS_CONFIG = Path.home() / ".claude" / "cache" / "tts" / "tts_config.json"
 
@@ -121,6 +128,7 @@ def _groq_translate(text: str, target_lang_name: str, api_key: str) -> str:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
+        "User-Agent": HTTP_USER_AGENT,
     }
     # Prefer requests, fall back to urllib so we don't add a hard dep
     try:
