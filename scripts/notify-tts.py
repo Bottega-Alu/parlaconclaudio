@@ -588,9 +588,9 @@ def build_notif_message(sub_type: str | None, repo: str, detail: str) -> str:
 # EASTER EGG: FRISCO APPRECIATION
 # ══════════════════════════════════════════════════
 
-# ~7% chance per invocation. Quote is random, voice is random.
+# ~14% chance per invocation. Quote is random, voice is random.
 # Any quote can be spoken by any voice — polyglot chaos.
-EASTER_EGG_CHANCE = 0.07
+EASTER_EGG_CHANCE = 0.14
 
 # Each quote has a native language tag. 80% native voice, 20% polyglot chaos.
 # Best quotes are translated across all 7 languages.
