@@ -667,6 +667,9 @@ class TrayIcon:
             ),
             pystray.MenuItem(f"🎧 Preview [{current_pack}]", pystray.Menu(*preview_items) if preview_items else None),
             pystray.Menu.SEPARATOR,
+            # --- Audio file batch transcription ---
+            pystray.MenuItem("🎙️ Trascrivi audio file…", self._transcribe_files_clicked),
+            pystray.Menu.SEPARATOR,
             # --- Settings & Info ---
             pystray.MenuItem("⚙️ Settings & Info", settings_menu),
             pystray.Menu.SEPARATOR,
@@ -1054,6 +1057,94 @@ class TrayIcon:
             logger.info("VRAM purge triggered from menu")
         else:
             logger.warning("VRAM purge not available (no callback registered)")
+
+    def _transcribe_files_clicked(self, icon, item):
+        """Open a multi-select file dialog and run the audio file batch
+        processor in a background thread.
+        """
+        if not self._transcriber:
+            logger.warning("Transcribe-files: no transcriber available")
+            return
+        threading.Thread(target=self._transcribe_files_flow, daemon=True).start()
+
+    def _transcribe_files_flow(self) -> None:
+        """Background-thread flow: pick files, process, set clipboard,
+        update tray title with progress + final summary.
+        """
+        from .audio_file_processor import AudioFileProcessor, SUPPORTED_EXTENSIONS
+
+        # 1) Multi-select file dialog (Tk runs on its own root, off the
+        # main tray thread — must withdraw or it'll show a stub window)
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            patterns = " ".join(f"*{e}" for e in SUPPORTED_EXTENSIONS)
+            picked = filedialog.askopenfilenames(
+                title="Seleziona file audio da trascrivere",
+                filetypes=[
+                    ("Audio files", patterns),
+                    ("All files", "*.*"),
+                ],
+                parent=root,
+            )
+            root.destroy()
+        except Exception as e:
+            logger.error(f"File dialog failed: {e}")
+            return
+
+        if not picked:
+            logger.info("Transcribe-files: no files selected")
+            return
+
+        from pathlib import Path
+        paths = [Path(p) for p in picked]
+        logger.info(f"Transcribe-files: processing {len(paths)} file(s)")
+
+        # 2) Status while running
+        original_title = None
+        if self._icon:
+            original_title = self._icon.title
+
+        def on_progress(idx: int, total: int, p):
+            if self._icon:
+                self._icon.title = f"Trascrivendo {idx}/{total}: {p.name[:40]}"
+
+        # 3) Run the pipeline
+        processor = AudioFileProcessor(self._transcriber)
+        try:
+            batch = processor.process_files(paths, on_progress=on_progress)
+        except Exception as e:
+            logger.error(f"Transcribe batch failed: {e}")
+            if self._icon and original_title is not None:
+                self._icon.title = original_title
+            return
+
+        # 4) Clipboard with the aggregate report
+        clipboard_text = AudioFileProcessor.build_clipboard_payload(batch)
+        try:
+            import pyperclip
+            pyperclip.copy(clipboard_text)
+            logger.info("Transcribe-files: clipboard updated with aggregate report")
+        except Exception as e:
+            logger.warning(f"Failed to write clipboard: {e}")
+
+        # 5) Restore tray title with one-liner summary
+        saved_total = sum(len(f.saved_files) for f in batch.files)
+        summary = (
+            f"Trascrizione: {batch.ok_count}/{batch.total} file, "
+            f"{saved_total} .txt salvati"
+        )
+        logger.info(summary)
+        if self._icon:
+            if original_title is not None:
+                self._icon.title = original_title
+            try:
+                self._icon.notify(summary, "parlaconclaudio")
+            except Exception:
+                pass
 
     def _exit_clicked(self, icon, item):
         if self._on_exit:

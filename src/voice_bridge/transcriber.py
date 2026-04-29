@@ -262,6 +262,47 @@ class Transcriber:
             logger.error(f"Transcription failed [{self._engine.name}]: {e}")
             return ""
 
+    def transcribe_file(
+        self,
+        path: Path,
+        language: str | None = None,
+        task: str = "transcribe",
+    ) -> tuple[str, str]:
+        """Transcribe an audio file from disk.
+
+        Returns (text, detected_language). Works only with the local
+        Whisper engine (cloud engines don't get a path interface in
+        this codebase). Caller should fall back to numpy buffer if
+        the engine isn't local.
+
+        Args:
+            path: Path to audio file (.ogg, .mp3, .wav, .m4a, .opus, ...)
+            language: ISO code to force (e.g. "it") or None to auto-detect.
+            task: "transcribe" (output in source language) or "translate"
+                  (Whisper-native translation to English).
+        """
+        self._ensure_engine()
+        if not self._engine.is_local:
+            raise RuntimeError(
+                "transcribe_file requires the local Whisper engine; "
+                f"current active engine is '{self._engine.name}'"
+            )
+        result = self._engine.transcribe(
+            str(path),
+            language=language,
+            task=task,
+            beam_size=5,
+            vad_filter=True,
+            word_timestamps=False,
+        )
+        text = (result.text or "").strip()
+        detected = result.language or "unknown"
+        logger.info(
+            f"transcribe_file [{path.name}] task={task} "
+            f"lang={detected} ({len(text)} chars)"
+        )
+        return text, detected
+
     # ------------------------------------------------------------------
     # VRAM management
     # ------------------------------------------------------------------
