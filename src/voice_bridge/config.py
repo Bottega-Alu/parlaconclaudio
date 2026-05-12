@@ -30,11 +30,14 @@ class VoiceBridgeConfig:
     sample_rate: int = 16000
     channels: int = 1
     chunk_size: int = 1024
+    mic_device_id: int | None = None
 
     # Sound feedback
     sound_on_start: bool = True
     sound_on_stop: bool = True
     sound_on_output: bool = True
+    volume: int = 200
+    muted: bool = False
 
     # STT engine orchestration
     stt_mode: str = "auto"            # "auto" | "local" | "cloud_groq" | "cloud_deepgram"
