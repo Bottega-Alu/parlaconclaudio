@@ -48,8 +48,9 @@ class VoiceBridge:
         self._running = False
         self._lock = threading.Lock()
 
-        # Read mic device from shared config
-        self._mic_device_id = self._read_mic_device()
+        # Read initial config from shared tts_config.json
+        self._load_shared_config()
+        self._mic_device_id = self.config.mic_device_id
 
         # Components (lazy init for heavy ones like Whisper)
         self._recorder = AudioRecorder(
@@ -79,6 +80,8 @@ class VoiceBridge:
             on_purge_vram=self._purge_vram,
             on_stt_mode_changed=self._on_stt_mode_changed,
             on_mic_changed=self._on_mic_changed,
+            on_volume_changed=self._on_volume_changed,
+            on_muted_changed=self._on_muted_changed,
             transcriber=self._transcriber,
             recorder=self._recorder,
         )
@@ -100,7 +103,7 @@ class VoiceBridge:
                 return
             self._set_state(BridgeState.RECORDING)
 
-        if self.config.sound_on_start:
+        if self.config.sound_on_start and not self.config.muted and self.config.volume > 0:
             beep_start(self.config.sound_start_freq, self.config.sound_start_duration)
 
         self._recorder.start()
@@ -112,7 +115,7 @@ class VoiceBridge:
                 return
             self._set_state(BridgeState.TRANSCRIBING)
 
-        if self.config.sound_on_stop:
+        if self.config.sound_on_stop and not self.config.muted and self.config.volume > 0:
             beep_stop(self.config.sound_stop_freq, self.config.sound_stop_duration)
 
         # Stop recording and get audio
@@ -132,7 +135,7 @@ class VoiceBridge:
 
                 self._output.deliver(text)
 
-                if self.config.sound_on_output:
+                if self.config.sound_on_output and not self.config.muted and self.config.volume > 0:
                     beep_output(self.config.sound_output_freq, self.config.sound_output_duration)
             else:
                 logger.info("No speech detected")
@@ -195,19 +198,36 @@ class VoiceBridge:
         logger.info("Voice Bridge ready! Hold hotkey to dictate.")
         logger.info("Press Ctrl+C to exit.")
 
-    @staticmethod
-    def _read_mic_device() -> int | None:
-        """Read mic_device_id from tts_config.json."""
+    def _load_shared_config(self) -> None:
+        """Read settings from shared tts_config.json into self.config."""
         import json
         from pathlib import Path
         try:
             config_path = Path.home() / ".claude" / "cache" / "tts" / "tts_config.json"
             if config_path.is_file():
-                config = json.loads(config_path.read_text(encoding="utf-8"))
-                val = config.get("mic_device_id")
-                return int(val) if val is not None else None
-        except Exception:
-            pass
+                shared = json.loads(config_path.read_text(encoding="utf-8"))
+
+                # Microphone
+                mic_id = shared.get("mic_device_id")
+                self.config.mic_device_id = int(mic_id) if mic_id is not None else None
+
+                # Volume & Mute
+                self.config.volume = int(shared.get("volume", 200))
+                self.config.muted = bool(shared.get("muted", False))
+
+                # STT Language
+                self.config.whisper_language = shared.get("whisper_language")
+
+                # STT Mode
+                self.config.stt_mode = shared.get("stt_mode", "auto")
+
+                logger.info(f"Loaded shared config: volume={self.config.volume}, muted={self.config.muted}, language={self.config.whisper_language}")
+        except Exception as e:
+            logger.warning(f"Failed to load shared config: {e}")
+
+    @staticmethod
+    def _read_mic_device() -> int | None:
+        """DEPRECATED: Use _load_shared_config instead."""
         return None
 
     def _on_mic_changed(self, device_id: int | None) -> None:
@@ -217,6 +237,16 @@ class VoiceBridge:
             return
         self._recorder.set_device(device_id)
         logger.info(f"Microphone switched to device {device_id}")
+
+    def _on_volume_changed(self, level: int) -> None:
+        """Handle volume change from tray menu."""
+        self.config.volume = level
+        logger.info(f"Bridge volume updated to {level}%")
+
+    def _on_muted_changed(self, muted: bool) -> None:
+        """Handle mute toggle from tray menu."""
+        self.config.muted = muted
+        logger.info(f"Bridge mute updated to {muted}")
 
     def _on_stt_mode_changed(self, mode: str) -> None:
         """Handle STT mode switch from tray menu."""

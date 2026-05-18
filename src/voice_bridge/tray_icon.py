@@ -116,7 +116,7 @@ EDGE_VOICES = {
     ],
 }
 
-VOLUME_LEVELS = [25, 50, 75, 100, 125, 150, 200, 250, 300]
+VOLUME_LEVELS = [0, 25, 50, 75, 100, 125, 150, 200, 250, 300]
 
 TTS_MODES = {
     "Full": "full",              # Chime + voice always
@@ -200,7 +200,7 @@ def _load_config() -> dict:
             return json.loads(TTS_CONFIG.read_text())
     except Exception:
         pass
-    return {"sound_pack": "r2d2", "whisper_language": None}
+    return {"sound_pack": "r2d2", "whisper_language": None, "volume": 200, "muted": False}
 
 
 def _save_config(config: dict) -> None:
@@ -214,12 +214,16 @@ def _save_config(config: dict) -> None:
 def _play_sound(filepath: str) -> None:
     """Play a sound file for preview at configured volume."""
     config = _load_config()
-    volume = str(config.get("volume", 200))
+    if config.get("muted"):
+        return
+    volume = config.get("volume", 200)
+    if volume <= 0:
+        return
     try:
         CREATE_NO_WINDOW = 0x08000000
         subprocess.Popen(
             ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
-             "-volume", volume, filepath],
+             "-af", f"volume={volume}/100", filepath],
             creationflags=CREATE_NO_WINDOW,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -444,6 +448,8 @@ class TrayIcon:
         on_purge_vram: Callable[[], None] | None = None,
         on_stt_mode_changed: Callable[[str], None] | None = None,
         on_mic_changed: Callable[[int | None], None] | None = None,
+        on_volume_changed: Callable[[int], None] | None = None,
+        on_muted_changed: Callable[[bool], None] | None = None,
         transcriber=None,
         recorder=None,
     ):
@@ -451,6 +457,8 @@ class TrayIcon:
         self._on_purge_vram = on_purge_vram
         self._on_stt_mode_changed = on_stt_mode_changed
         self._on_mic_changed = on_mic_changed
+        self._on_volume_changed = on_volume_changed
+        self._on_muted_changed = on_muted_changed
         self._transcriber = transcriber
         self._recorder = recorder
         self._icon: "pystray.Icon | None" = None
@@ -493,6 +501,7 @@ class TrayIcon:
     def _build_menu(self) -> "pystray.Menu":
         config = _load_config()
         current_pack = config.get("sound_pack", "r2d2")
+        is_muted = config.get("muted", False)
         current_lang = config.get("whisper_language")
         current_voice = config.get("voice", {"voice": "it-IT-IsabellaNeural"})
         current_voice_id = current_voice.get("voice", "it-IT-IsabellaNeural")
@@ -552,6 +561,15 @@ class TrayIcon:
         # --- Volume submenu ---
         current_vol = config.get("volume", 200)
         vol_items = []
+
+        # Mute toggle
+        mute_sel = E_SELECTED if is_muted else E_UNSELECTED
+        vol_items.append(pystray.MenuItem(
+            f"{mute_sel} MUTE",
+            self._make_toggle_mute(),
+        ))
+        vol_items.append(pystray.Menu.SEPARATOR)
+
         for level in VOLUME_LEVELS:
             checked = (level == current_vol)
             sel = E_SELECTED if checked else E_UNSELECTED
@@ -629,17 +647,19 @@ class TrayIcon:
         # === Mode emoji for status ===
         mode_icon = MODE_EMOJI.get(current_mode, "🔔")
         pack_icon = PACK_EMOJI.get(current_pack, "📦")
+        vol_display = "MUTE" if is_muted else f"{current_vol}%"
+        vol_icon = "🔇" if is_muted or current_vol == 0 else "🔊"
 
         return pystray.Menu(
             pystray.MenuItem("✨ parlaconclaudio v0.9.9.0426 ✨", None, enabled=False),
             pystray.Menu.SEPARATOR,
             # --- Status dashboard (always visible, read-only) ---
             pystray.MenuItem(f"  🧠 {engine_display}  │  {lang_display}  │  🎤 {mic_display}", None, enabled=False),
-            pystray.MenuItem(f"  {mode_icon} {current_mode}  │  🔊 {current_vol}%  │  {pack_icon} {current_pack}", None, enabled=False),
+            pystray.MenuItem(f"  {mode_icon} {current_mode}  │  {vol_icon} {vol_display}  │  {pack_icon} {current_pack}", None, enabled=False),
             pystray.Menu.SEPARATOR,
             # --- Quick access ---
             pystray.MenuItem(f"🔔 Mode [{current_mode}]", pystray.Menu(*mode_items)),
-            pystray.MenuItem(f"🔊 Volume [{current_vol}%]", pystray.Menu(*vol_items)),
+            pystray.MenuItem(f"{vol_icon} Volume [{vol_display}]", pystray.Menu(*vol_items)),
             pystray.MenuItem(f"🎵 Sound Pack [{current_pack}]", pystray.Menu(*pack_items)),
             pystray.MenuItem(f"🎧 Preview [{current_pack}]", pystray.Menu(*preview_items) if preview_items else None),
             pystray.Menu.SEPARATOR,
@@ -940,7 +960,21 @@ class TrayIcon:
             config = _load_config()
             config["volume"] = level
             _save_config(config)
+            if self._on_volume_changed:
+                self._on_volume_changed(level)
             logger.info(f"Volume set to: {level}%")
+            self._rebuild_menu()
+        return handler
+
+    def _make_toggle_mute(self):
+        def handler(icon, item):
+            config = _load_config()
+            new_state = not config.get("muted", False)
+            config["muted"] = new_state
+            _save_config(config)
+            if self._on_muted_changed:
+                self._on_muted_changed(new_state)
+            logger.info(f"Mute toggled: {new_state}")
             self._rebuild_menu()
         return handler
 
