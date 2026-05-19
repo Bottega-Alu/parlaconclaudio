@@ -78,6 +78,10 @@ def get_volume() -> int:
     return load_config().get("volume", 200)
 
 
+def get_muted() -> bool:
+    return load_config().get("muted", False)
+
+
 def get_sound_pack() -> str:
     """Return the configured sound pack name as stored in config.
 
@@ -224,6 +228,8 @@ def _pick_cross_pack_chime(chime_key: str) -> Path | None:
 
 
 def play_chime(chime_key: str, progress: float = 0.0) -> None:
+    if get_muted() or get_volume() <= 0:
+        return
     pack_name = get_sound_pack()
 
     # "random" means: pick one chime uniformly across every installed
@@ -268,13 +274,13 @@ def play_chime(chime_key: str, progress: float = 0.0) -> None:
 # ══════════════════════════════════════════════════
 
 def play_mp3_sync(filepath: str) -> None:
-    if not os.path.isfile(filepath):
+    if not os.path.isfile(filepath) or get_muted() or get_volume() <= 0:
         return
     try:
         CREATE_NO_WINDOW = 0x08000000
         proc = subprocess.Popen(
             ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
-             "-volume", str(get_volume()), filepath],
+             "-af", f"volume={get_volume()}/100", filepath],
             creationflags=CREATE_NO_WINDOW,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
@@ -284,13 +290,13 @@ def play_mp3_sync(filepath: str) -> None:
 
 
 def play_mp3(filepath: str) -> None:
-    if not os.path.isfile(filepath):
+    if not os.path.isfile(filepath) or get_muted() or get_volume() <= 0:
         return
     try:
         CREATE_NO_WINDOW = 0x08000000
         subprocess.Popen(
             ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
-             "-volume", str(get_volume()), filepath],
+             "-af", f"volume={get_volume()}/100", filepath],
             creationflags=CREATE_NO_WINDOW,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
