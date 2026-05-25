@@ -37,6 +37,12 @@ NOTIFY_BURST_FILE = CACHE_DIR / "notify_burst.txt"
 # latest on disk.
 BURST_WAIT_MS = 300
 
+# Subagent (TaskCompleted) gets a longer window so a cluster of
+# subagents finishing within a couple of seconds collapses to a single
+# voice line instead of overlapping into cacophony.
+SUBAGENT_BURST_WAIT_MS = 1500
+SUBAGENT_PHRASE = "Subagente terminato."
+
 # Cache cleanup settings
 CACHE_TTL_DAYS = 7
 CACHE_MAX_MB = 50
@@ -808,6 +814,22 @@ def maybe_play_easter_egg(tts_mode: str) -> None:
         play_mp3(audio_path)
 
 
+def play_subagent_voice() -> None:
+    """Speak the fixed SUBAGENT_PHRASE with a randomly-picked voice from
+    the multilingual pool.
+
+    Used for TaskCompleted (subagent termination) to keep the audio cue
+    short and varied without the full chime + contextual TTS +
+    easter-egg fanfara that would overlap when several subagents finish
+    close together.
+    """
+    voice_id = random.choice(_ALL_VOICES)
+    profile = {"voice": voice_id, "rate": "+0%", "pitch": "+0Hz"}
+    audio_path = resolve_audio(SUBAGENT_PHRASE, profile)
+    if audio_path:
+        play_mp3(audio_path)
+
+
 # ══════════════════════════════════════════════════
 # SUBTASK TRACKER
 # ══════════════════════════════════════════════════
@@ -860,7 +882,7 @@ def update_tracker(data: dict) -> tuple[int, int]:
 # MAIN
 # ══════════════════════════════════════════════════
 
-def burst_check_should_play() -> bool:
+def burst_check_should_play(wait_ms: int = BURST_WAIT_MS) -> bool:
     """Last-wins burst suppression.
 
     Each invocation writes a fresh UUID to NOTIFY_BURST_FILE, sleeps a
@@ -876,7 +898,7 @@ def burst_check_should_play() -> bool:
         NOTIFY_BURST_FILE.write_text(my_id, encoding="utf-8")
     except Exception:
         return True  # if we can't write, just play
-    time.sleep(BURST_WAIT_MS / 1000)
+    time.sleep(wait_ms / 1000)
     try:
         latest = NOTIFY_BURST_FILE.read_text(encoding="utf-8").strip()
     except Exception:
@@ -893,27 +915,35 @@ def main() -> None:
     except (json.JSONDecodeError, Exception):
         return
 
-    # Last-wins burst suppression — skip if a newer hook overlapped us.
-    if not burst_check_should_play():
+    event_name = data.get("hook_event_name", "")
+
+    # Per-event burst window: subagents (TaskCompleted) get the longer
+    # window so clusters collapse to one voice line; Stop and
+    # Notification stay reactive on the default 300 ms window.
+    burst_wait = SUBAGENT_BURST_WAIT_MS if event_name == "TaskCompleted" else BURST_WAIT_MS
+    if not burst_check_should_play(burst_wait):
         return
 
     # Run cache cleanup (fast, non-blocking)
     cleanup_tts_cache()
 
-    event_name = data.get("hook_event_name", "")
+    # Subagent terminated → fixed short phrase, random voice, no chime,
+    # no contextual TTS, no easter egg. Tracker is still updated so any
+    # downstream progress logic stays consistent.
+    if event_name == "TaskCompleted":
+        update_tracker(data)
+        tts_mode = load_config().get("tts_mode", "full")
+        if tts_mode in ("silent", "semi-silent"):
+            return
+        play_subagent_voice()
+        return
+
     sub_type = data.get("notification_type") or data.get("type") or data.get("sub_type")
     repo = extract_repo_name(data)
     voice = get_voice()
     progress = 0.0
 
-    if event_name == "TaskCompleted":
-        completed, total = update_tracker(data)
-        detail = extract_task_detail(data)
-        message = build_task_message(completed, total, detail)
-        chime_key = "task_done"
-        progress = completed / max(total, 1)
-
-    elif event_name == "Stop":
+    if event_name == "Stop":
         plan_info = extract_plan_info(data)
         detail = extract_task_detail(data)
         stop_type = "hook_active" if data.get("stop_hook_active") else None
