@@ -4,7 +4,13 @@
       "Bash(git -C \"C:\\PROJECTS\\RTSTT\" status)",
       "Bash(git -C \"C:\\PROJECTS\\RTSTT\" log --oneline -10)",
       "Bash(git log:*)",
-      "Bash(git for-each-ref:*)"
+      "Bash(git for-each-ref:*)",
+      "Bash(taskkill /F /PID 90768)",
+      "Bash(rm -f __TRACKED_VAR__/.claude/cache/tts/voicebridge.pid)",
+      "Bash(cp __TRACKED_VAR__/.claude/scripts/notify-tts.py __TRACKED_VAR__/.claude/scripts/notify-tts.py.bak-2026-02-15)",
+      "Bash(cp scripts/notify-tts.py __TRACKED_VAR__/.claude/scripts/notify-tts.py)",
+      "Bash(venv/Scripts/python.exe __TRACKED_VAR__/.claude/scripts/notify-tts.py)",
+      "Bash(echo \"exit:$?\")"
     ],
     "deny": [],
     "ask": []
