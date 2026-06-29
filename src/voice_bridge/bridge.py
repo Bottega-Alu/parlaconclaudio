@@ -188,12 +188,50 @@ class VoiceBridge:
         else:
             logger.debug(f"Gesture toggle ignored (state={self._state.value})")
 
+    def _apply_cleanup(self, text: str) -> str:
+        """Language-preserving LLM cleanup for LIVE dictation (best-effort).
+
+        Gated by ``enable_stt_cleanup`` in tts_config.json. NullObject: returns
+        the raw text on any failure (flag off, no key, OpenRouter down) so live
+        dictation is never blocked. Adds the OpenRouter round-trip to the live
+        path; disable the flag for raw-fast dictation.
+        """
+        try:
+            cfg = self._transcriber._load_config()
+        except Exception:
+            cfg = {}
+        if not bool(cfg.get("enable_stt_cleanup", True)):
+            return text
+        try:
+            from .stt_cleanup import cleanup_text
+            from .audio_file_processor import (
+                DEFAULT_CLEANUP_FALLBACK,
+                DEFAULT_CLEANUP_MODEL,
+                _normalize_glossary,
+            )
+            from ..core.stt_engine.key_manager import KeyManager
+
+            cleaned = cleanup_text(
+                text,
+                model=str(cfg.get("stt_cleanup_model", DEFAULT_CLEANUP_MODEL)),
+                fallback=str(cfg.get("stt_cleanup_fallback", DEFAULT_CLEANUP_FALLBACK)),
+                api_key=KeyManager.get_key("openrouter"),
+                glossary=_normalize_glossary(cfg.get("stt_cleanup_glossary", [])),
+            )
+            if cleaned and cleaned != text:
+                logger.info(f"Live STT cleanup applied ({len(text)}->{len(cleaned)} chars)")
+            return cleaned or text
+        except Exception as e:
+            logger.warning(f"Live STT cleanup skipped: {e}")
+            return text
+
     def _transcribe_and_output(self, audio) -> None:
         """Transcribe audio and deliver output."""
         try:
             text = self._transcriber.transcribe(audio)
 
             if text:
+                text = self._apply_cleanup(text)
                 with self._lock:
                     self._set_state(BridgeState.OUTPUT)
 
