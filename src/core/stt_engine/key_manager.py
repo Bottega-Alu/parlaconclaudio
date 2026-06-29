@@ -19,11 +19,13 @@ TTS_CONFIG = Path.home() / ".claude" / "cache" / "tts" / "tts_config.json"
 _ENV_VARS = {
     "groq": "GROQ_API_KEY",
     "deepgram": "DEEPGRAM_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
 }
 
 _JSON_KEYS = {
     "groq": "stt_api_key_groq",
     "deepgram": "stt_api_key_deepgram",
+    "openrouter": "stt_api_key_openrouter",
 }
 
 _KEYRING_SERVICE = "parlaconclaudio"

@@ -1,0 +1,136 @@
+[
+  {
+    "kind": "run",
+    "id": "run-2026-06-29T13-33-46Z",
+    "ts": "2026-06-29T13:33:46Z",
+    "task": "stt_cleanup",
+    "stage": 1,
+    "eval_set": "stt-cleanup-itaeng-v1",
+    "eval_set_hash": "n/a",
+    "judge": "claude-opus-4-8 (inline)",
+    "runs_per_model": 5,
+    "tier": "all",
+    "temperature": 0.2,
+    "catalog_snapshot": "openrouter-live-2026-06-29",
+    "results": [
+      {
+        "latency_ms_p50": 936,
+        "model": "qwen/qwen-2.5-7b-instruct",
+        "score_mean": 4.6,
+        "deterministic_pass": true,
+        "score_var": 0.1,
+        "cost_usd_per_run": 2.1e-05
+      },
+      {
+        "latency_ms_p50": 601,
+        "model": "amazon/nova-micro-v1",
+        "score_mean": 4.4,
+        "deterministic_pass": true,
+        "score_var": 0.1,
+        "cost_usd_per_run": 1.9e-05
+      },
+      {
+        "latency_ms_p50": 1022,
+        "model": "google/gemma-4-26b-a4b-it",
+        "score_mean": 4.3,
+        "deterministic_pass": true,
+        "score_var": 0.1,
+        "cost_usd_per_run": 3.5e-05
+      },
+      {
+        "latency_ms_p50": 516,
+        "model": "ibm-granite/granite-4.1-8b",
+        "score_mean": 4.0,
+        "deterministic_pass": true,
+        "score_var": 0.2,
+        "cost_usd_per_run": 2.7e-05
+      },
+      {
+        "latency_ms_p50": 648,
+        "model": "amazon/nova-lite-v1",
+        "score_mean": 3.9,
+        "deterministic_pass": true,
+        "score_var": 0.2,
+        "cost_usd_per_run": 3.2e-05
+      },
+      {
+        "latency_ms_p50": 1016,
+        "model": "inclusionai/ling-2.6-flash",
+        "score_mean": 3.8,
+        "deterministic_pass": true,
+        "score_var": 0.2,
+        "cost_usd_per_run": 6e-06
+      },
+      {
+        "latency_ms_p50": 1250,
+        "model": "ibm-granite/granite-4.0-h-micro",
+        "score_mean": 3.3,
+        "deterministic_pass": false,
+        "score_var": 0.3,
+        "cost_usd_per_run": 1e-05
+      },
+      {
+        "latency_ms_p50": 2507,
+        "model": "nvidia/nemotron-3-super-120b-a12b",
+        "score_mean": 2.8,
+        "deterministic_pass": false,
+        "score_var": 0.4,
+        "cost_usd_per_run": 0.000125
+      },
+      {
+        "latency_ms_p50": 2265,
+        "model": "nvidia/nemotron-3-nano-30b-a3b",
+        "score_mean": 2.5,
+        "deterministic_pass": false,
+        "score_var": 0.5,
+        "cost_usd_per_run": 8.4e-05
+      },
+      {
+        "latency_ms_p50": 1187,
+        "model": "google/gemma-3-4b-it",
+        "score_mean": 2.0,
+        "deterministic_pass": false,
+        "score_var": 0.5,
+        "cost_usd_per_run": 2.5e-05
+      },
+      {
+        "latency_ms_p50": 2077,
+        "model": "mistralai/mistral-nemo",
+        "score_mean": 2.0,
+        "deterministic_pass": false,
+        "score_var": 0.6,
+        "cost_usd_per_run": 1e-05
+      },
+      {
+        "latency_ms_p50": 1391,
+        "model": "mistralai/mistral-small-24b-instruct-2501",
+        "score_mean": 1.8,
+        "deterministic_pass": false,
+        "score_var": 0.6,
+        "cost_usd_per_run": 2.5e-05
+      }
+    ]
+  },
+  {
+    "kind": "decision",
+    "id": "decision-2026-06-29T13-33-46Z",
+    "ts": "2026-06-29T13:33:46Z",
+    "task": "stt_cleanup",
+    "chosen": "qwen/qwen-2.5-7b-instruct",
+    "fallback": "amazon/nova-micro-v1",
+    "rationale": "Language-preservation #1: unico 5/5 a NON flippare IT->EN sul langflip-trap e EN preservato su D; piu fedele (no content-add che invece nova-micro fa su E). 0 errori, consistente. Fallback nova-micro: quasi pari, 601ms e cheap. Squalificati: gemma-3-4b (non processa input), mistral-nemo (allucina/traduce), mistral-small (31/50 err), nemotron nano/super (leak CoT), granite-micro (traduce+aggiunge+droppa). Judge: Claude inline.",
+    "run_ref": "run-2026-06-29T13-33-46Z",
+    "supersedes": null
+  },
+  {
+    "kind": "decision",
+    "id": "decision-2026-06-29T18-05-09Z",
+    "ts": "2026-06-29T18:05:09Z",
+    "task": "stt_cleanup",
+    "chosen": "google/gemini-2.5-flash",
+    "fallback": "qwen/qwen-2.5-7b-instruct",
+    "rationale": "Con glossario LLM-first + garble fonetici SEVERI (di tab->GitHub), gemini-2.5-flash e l UNICO che recupera in modo affidabile (4/5 verificato anti-culo). ~15 modelli provati: cheap/mid (qwen/ling/llama/mistral/nova/lfm) si fermano ai medio-severi (Nextcloud), NON craccano GitHub; qwen3-235b-thinking solo Nextcloud (non e questione di taglia); arcee-trinity-mini 1/5 = culo; gpt-5-nano/gpt-oss reasoning-model -> content vuoto (budget) o errato (di tab->Git). Glossario sempre attivo. qwen-2.5-7b resta fallback cheap per outage. Supersede la decisione no-glossario su garble moderati.",
+    "run_ref": "severe-garble-verify-2026-06-29",
+    "supersedes": "decision-2026-06-29T13-33-46Z"
+  }
+]

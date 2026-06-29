@@ -254,3 +254,11 @@ nul
 *.png
 *.ico
 voice_bridge.spec
+
+# Secrets - API keys, mai committare
+orkey.txt
+orkey.md
+
+# Bench-2: audio personali + output con trascrizioni (mai committare)
+.work/stt-engine-scan/bench2/audio/
+.work/stt-engine-scan/bench2/*.json
