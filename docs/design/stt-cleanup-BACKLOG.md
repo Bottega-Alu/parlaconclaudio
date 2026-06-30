@@ -36,6 +36,13 @@ Va prototipato sul flusso reale, non specificato a tavolino.
   Sortformer (plumbing, satura i 16GB) — vedi `.work/stt-engine-scan/`.
 - **Routing modello per-lingua** — già config-driven (PT→gemini si setta a mano);
   auto-route per `detected_language` è il passo dopo.
+- **Lingue preferite / allowlist per l'auto-detect** [Frisco, 2026-06-30] — l'utente
+  dichiara le sue lingue (es. EN + IT); l'auto-detect viene **vincolato a quel set**:
+  se Whisper rileva fuori dall'allowlist (o con bassa `language_probability`), si
+  ripiega sulla più probabile **tra le consentite**. È la versione principled del
+  "fallback su lingua primaria" — un'**allowlist groundata** (regola LLM-first: passa
+  il set valido e fai scegliere), non una word-list hardcoded. Misurare prima il
+  multilingua puro: si costruisce solo se le clip IT brevi si misdetectano davvero.
 - **Latenza live** — cleanup async/streaming: mostra il grezzo subito, poi corregge
   in-place; oppure primo passo con modello locale a bassa latenza.
 - **Re-bench engine STT periodico** — oggi Whisper batte Qwen3-ASR sul reale, ma le
