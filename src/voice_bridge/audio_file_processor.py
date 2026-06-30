@@ -30,7 +30,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from .stt_cleanup import cleanup_text
+
 logger = logging.getLogger(__name__)
+
+# Defaults for the STT cleanup agent — overridable via tts_config.json
+# (mirrors VoiceBridgeConfig.stt_cleanup_model / stt_cleanup_fallback).
+DEFAULT_CLEANUP_MODEL = "google/gemini-2.5-flash"
+DEFAULT_CLEANUP_FALLBACK = "qwen/qwen-2.5-7b-instruct"
+# Above this many characters, only the (cleaned) transcription is produced —
+# the English/IT/PT translations and TTS dubs are skipped.
+DEFAULT_EXTRAS_MAX_CHARS = 2500
 
 # Audio formats accepted by Whisper / ffmpeg
 SUPPORTED_EXTENSIONS = (
@@ -62,6 +72,7 @@ class FileResult:
     source: Path
     detected_language: str = ""
     original: str = ""
+    cleaned: str | None = None  # language-preserving STT cleanup; None = not run/failed
     english: str = ""
     italian: str = ""
     portuguese: str = ""
@@ -156,23 +167,50 @@ _LANG_NAMES = {
 # Default voices for the TTS dub round-trip (one per target language).
 # Edge-TTS supports many alternatives; these are picked from the same
 # catalogue used in tray_icon.py.
+#
+# Note: Italian deliberately uses the *English* AvaMultilingual voice in
+# cross-lingual mode rather than a native it-IT voice. The "Multilingual"
+# neural voices (Ava, Thalita) are a newer generation and, in A/B testing,
+# read Italian more naturally than the older native it-IT-IsabellaNeural —
+# and beat local models (XTTS-v2, Kokoro, Piper) too. Multilingual voices
+# are designed for exactly this kind of cross-lingual synthesis.
 DUB_VOICES = {
-    "it": "it-IT-IsabellaNeural",
+    "it": "en-US-AvaMultilingualNeural",
     "pt": "pt-BR-ThalitaMultilingualNeural",
     "en": "en-US-AvaMultilingualNeural",
 }
 
 
-def _is_dub_enabled() -> bool:
-    """Read transcribe_tts_dub flag from tts_config.json (default True)."""
+def _load_tts_config() -> dict:
+    """Read the shared tts_config.json once (empty dict on any failure)."""
     try:
         if TTS_CONFIG.is_file():
-            cfg = json.loads(TTS_CONFIG.read_text(encoding="utf-8"))
-            val = cfg.get("transcribe_tts_dub", True)
-            return bool(val)
+            return json.loads(TTS_CONFIG.read_text(encoding="utf-8"))
     except Exception:
         pass
-    return True
+    return {}
+
+
+def _is_dub_enabled() -> bool:
+    """Read transcribe_tts_dub flag from tts_config.json (default True)."""
+    return bool(_load_tts_config().get("transcribe_tts_dub", True))
+
+
+def _normalize_glossary(raw) -> list[str]:
+    """Normalize the configured glossary to a clean list of terms.
+
+    Accepts a list/tuple of strings or a single comma-separated string;
+    anything else (or empty) yields an empty list.
+    """
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        items = raw.split(",")
+    elif isinstance(raw, (list, tuple)):
+        items = raw
+    else:
+        return []
+    return [str(t).strip() for t in items if str(t).strip()]
 
 
 def _synthesize_dub(text: str, voice: str, output_path: Path) -> bool:
@@ -223,17 +261,31 @@ class AudioFileProcessor:
         self._transcriber = transcriber
         self._groq_key_cached: str | None = None
         self._groq_warned = False
+        self._openrouter_key_cached: str | None = None
 
     def _groq_key(self) -> str | None:
         if self._groq_key_cached is None:
             self._groq_key_cached = _load_groq_key() or ""
         return self._groq_key_cached or None
 
+    def _openrouter_key(self) -> str | None:
+        """Resolve the OpenRouter key via the layered KeyManager (env→keyring→json)."""
+        if self._openrouter_key_cached is None:
+            try:
+                from ..core.stt_engine.key_manager import KeyManager
+                self._openrouter_key_cached = KeyManager.get_key("openrouter") or ""
+            except Exception as e:
+                logger.debug(f"OpenRouter key resolution failed: {e}")
+                self._openrouter_key_cached = ""
+        return self._openrouter_key_cached or None
+
     def process_file(self, path: Path) -> FileResult:
         result = FileResult(source=path)
         if not path.is_file():
             result.errors.append(f"file not found: {path}")
             return result
+
+        cfg = _load_tts_config()
 
         # 1) Source-language transcribe (auto-detect)
         try:
@@ -247,51 +299,85 @@ class AudioFileProcessor:
             result.errors.append(msg)
             return result
 
-        # 2) English via Whisper translate (skip if already English)
-        if lang == "en":
-            result.english = result.original
-        else:
-            try:
-                en_text, _ = self._transcriber.transcribe_file(path,
-                                                               language=None,
-                                                               task="translate")
-                result.english = en_text
-            except Exception as e:
-                msg = f"english translate failed: {e}"
-                logger.warning(f"[{path.name}] {msg}")
-                result.errors.append(msg)
+        # 1b) Language-preserving STT cleanup (OpenRouter). NullObject: on any
+        # failure `cleaned` stays None and downstream falls back to `original`.
+        if bool(cfg.get("enable_stt_cleanup", True)):
+            result.cleaned = cleanup_text(
+                result.original,
+                model=str(cfg.get("stt_cleanup_model", DEFAULT_CLEANUP_MODEL)),
+                fallback=str(cfg.get("stt_cleanup_fallback", DEFAULT_CLEANUP_FALLBACK)),
+                api_key=self._openrouter_key(),
+                glossary=_normalize_glossary(cfg.get("stt_cleanup_glossary", [])),
+            )
+            if result.cleaned and result.cleaned != result.original:
+                logger.info(f"[{path.name}] STT cleanup applied "
+                            f"({len(result.original)}→{len(result.cleaned)} chars)")
 
-        # 3) IT and PT via Groq LLM (skip if already that language)
-        groq_key = self._groq_key()
-        if groq_key:
-            for lang_code in ("it", "pt"):
-                if lang == lang_code:
-                    setattr(result, _attr_for(lang_code), result.original)
-                    continue
+        # All text-derived steps run on the cleaned text when available.
+        base = result.cleaned or result.original
+
+        # Long-file guard: above the cap, produce ONLY the (cleaned) source
+        # transcription — skip English/IT/PT translations and TTS dubs.
+        max_chars = int(cfg.get("transcribe_extras_max_chars", DEFAULT_EXTRAS_MAX_CHARS))
+        suppress_extras = max_chars > 0 and len(base) > max_chars
+        if suppress_extras:
+            logger.info(
+                f"[{path.name}] long transcription ({len(base)} chars > {max_chars}) "
+                f"— skipping translations and TTS dubs (transcription only)"
+            )
+
+        translations_enabled = bool(cfg.get("transcribe_translations", True))
+
+        # 2) English via Whisper translate (re-transcribes the AUDIO, not the
+        # text). Skipped for long files or when translations are disabled.
+        if not suppress_extras and translations_enabled:
+            if lang == "en":
+                result.english = result.original
+            else:
                 try:
-                    translated = _groq_translate(
-                        result.original, _LANG_NAMES[lang_code], groq_key,
-                    )
-                    setattr(result, _attr_for(lang_code), translated)
+                    en_text, _ = self._transcriber.transcribe_file(path,
+                                                                   language=None,
+                                                                   task="translate")
+                    result.english = en_text
                 except Exception as e:
-                    msg = f"{lang_code} translate failed: {e}"
+                    msg = f"english translate failed: {e}"
                     logger.warning(f"[{path.name}] {msg}")
                     result.errors.append(msg)
-        else:
-            if not self._groq_warned:
-                logger.warning(
-                    "Groq API key not configured — skipping Italian/Portuguese "
-                    "translations. Set GROQ_API_KEY env or stt_api_key_groq in "
-                    "tts_config.json to enable them."
-                )
-                self._groq_warned = True
 
-        # 4) Persist .txt files alongside the source
+        # 3) IT and PT via Groq LLM, run on the cleaned text (skip if already
+        # that language). Skipped for long files or when translations disabled.
+        if not suppress_extras and translations_enabled:
+            groq_key = self._groq_key()
+            if groq_key:
+                for lang_code in ("it", "pt"):
+                    if lang == lang_code:
+                        setattr(result, _attr_for(lang_code), base)
+                        continue
+                    try:
+                        translated = _groq_translate(
+                            base, _LANG_NAMES[lang_code], groq_key,
+                        )
+                        setattr(result, _attr_for(lang_code), translated)
+                    except Exception as e:
+                        msg = f"{lang_code} translate failed: {e}"
+                        logger.warning(f"[{path.name}] {msg}")
+                        result.errors.append(msg)
+            else:
+                if not self._groq_warned:
+                    logger.warning(
+                        "Groq API key not configured — skipping Italian/Portuguese "
+                        "translations. Set GROQ_API_KEY env or stt_api_key_groq in "
+                        "tts_config.json to enable them."
+                    )
+                    self._groq_warned = True
+
+        # 4) Persist .txt files alongside the source (source-lang .txt = cleaned)
         result.saved_files = self._save_outputs(result)
 
         # 5) TTS round-trip: synthesize spoken versions for each non-empty
-        # translation in a language different from the source.
-        if _is_dub_enabled():
+        # translation in a language different from the source. Skipped for
+        # long files; otherwise gated by the transcribe_tts_dub flag.
+        if not suppress_extras and _is_dub_enabled():
             result.dub_files = self._synthesize_dubs(result)
 
         return result
@@ -348,7 +434,9 @@ class AudioFileProcessor:
         base = result.source.with_suffix("")
         saved: list[Path] = []
         for suffix, content in (
-            (".original.txt", result.original),
+            # Source-language file carries the cleaned text when available;
+            # result.original keeps the raw transcription in-memory for audit.
+            (".original.txt", result.cleaned or result.original),
             (".en.txt", result.english),
             (".it.txt", result.italian),
             (".pt.txt", result.portuguese),

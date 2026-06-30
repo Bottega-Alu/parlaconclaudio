@@ -1,0 +1,118 @@
+{
+  "name": "stt-cleanup-itaeng-v1",
+  "task": "stt_cleanup",
+  "description": "Eval-set per la selezione del modello di cleanup del testo trascritto da audio. Mix IT/EN, code-switch, term-restoration, language-preservation, no-paraphrase. Gli item 'real' vengono da dettature STT-garbled reali di Frisco; i 'synthetic' sono costruiti sugli stessi pattern.",
+  "invariants": "Per ogni item: (1) la lingua dell'output deve restare la lingua attesa (MAI tradurre IT<->EN); (2) i termini tech in must_contain devono comparire restaurati; (3) le forme garbled in must_not_contain devono sparire; (4) nessuna parafrasi / nessun contenuto aggiunto o rimosso, solo cleanup; (5) lunghezza output entro 0.5x-2.0x dell'input.",
+  "items": [
+    {
+      "id": "A_realt_speech2text",
+      "tier": "base",
+      "source": "real",
+      "expected_lang": "it",
+      "input": "ho usato spicciuto testo per trascrivere le note ma il modello sbaglia in continuazione",
+      "reference": "ho usato speech to text per trascrivere le note ma il modello sbaglia in continuazione",
+      "must_contain": ["speech to text"],
+      "must_not_contain": ["spicciuto testo"],
+      "notes": "Termine tech EN reso foneticamente dentro frase IT. Deve restare IT, restaurare 'speech to text'."
+    },
+    {
+      "id": "B_real_orkey",
+      "tier": "base",
+      "source": "real",
+      "expected_lang": "it",
+      "input": "intanto piazzo in un file un'acchi open router cosi la cabliamo dopo",
+      "reference": "intanto piazzo in un file una key OpenRouter cosi la cabliamo dopo",
+      "must_contain": ["key", "OpenRouter"],
+      "must_not_contain": ["acchi"],
+      "notes": "'un'acchi' = 'una key'; 'open router' = 'OpenRouter'. Frase IT con termini tech EN."
+    },
+    {
+      "id": "C_en_circuitbreaker",
+      "tier": "base",
+      "source": "synthetic",
+      "expected_lang": "en",
+      "input": "let me deploy the circus breaker before the retry logic kicks in on production",
+      "reference": "let me deploy the circuit breaker before the retry logic kicks in on production",
+      "must_contain": ["circuit breaker"],
+      "must_not_contain": ["circus breaker"],
+      "notes": "EN parlato: DEVE restare EN (non tradurre). Fix 'circus'->'circuit'."
+    },
+    {
+      "id": "D_en_langpreserve",
+      "tier": "base",
+      "source": "real",
+      "expected_lang": "en",
+      "input": "the speech to text model keeps writing italian even when i clearly speak english",
+      "reference": "the speech-to-text model keeps writing Italian even when I clearly speak English",
+      "must_contain": ["speech", "English"],
+      "must_not_contain": [],
+      "notes": "Il dolore #1 in forma di test: input EN deve restare EN, non diventare italiano."
+    },
+    {
+      "id": "E_it_pareto_punct",
+      "tier": "base",
+      "source": "real",
+      "expected_lang": "it",
+      "input": "allora direi che ha vinto pareto minima spesa massima resa e zero rischio",
+      "reference": "Allora, direi che ha vinto Pareto: minima spesa, massima resa e zero rischio.",
+      "must_contain": ["Pareto"],
+      "must_not_contain": [],
+      "notes": "IT puro: solo punteggiatura/maiuscole. Nessun termine da inventare."
+    },
+    {
+      "id": "F_codeswitch_restraint",
+      "tier": "base",
+      "source": "real",
+      "expected_lang": "it",
+      "input": "il circuit breaker e il retry intelligente vanno messi nel voice bridge non altrove",
+      "reference": "il circuit breaker e il retry intelligente vanno messi nel voice bridge, non altrove",
+      "must_contain": ["circuit breaker", "retry", "voice bridge"],
+      "must_not_contain": ["interruttore di circuito"],
+      "notes": "Restraint: i termini tech EN sono GIA' corretti -> NON tradurli in IT. Solo punteggiatura."
+    },
+    {
+      "id": "G_it_noparaphrase",
+      "tier": "hard",
+      "source": "synthetic",
+      "expected_lang": "it",
+      "input": "boh non so se conviene davvero magari si magari no vedi tu poi mi dici",
+      "reference": "Boh, non so se conviene davvero. Magari si, magari no, vedi tu poi mi dici.",
+      "must_contain": [],
+      "must_not_contain": [],
+      "notes": "Adversariale: tono colloquiale. NON formalizzare, NON aggiungere/togliere contenuto."
+    },
+    {
+      "id": "H_en_gpu_streaming",
+      "tier": "hard",
+      "source": "synthetic",
+      "expected_lang": "en",
+      "input": "we need real time stream ing with low latency running locally on the gee pee you",
+      "reference": "we need real-time streaming with low latency running locally on the GPU",
+      "must_contain": ["GPU", "streaming"],
+      "must_not_contain": ["gee pee you"],
+      "notes": "EN: fix 'gee pee you'->GPU, 'stream ing'->streaming. Resta EN."
+    },
+    {
+      "id": "I_hard_langflip_trap",
+      "tier": "hard",
+      "source": "synthetic",
+      "expected_lang": "it",
+      "input": "the deploy su stage e andato male quindi rollback subito e poi controlliamo i log",
+      "reference": "il deploy su stage e andato male, quindi rollback subito e poi controlliamo i log",
+      "must_contain": ["deploy", "stage", "rollback", "log"],
+      "must_not_contain": [],
+      "notes": "Trappola: inizia con 'the' ma la frase e' dominante IT. Deve restare IT, non flippare a EN ne tradurre i termini tech."
+    },
+    {
+      "id": "J_hard_en_dense_terms",
+      "tier": "hard",
+      "source": "synthetic",
+      "expected_lang": "en",
+      "input": "the cuda kernel runs out of v ram on the are tee ex five thousand eighty during inference",
+      "reference": "the CUDA kernel runs out of VRAM on the RTX 5080 during inference",
+      "must_contain": ["CUDA", "VRAM", "RTX 5080"],
+      "must_not_contain": ["are tee ex"],
+      "notes": "EN denso di termini tech resi foneticamente: CUDA, VRAM, RTX 5080. Resta EN."
+    }
+  ]
+}

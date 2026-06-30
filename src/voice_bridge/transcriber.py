@@ -102,9 +102,19 @@ class Transcriber:
         """Read stt_mode from tts_config.json."""
         return self._load_config().get("stt_mode", "auto")
 
-    @staticmethod
-    def _get_system_language() -> str:
-        """Derive a Whisper-compatible language code from the OS locale."""
+    def _get_system_language(self) -> str | None:
+        """Fallback language when no explicit ``whisper_language`` is set.
+
+        Default is ``None`` → let Whisper auto-detect. The previous hardcoded
+        ``"it"`` (and the OS-locale derivation that resolves to ``"it"`` on an
+        Italian box) biased detection toward Italian and forced IT output even
+        for English / mixed speech — the root of the language-flip bug.
+
+        Opt back into OS-locale derivation by setting
+        ``"whisper_locale_fallback": true`` in tts_config.json.
+        """
+        if not self._load_config().get("whisper_locale_fallback", False):
+            return None  # auto-detect
         import locale
         try:
             loc = locale.getdefaultlocale()[0]  # e.g. "it_IT", "en_US"
@@ -112,7 +122,7 @@ class Transcriber:
                 return loc.split("_")[0]  # "it", "en"
         except Exception:
             pass
-        return "it"  # safe default
+        return None
 
     def _get_auto_fallback(self) -> bool:
         return self._load_config().get("stt_auto_fallback", True)
