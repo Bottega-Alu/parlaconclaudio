@@ -47,3 +47,8 @@ Va prototipato sul flusso reale, non specificato a tavolino.
   in-place; oppure primo passo con modello locale a bassa latenza.
 - **Re-bench engine STT periodico** — oggi Whisper batte Qwen3-ASR sul reale, ma le
   versioni nuove vanno ri-testate; ledger + harness già pronti (`.work/stt-engine-scan/bench2/`).
+- **Inserimento key OpenRouter da UI** [Frisco, 2026-06-30] — estendere il menu tray
+  "Set API keys" (che già gestisce Groq/Deepgram con input mascherato) per includere la
+  key OpenRouter del **cleanup LLM (affinamento output STT)**, così si imposta dall'app
+  invece che a mano in `tts_config.json`/env. Riusa `key_manager` (entry `openrouter`
+  già presente) + il pattern di input mascherato esistente nel tray.
