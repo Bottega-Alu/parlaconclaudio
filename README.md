@@ -4,11 +4,11 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.9.9.0426-blueviolet?style=flat-square" alt="v0.9.9.0426">
+  <img src="https://img.shields.io/badge/version-1.0.0.0630-blueviolet?style=flat-square" alt="v1.0.0.0630">
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078D4?style=flat-square&logo=windows" alt="Windows 11">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/GPU-NVIDIA%20CUDA-76B900?style=flat-square&logo=nvidia" alt="NVIDIA CUDA">
-  <img src="https://img.shields.io/badge/cloud-Groq%20%7C%20Deepgram-FF6F00?style=flat-square" alt="Groq | Deepgram">
+  <img src="https://img.shields.io/badge/cloud-Groq%20%7C%20Deepgram%20%7C%20OpenRouter-FF6F00?style=flat-square" alt="Groq | Deepgram | OpenRouter">
   <img src="https://img.shields.io/badge/STT-Whisper%20large--v3-FF6F00?style=flat-square" alt="Whisper large-v3">
   <img src="https://img.shields.io/badge/TTS-edge--tts-00A4EF?style=flat-square&logo=microsoft" alt="edge-tts">
   <img src="https://img.shields.io/badge/built%20with-Claude%20Code-7C3AED?style=flat-square" alt="Built with Claude Code">
@@ -50,12 +50,40 @@ parlaconclaudio v0.9.9 introduces **multi-backend STT** with automatic fallback:
 
 API keys are stored securely: environment variables > OS keyring > JSON config.
 
+## STT Cleanup (v1.0)
+
+parlaconclaudio v1.0 adds a **language-preserving LLM cleanup** pass over every transcription. Whisper is fast and accurate, but it still drops the odd word, mangles English tech terms heard phonetically (e.g. "di tab" -> **GitHub**), and skips punctuation. The cleanup pass fixes exactly that — and nothing else.
+
+- **What it does** — corrects STT slips, restores phonetically-garbled English tech terms, and fixes punctuation, while **preserving the spoken language** (it never translates your IT / EN / PT into another language). Applied to both **live dictation** and **dropped audio files**.
+- **Never blocks you (NullObject)** — if the LLM is unreachable, the raw transcription is kept as-is. Dictation never stalls waiting on the network.
+- **Model** — `google/gemini-2.5-flash` (primary) + `qwen/qwen-2.5-7b-instruct` (fallback), via **[OpenRouter](https://openrouter.ai)**. Chosen empirically: it's the one model that reliably recovers severe phonetic garbles **when handed a glossary**.
+- **Config-driven glossary** (`stt_cleanup_glossary`) — a list of *your* terms (GitHub, Nextcloud, project names…) injected as grounding, so even badly-garbled audio maps back to the right term. This is an **LLM-first whitelist, not a hardcoded alias dictionary**.
+- **Multilingual** — language is auto-detected (the old hardcoded Italian bias is gone). Set `whisper_language` to force a language, leave it empty for auto.
+- **Long-file gating** — for transcriptions longer than `transcribe_extras_max_chars` (default 2500), translations + TTS dub are skipped; you get just the cleaned transcript.
+
+### New `tts_config.json` keys
+
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `enable_stt_cleanup` | `true` | Master switch for the LLM cleanup pass |
+| `stt_cleanup_model` | `google/gemini-2.5-flash` | Primary cleanup model (OpenRouter) |
+| `stt_cleanup_fallback` | `qwen/qwen-2.5-7b-instruct` | Fallback model when the primary fails |
+| `stt_cleanup_glossary` | `[]` | Your domain terms, injected as grounding |
+| `transcribe_translations` | `true` | Produce EN/IT/PT translations for dropped audio files |
+| `transcribe_tts_dub` | `true` | Synthesize spoken TTS dubs of the translations |
+| `transcribe_extras_max_chars` | `2500` | Above this length, skip translations + dub (cleaned transcript only) |
+
+**OpenRouter key** — set `OPENROUTER_API_KEY` as an environment variable, or `stt_api_key_openrouter` in `tts_config.json`. Same secure resolution scale as the other providers: **environment variables > OS keyring > JSON config**.
+
 ## Architecture
 
 ```
 Voice Bridge (STT)
-  Ctrl+Alt+Space -> Microphone -> STT Engine (auto) -> Clipboard + Ctrl+V -> Terminal
-                                     |
+  Ctrl+Alt+Space -> Microphone -> STT Engine (auto) -> LLM Cleanup -> Clipboard + Ctrl+V -> Terminal
+                                     |                       |
+                                     |                       +-- google/gemini-2.5-flash (primary)
+                                     |                       +-- qwen/qwen-2.5-7b-instruct (fallback)
+                                     |                       +-- NullObject: raw text if LLM down
                                      +-- Local: Whisper large-v3 (CUDA float16)
                                      +-- Cloud: Groq (whisper-large-v3)
                                      +-- Cloud: Deepgram (Nova-3)
@@ -131,7 +159,7 @@ Add to `~/.claude/settings.json`:
 Right-click the animated Rorschach sphere in the system tray:
 
 ```
-✨ Voice Bridge v0.9.9.0426 ✨
+✨ Voice Bridge v1.0.0.0630 ✨
 ────────────────────────────
 🧠 Local GPU  ·  🇮🇹 Italiano  ·  🎤 Default     <- always visible status
 ────────────────────────────
@@ -261,6 +289,31 @@ La v0.9.9 introduce **STT multi-backend** con fallback automatico:
 
 Le API key sono gestite in modo sicuro: variabili d'ambiente > keyring OS > config JSON.
 
+## STT Cleanup (v1.0)
+
+La v1.0 aggiunge un passaggio di **cleanup LLM language-preserving** su ogni trascrizione. Whisper e' veloce e preciso, ma ogni tanto perde una parola, storpia i termini tech inglesi sentiti foneticamente (es. "di tab" -> **GitHub**) e salta la punteggiatura. Il cleanup sistema esattamente quello — e nient'altro.
+
+- **Cosa fa** — corregge le sviste STT, restaura i termini tech inglesi resi foneticamente e sistema la punteggiatura, **preservando la lingua parlata** (non traduce mai il tuo IT / EN / PT). Applicato sia alla **dettatura live** sia ai **file audio** droppati.
+- **Non ti blocca mai (NullObject)** — se l'LLM e' irraggiungibile resta il testo grezzo. La dettatura non si ferma mai ad aspettare la rete.
+- **Modello** — `google/gemini-2.5-flash` (primario) + `qwen/qwen-2.5-7b-instruct` (fallback), via **[OpenRouter](https://openrouter.ai)**. Scelto empiricamente: e' l'unico modello che recupera in modo affidabile i garble fonetici severi **quando gli si passa un glossario**.
+- **Glossario config-driven** (`stt_cleanup_glossary`) — una lista dei *tuoi* termini (GitHub, Nextcloud, nomi progetti…) iniettata come grounding, cosi' anche un audio molto storpiato rimappa al termine giusto. E' una **whitelist LLM-first, non un dizionario hardcoded**.
+- **Multilingua** — la lingua viene auto-rilevata (il vecchio bias hardcoded sull'italiano e' stato rimosso). Imposta `whisper_language` per forzare una lingua, lascialo vuoto per auto.
+- **Gating file lunghi** — per trascrizioni piu' lunghe di `transcribe_extras_max_chars` (default 2500) si saltano traduzioni + TTS dub; ottieni solo la trascrizione pulita.
+
+### Nuove chiavi `tts_config.json`
+
+| Chiave | Default | Scopo |
+|--------|---------|-------|
+| `enable_stt_cleanup` | `true` | Interruttore principale del cleanup LLM |
+| `stt_cleanup_model` | `google/gemini-2.5-flash` | Modello di cleanup primario (OpenRouter) |
+| `stt_cleanup_fallback` | `qwen/qwen-2.5-7b-instruct` | Modello di fallback quando il primario fallisce |
+| `stt_cleanup_glossary` | `[]` | I tuoi termini di dominio, iniettati come grounding |
+| `transcribe_translations` | `true` | Produce traduzioni EN/IT/PT per i file audio droppati |
+| `transcribe_tts_dub` | `true` | Sintetizza i dub TTS parlati delle traduzioni |
+| `transcribe_extras_max_chars` | `2500` | Oltre questa lunghezza, salta traduzioni + dub (solo trascrizione pulita) |
+
+**Chiave OpenRouter** — imposta `OPENROUTER_API_KEY` come variabile d'ambiente, oppure `stt_api_key_openrouter` in `tts_config.json`. Stessa scala sicura degli altri provider: **variabili d'ambiente > keyring OS > config JSON**.
+
 ## Prerequisiti
 
 - Windows 10/11
@@ -313,7 +366,7 @@ pip install keyring
 Click destro sulla sfera Rorschach nel system tray:
 
 ```
-✨ Voice Bridge v0.9.9.0426 ✨
+✨ Voice Bridge v1.0.0.0630 ✨
 ────────────────────────────
 🧠 Local GPU  ·  🇮🇹 Italiano  ·  🎤 Default     <- barra stato sempre visibile
 ────────────────────────────
@@ -387,6 +440,31 @@ A v0.9.9 introduz **STT multi-backend** com fallback automatico:
 
 As API keys sao armazenadas com seguranca: variaveis de ambiente > keyring do OS > config JSON.
 
+## STT Cleanup (v1.0)
+
+A v1.0 adiciona uma etapa de **cleanup LLM que preserva o idioma** sobre cada transcricao. O Whisper e rapido e preciso, mas ainda perde uma palavra aqui e ali, distorce termos tech em ingles ouvidos foneticamente (ex. "di tab" -> **GitHub**) e pula a pontuacao. O cleanup corrige exatamente isso — e nada mais.
+
+- **O que faz** — corrige os deslizes do STT, restaura os termos tech em ingles ouvidos foneticamente e ajusta a pontuacao, **preservando o idioma falado** (nunca traduz seu IT / EN / PT). Aplicado tanto ao **ditado ao vivo** quanto aos **arquivos de audio** soltos.
+- **Nunca te bloqueia (NullObject)** — se o LLM estiver inacessivel, o texto bruto e mantido. O ditado nunca trava esperando a rede.
+- **Modelo** — `google/gemini-2.5-flash` (primario) + `qwen/qwen-2.5-7b-instruct` (fallback), via **[OpenRouter](https://openrouter.ai)**. Escolhido empiricamente: e o unico modelo que recupera de forma confiavel os garbles foneticos severos **quando recebe um glossario**.
+- **Glossario config-driven** (`stt_cleanup_glossary`) — uma lista dos *seus* termos (GitHub, Nextcloud, nomes de projetos…) injetada como grounding, para que mesmo um audio muito distorcido remapeie ao termo certo. E uma **whitelist LLM-first, nao um dicionario hardcoded**.
+- **Multilingual** — o idioma e detectado automaticamente (o antigo bias hardcoded no italiano foi removido). Defina `whisper_language` para forcar um idioma, deixe vazio para auto.
+- **Gating de arquivos longos** — para transcricoes maiores que `transcribe_extras_max_chars` (padrao 2500), traducoes + TTS dub sao puladas; voce recebe apenas a transcricao limpa.
+
+### Novas chaves `tts_config.json`
+
+| Chave | Padrao | Proposito |
+|-------|--------|-----------|
+| `enable_stt_cleanup` | `true` | Interruptor principal do cleanup LLM |
+| `stt_cleanup_model` | `google/gemini-2.5-flash` | Modelo de cleanup primario (OpenRouter) |
+| `stt_cleanup_fallback` | `qwen/qwen-2.5-7b-instruct` | Modelo de fallback quando o primario falha |
+| `stt_cleanup_glossary` | `[]` | Seus termos de dominio, injetados como grounding |
+| `transcribe_translations` | `true` | Produz traducoes EN/IT/PT para arquivos de audio soltos |
+| `transcribe_tts_dub` | `true` | Sintetiza os dubs TTS falados das traducoes |
+| `transcribe_extras_max_chars` | `2500` | Acima deste tamanho, pula traducoes + dub (apenas transcricao limpa) |
+
+**Chave OpenRouter** — defina `OPENROUTER_API_KEY` como variavel de ambiente, ou `stt_api_key_openrouter` no `tts_config.json`. Mesma escala segura dos outros provedores: **variaveis de ambiente > keyring do OS > config JSON**.
+
 ## Pre-requisitos
 
 - Windows 10/11
@@ -439,7 +517,7 @@ pip install keyring
 Clique direito na esfera Rorschach no system tray:
 
 ```
-✨ Voice Bridge v0.9.9.0426 ✨
+✨ Voice Bridge v1.0.0.0630 ✨
 ────────────────────────────
 🧠 Local GPU  ·  🇮🇹 Italiano  ·  🎤 Default     <- barra de status sempre visivel
 ────────────────────────────
