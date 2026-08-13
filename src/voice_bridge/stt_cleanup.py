@@ -19,6 +19,12 @@ Design notes
   network errors — the same shape as ``groq_stt._call_api``.
 * Fallback model: if the primary model fails, a secondary model is
   tried before giving up.
+* Chunking: long transcriptions are split on sentence boundaries and
+  cleaned one block per call, because a single call is capped by the
+  model's own output budget (see ``_CLEANUP_CHUNK_CHARS``). A chunk that
+  fails keeps its raw text instead of failing the whole transcription.
+* Truncation guard: a response with ``finish_reason == "length"`` is a
+  *failure*, never a success — its body is mutilated by construction.
 * Circuit-breaker: after N consecutive *full* failures in a session the
   agent stops calling the network and returns ``None`` immediately, so a
   prolonged outage costs nothing per file.
@@ -32,6 +38,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 
 logger = logging.getLogger(__name__)
@@ -54,6 +61,16 @@ HTTP_USER_AGENT = (
 CLEANUP_TEMPERATURE = 0.2
 _MAX_TOKENS_FLOOR = 1024
 _MAX_TOKENS_CEIL = 4096
+
+# Above this many characters the text is cleaned in several calls instead of
+# one (see _chunk_text). The value is derived from _MAX_TOKENS_CEIL, it is not
+# a taste call: a single call's budget is `len(text)//3 + 256` capped at
+# _MAX_TOKENS_CEIL, so any text longer than ~11.5k chars used to hit that cap
+# and come back silently mutilated (a 2h / 74k-char transcription was cut to
+# 15k chars in the field). Keeping the chunk well under that bound
+# (8000//3 + 256 = 2922 < 4096) means the per-chunk budget can NEVER reach the
+# ceiling, and leaves headroom for thinking-model reasoning tokens.
+_CLEANUP_CHUNK_CHARS = 8000
 
 _MAX_RETRIES = 1                 # one retry on 429 / 5xx / network (à la groq_stt)
 _CIRCUIT_BREAKER_THRESHOLD = 3   # consecutive full failures before we give up
@@ -121,6 +138,78 @@ def _build_system_prompt(glossary: list[str] | None) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Chunking (sentence-boundary splitting for long transcriptions)
+# --------------------------------------------------------------------------- #
+#
+# NOTE on the regex: the project rule is LLM-first for parsing/normalization,
+# regex only as a last resort. This is the explicit exception — splitting a
+# text into blocks is *tokenization*, one of the listed regex-acceptable uses.
+# Nothing semantic is decided here: a wrong boundary costs a slightly awkward
+# block, never a wrong word, and the LLM still sees full sentences.
+
+# A boundary is: sentence-final punctuation followed by whitespace, or one or
+# more newlines. The separator is kept with the block that precedes it, so
+# "".join(chunks) reproduces the input byte for byte.
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?…])\s+|\n+")
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split *text* into sentence-ish blocks, separators included."""
+    pieces: list[str] = []
+    last = 0
+    for m in _SENTENCE_BOUNDARY_RE.finditer(text):
+        pieces.append(text[last:m.end()])
+        last = m.end()
+    if last < len(text):
+        pieces.append(text[last:])
+    return pieces
+
+
+def _hard_split(piece: str, limit: int) -> list[str]:
+    """Break a single over-long block on word boundaries.
+
+    Whisper can emit minutes of speech with no sentence terminator at all; a
+    block like that would otherwise blow past the budget. Cuts on the last
+    space inside the window, or mid-word if there is not even one.
+    """
+    if len(piece) <= limit:
+        return [piece]
+    out: list[str] = []
+    rest = piece
+    while len(rest) > limit:
+        cut = rest.rfind(" ", 0, limit)
+        cut = limit if cut <= 0 else cut + 1  # keep the space on the left side
+        out.append(rest[:cut])
+        rest = rest[cut:]
+    if rest:
+        out.append(rest)
+    return out
+
+
+def _chunk_text(text: str, limit: int = _CLEANUP_CHUNK_CHARS) -> list[str]:
+    """Split *text* into blocks of at most *limit* chars on sentence boundaries.
+
+    Returns ``[text]`` unchanged when it already fits — the common case (live
+    dictation) keeps its exact single-call behaviour.
+    """
+    if len(text) <= limit:
+        return [text]
+
+    chunks: list[str] = []
+    buf = ""
+    for piece in _split_sentences(text):
+        for block in _hard_split(piece, limit):
+            if buf and len(buf) + len(block) > limit:
+                chunks.append(buf)
+                buf = block
+            else:
+                buf += block
+    if buf:
+        chunks.append(buf)
+    return chunks
+
+
+# --------------------------------------------------------------------------- #
 # Circuit-breaker (session-scoped consecutive-failure counter)
 # --------------------------------------------------------------------------- #
 
@@ -150,6 +239,18 @@ def reset_circuit_breaker() -> None:
 # --------------------------------------------------------------------------- #
 # HTTP transport
 # --------------------------------------------------------------------------- #
+
+class _TruncatedOutputError(Exception):
+    """The model stopped because it ran out of output budget.
+
+    ``finish_reason == "length"`` means the body we got back is mutilated by
+    construction — accepting it would silently destroy the tail of the user's
+    transcription. It is raised *outside* the transport retry block on
+    purpose: retrying the same model with the same cap would truncate again,
+    so the caller moves straight on to the fallback model and, failing that,
+    keeps the raw text.
+    """
+
 
 class _HttpError(Exception):
     """Normalised HTTP failure carrying status + Retry-After.
@@ -213,8 +314,9 @@ def _chat_completion(text: str, *, model: str, api_key: str,
                      system_prompt: str = SYSTEM_PROMPT, _retry: int = 0) -> str:
     """Call one model once (with bounded retry) and return the cleaned text.
 
-    Raises ``_HttpError`` when the model ultimately fails — the caller decides
-    whether to try the fallback model or give up.
+    Raises ``_HttpError`` when the model ultimately fails, or
+    ``_TruncatedOutputError`` when the answer came back cut off — the caller
+    decides whether to try the fallback model or give up.
     """
     # Cleanup output ≈ input length; scale the cap so long notes aren't
     # truncated, leaving headroom for thinking-model reasoning tokens.
@@ -263,12 +365,58 @@ def _chat_completion(text: str, *, model: str, api_key: str,
                                     _retry=_retry + 1)
         raise
 
-    return data["choices"][0]["message"]["content"].strip()
+    choice = data["choices"][0]
+    # Truncation guard — MUST come before we look at the content. A body that
+    # stopped on "length" is incomplete; treating it as a success is exactly
+    # how a 2h transcription silently lost 80% of its text.
+    finish_reason = choice.get("finish_reason")
+    if finish_reason == "length":
+        raise _TruncatedOutputError(
+            f"output truncated (finish_reason=length, max_tokens={max_tokens}, "
+            f"input={len(text)} chars)"
+        )
+    return choice["message"]["content"].strip()
 
 
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
+
+def _cleanup_chunk(chunk: str, *, candidates: list[str], api_key: str,
+                   system_prompt: str) -> str | None:
+    """Clean ONE block through the candidate models. ``None`` = all failed.
+
+    Also the circuit-breaker accounting point: a long text is many calls, so
+    the breaker is fed per chunk. That way a service outage halfway through a
+    2h transcription stops the remaining calls instead of paying for one
+    doomed request per block.
+    """
+    if _breaker_open():
+        logger.info(
+            "STT cleanup circuit-breaker open (%d consecutive failures) — "
+            "using raw text", _consecutive_failures,
+        )
+        return None
+
+    for candidate in candidates:
+        try:
+            cleaned = _chat_completion(chunk, model=candidate, api_key=api_key,
+                                       system_prompt=system_prompt)
+        except Exception as e:  # noqa: BLE001 — degrade on anything
+            logger.warning("STT cleanup model '%s' failed: %s", candidate, e)
+            continue
+        if cleaned:
+            _record_success()
+            return cleaned
+        logger.warning("STT cleanup model '%s' returned empty output", candidate)
+
+    _record_failure()
+    logger.warning(
+        "STT cleanup failed for all models (%s) — keeping raw transcription",
+        ", ".join(candidates),
+    )
+    return None
+
 
 def cleanup_text(
     text: str,
@@ -284,6 +432,11 @@ def cleanup_text(
     the caller falls back to the raw transcription). Tries ``model`` first,
     then ``fallback`` if given. A session circuit-breaker short-circuits
     once the service has failed repeatedly.
+
+    Long texts are split into sentence-aligned chunks and cleaned one call
+    per chunk (transparently — the signature does not change). A chunk that
+    cannot be cleaned keeps its raw text and the rest of the transcription is
+    still cleaned; only an all-chunks failure degrades to ``None``.
 
     ``glossary`` is an optional list of exact terms the speaker uses; when
     non-empty it is appended to the system prompt so the model can recover
@@ -308,21 +461,39 @@ def cleanup_text(
     if fallback and fallback != model:
         candidates.append(fallback)
 
-    for candidate in candidates:
-        try:
-            cleaned = _chat_completion(text, model=candidate, api_key=api_key,
-                                       system_prompt=system_prompt)
-        except Exception as e:  # noqa: BLE001 — degrade on anything
-            logger.warning("STT cleanup model '%s' failed: %s", candidate, e)
-            continue
-        if cleaned:
-            _record_success()
-            return cleaned
-        logger.warning("STT cleanup model '%s' returned empty output", candidate)
+    chunks = _chunk_text(text)
+    if len(chunks) == 1:
+        return _cleanup_chunk(chunks[0], candidates=candidates,
+                              api_key=api_key, system_prompt=system_prompt)
 
-    _record_failure()
-    logger.warning(
-        "STT cleanup failed for all models (%s) — keeping raw transcription",
-        ", ".join(candidates),
+    logger.info(
+        "STT cleanup: %d chars exceed the %d-char single-call budget — "
+        "cleaning in %d chunks", len(text), _CLEANUP_CHUNK_CHARS, len(chunks),
     )
-    return None
+    parts: list[str] = []
+    failed = 0
+    for i, chunk in enumerate(chunks, start=1):
+        cleaned = _cleanup_chunk(chunk, candidates=candidates,
+                                 api_key=api_key, system_prompt=system_prompt)
+        if cleaned:
+            parts.append(cleaned)
+        else:
+            failed += 1
+            logger.warning(
+                "STT cleanup: chunk %d/%d failed — keeping its raw text "
+                "(%d chars)", i, len(chunks), len(chunk),
+            )
+            parts.append(chunk.strip())
+
+    if failed == len(chunks):
+        logger.warning(
+            "STT cleanup failed for every one of the %d chunks — keeping raw "
+            "transcription", len(chunks),
+        )
+        return None
+    if failed:
+        logger.warning("STT cleanup: %d of %d chunks kept their raw text",
+                       failed, len(chunks))
+    # Blank line between blocks: the boundaries are sentence-aligned, so this
+    # only adds paragraph breaks to what was one unreadable wall of text.
+    return "\n\n".join(p for p in parts if p)

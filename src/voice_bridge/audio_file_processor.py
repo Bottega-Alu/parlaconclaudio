@@ -3,7 +3,8 @@
 For each audio file the user selects, this module produces up to four
 text outputs saved next to the source:
 
-  <stem>.original.txt   — Whisper transcribe, source language
+  <stem>.original.txt   — Whisper transcribe, source language (cleaned)
+  <stem>.raw.txt        — pre-cleanup Whisper output (only when it differs)
   <stem>.en.txt         — Whisper translate (English)
   <stem>.it.txt         — Groq LLM translate (Italian)
   <stem>.pt.txt         — Groq LLM translate (Portuguese)
@@ -432,15 +433,26 @@ class AudioFileProcessor:
     @staticmethod
     def _save_outputs(result: FileResult) -> list[Path]:
         base = result.source.with_suffix("")
-        saved: list[Path] = []
-        for suffix, content in (
-            # Source-language file carries the cleaned text when available;
-            # result.original keeps the raw transcription in-memory for audit.
+        outputs: list[tuple[str, str]] = [
+            # Source-language file carries the cleaned text when available —
+            # unchanged semantics, this is the file the user actually opens.
             (".original.txt", result.cleaned or result.original),
+        ]
+        # Whenever cleanup rewrote the text, the raw Whisper output is the
+        # only copy of the source data and it used to live in memory only: a
+        # degraded cleanup (truncation, over-eager edits, wrong language) then
+        # destroyed it for good. Persist it next to the cleaned file so the
+        # transcription is always recoverable. When nothing was rewritten
+        # .original.txt already IS the raw text — no duplicate is written.
+        if result.cleaned and result.cleaned != result.original:
+            outputs.append((".raw.txt", result.original))
+        outputs += [
             (".en.txt", result.english),
             (".it.txt", result.italian),
             (".pt.txt", result.portuguese),
-        ):
+        ]
+        saved: list[Path] = []
+        for suffix, content in outputs:
             if not content:
                 continue
             out = Path(str(base) + suffix)

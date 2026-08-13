@@ -17,4 +17,4 @@ for _pkg in ("cudnn", "cublas", "cuda_runtime"):
         os.environ["PATH"] = str(_nvidia_bin) + os.pathsep + os.environ.get("PATH", "")
         os.add_dll_directory(str(_nvidia_bin))
 
-__version__ = "1.0.0.0630"
+__version__ = "1.0.1.0813"
