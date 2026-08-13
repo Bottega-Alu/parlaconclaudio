@@ -23,8 +23,15 @@ Design notes
   cleaned one block per call, because a single call is capped by the
   model's own output budget (see ``_CLEANUP_CHUNK_CHARS``). A chunk that
   fails keeps its raw text instead of failing the whole transcription.
+* Reasoning off: every call carries ``reasoning: {"effort": "none"}``.
+  Cleanup is mechanical correction, and reasoning tokens are billed as
+  output tokens out of the same ``max_tokens`` budget as the answer — a
+  thinking model spends the budget on itself and then truncates. A
+  provider that rejects the parameter gets one re-send without it.
 * Truncation guard: a response with ``finish_reason == "length"`` is a
-  *failure*, never a success — its body is mutilated by construction.
+  *failure*, never a success — its body is mutilated by construction. The
+  error carries the provider's token accounting (including
+  ``reasoning_tokens``) so the next incident is read, not guessed.
 * Circuit-breaker: after N consecutive *full* failures in a session the
   agent stops calling the network and returns ``None`` immediately, so a
   prolonged outage costs nothing per file.
@@ -54,22 +61,49 @@ HTTP_USER_AGENT = (
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
+# Reasoning: OFF. Cleanup is mechanical text correction — there is nothing to
+# think about, and on OpenRouter reasoning tokens are billed as output tokens
+# drawn from the SAME `max_tokens` budget as the answer. gemini-2.5-flash is a
+# thinking model, so it was spending that budget on an internal monologue and
+# then running out mid-answer: every primary call failed the truncation guard
+# (field log 2026-06-30 18:54, max_tokens=2915 / input=7977 chars) and silently
+# demoted us to the qwen fallback, which the bench had rejected for severe
+# phonetic garbles. `effort: "none"` is the value OpenRouter documents as
+# "Disables reasoning entirely"; it is part of the `reasoning.effort` enum in
+# the API reference, so it is provider-agnostic — OpenRouter normalises it per
+# provider instead of us hardcoding Google's `thinkingBudget: 0`.
+#
+# The docs do NOT promise that a non-thinking model ignores the object, so this
+# is belt AND braces: _chat_completion re-sends once without it on a 4xx
+# reject (see _REASONING_REJECT_STATUSES). No list of "which models think".
+CLEANUP_REASONING = {"effort": "none"}
+_REASONING_REJECT_STATUSES = (400, 422)
+
 # Sampling: low temperature (deterministic, minimum-edit). max_tokens is
-# computed per-call from the input length (see _chat_completion): a fixed 512
-# truncated long transcriptions, and thinking-models (gemini-2.5-flash) also
-# spend tokens on internal reasoning, so the cap must scale with the text.
+# computed per-call from the input length (see _budget_for): a fixed 512
+# truncated long transcriptions, so the cap must scale with the text.
 CLEANUP_TEMPERATURE = 0.2
 _MAX_TOKENS_FLOOR = 1024
-_MAX_TOKENS_CEIL = 4096
+_MAX_TOKENS_CEIL = 8192
+
+# Headroom added on top of the text budget. With CLEANUP_REASONING this should
+# be dead weight — it is deliberate belt-and-braces for the case we cannot test
+# offline: a provider that quietly ignores `effort: "none"` and thinks anyway.
+# It is free insurance, because max_tokens is a CAP, not a charge: unspent
+# tokens are never generated and never billed.
+_REASONING_ALLOWANCE = 2048
 
 # Above this many characters the text is cleaned in several calls instead of
 # one (see _chunk_text). The value is derived from _MAX_TOKENS_CEIL, it is not
-# a taste call: a single call's budget is `len(text)//3 + 256` capped at
-# _MAX_TOKENS_CEIL, so any text longer than ~11.5k chars used to hit that cap
-# and come back silently mutilated (a 2h / 74k-char transcription was cut to
-# 15k chars in the field). Keeping the chunk well under that bound
-# (8000//3 + 256 = 2922 < 4096) means the per-chunk budget can NEVER reach the
-# ceiling, and leaves headroom for thinking-model reasoning tokens.
+# a taste call: a single call's budget is
+# `max(_MAX_TOKENS_FLOOR, len(text)//3 + 256) + _REASONING_ALLOWANCE` capped at
+# _MAX_TOKENS_CEIL, so a long enough text used to hit that cap and come back
+# silently mutilated (a 2h / 74k-char transcription was cut to 15k chars in the
+# field). Keeping the chunk well under that bound means the per-chunk budget
+# can NEVER reach the ceiling:
+#     max(1024, 8000//3 + 256) + 2048 = 2922 + 2048 = 4970 < 8192
+# That inequality is the invariant; test_chunk_threshold_can_never_reach_the
+# _token_ceiling asserts it against the real formula, not against a copy of it.
 _CLEANUP_CHUNK_CHARS = 8000
 
 _MAX_RETRIES = 1                 # one retry on 429 / 5xx / network (à la groq_stt)
@@ -310,17 +344,56 @@ def _safe_float(value: str | None, default: float = 1.0) -> float:
         return default
 
 
+def _budget_for(text: str) -> int:
+    """Output-token cap for one call on *text*.
+
+    Two separate concerns, kept separate on purpose:
+      * the *text* budget — cleanup output ≈ input length, floored so a short
+        dictation still gets room, i.e. ``max(FLOOR, len//3 + 256)``;
+      * the *reasoning* allowance — headroom for a provider that ignores our
+        ``reasoning: {"effort": "none"}`` and thinks anyway.
+    The sum is capped at ``_MAX_TOKENS_CEIL``, which chunking guarantees is
+    never actually reached (see ``_CLEANUP_CHUNK_CHARS``).
+    """
+    text_budget = max(_MAX_TOKENS_FLOOR, len(text) // 3 + 256)
+    return min(_MAX_TOKENS_CEIL, text_budget + _REASONING_ALLOWANCE)
+
+
+def _usage_note(data: dict) -> str:
+    """Render the token telemetry OpenRouter attached to *data*, if any.
+
+    Returns e.g. ``", completion_tokens=2915, reasoning_tokens=2711"`` — the
+    two numbers that turn "why was this truncated?" into a fact instead of a
+    guess. Empty string when the provider sent no ``usage`` block; nothing is
+    invented, and a malformed block never breaks the error path.
+    """
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return ""
+    bits = []
+    completion = usage.get("completion_tokens")
+    if completion is not None:
+        bits.append(f"completion_tokens={completion}")
+    details = usage.get("completion_tokens_details")
+    if isinstance(details, dict) and details.get("reasoning_tokens") is not None:
+        bits.append(f"reasoning_tokens={details['reasoning_tokens']}")
+    return (", " + ", ".join(bits)) if bits else ""
+
+
 def _chat_completion(text: str, *, model: str, api_key: str,
-                     system_prompt: str = SYSTEM_PROMPT, _retry: int = 0) -> str:
+                     system_prompt: str = SYSTEM_PROMPT, _retry: int = 0,
+                     _reasoning: bool = True) -> str:
     """Call one model once (with bounded retry) and return the cleaned text.
 
     Raises ``_HttpError`` when the model ultimately fails, or
     ``_TruncatedOutputError`` when the answer came back cut off — the caller
     decides whether to try the fallback model or give up.
+
+    ``_reasoning`` is internal: it starts ``True`` (thinking explicitly off via
+    ``CLEANUP_REASONING``) and flips to ``False`` for the single re-send that
+    follows a provider rejecting the parameter.
     """
-    # Cleanup output ≈ input length; scale the cap so long notes aren't
-    # truncated, leaving headroom for thinking-model reasoning tokens.
-    max_tokens = min(_MAX_TOKENS_CEIL, max(_MAX_TOKENS_FLOOR, len(text) // 3 + 256))
+    max_tokens = _budget_for(text)
     payload = {
         "model": model,
         "temperature": CLEANUP_TEMPERATURE,
@@ -330,6 +403,8 @@ def _chat_completion(text: str, *, model: str, api_key: str,
             {"role": "user", "content": text},
         ],
     }
+    if _reasoning:
+        payload["reasoning"] = dict(CLEANUP_REASONING)
     body = json.dumps(payload).encode("utf-8")
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -352,8 +427,23 @@ def _chat_completion(text: str, *, model: str, api_key: str,
                 time.sleep(wait)
                 return _chat_completion(text, model=model, api_key=api_key,
                                         system_prompt=system_prompt,
-                                        _retry=_retry + 1)
+                                        _retry=_retry + 1, _reasoning=_reasoning)
             raise
+        if e.status in _REASONING_REJECT_STATUSES and _reasoning:
+            # OpenRouter documents `reasoning` as a unified parameter but does
+            # NOT promise that a model without thinking ignores it. Rather than
+            # keeping a hardcoded list of thinking-capable models (which rots
+            # every time a default changes), we let the provider tell us: on a
+            # 4xx we re-send once, without the parameter. `_reasoning=False`
+            # makes this branch unreachable the second time, so a 400 that had
+            # nothing to do with reasoning still terminates after one re-send.
+            logger.warning(
+                "STT cleanup [%s]: request rejected (HTTP %s) with the "
+                "`reasoning` parameter — retrying once without it", model, e.status,
+            )
+            return _chat_completion(text, model=model, api_key=api_key,
+                                    system_prompt=system_prompt,
+                                    _retry=_retry, _reasoning=False)
         if (e.status is None or e.status >= 500) and _retry < _MAX_RETRIES:
             logger.warning(
                 "STT cleanup [%s]: %s, retrying...",
@@ -362,7 +452,7 @@ def _chat_completion(text: str, *, model: str, api_key: str,
             time.sleep(1)
             return _chat_completion(text, model=model, api_key=api_key,
                                     system_prompt=system_prompt,
-                                    _retry=_retry + 1)
+                                    _retry=_retry + 1, _reasoning=_reasoning)
         raise
 
     choice = data["choices"][0]
@@ -371,9 +461,15 @@ def _chat_completion(text: str, *, model: str, api_key: str,
     # how a 2h transcription silently lost 80% of its text.
     finish_reason = choice.get("finish_reason")
     if finish_reason == "length":
+        # Carry the provider's own token accounting into the message: a high
+        # reasoning_tokens here is the smoking gun that thinking ate the
+        # budget (i.e. our `effort: "none"` was ignored), and that is the one
+        # thing the previous incident could only be guessed at.
         raise _TruncatedOutputError(
             f"output truncated (finish_reason=length, max_tokens={max_tokens}, "
-            f"input={len(text)} chars)"
+            f"input={len(text)} chars, "
+            f"reasoning_param={'effort=none' if _reasoning else 'stripped'}"
+            f"{_usage_note(data)})"
         )
     return choice["message"]["content"].strip()
 

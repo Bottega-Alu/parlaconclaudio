@@ -89,12 +89,13 @@ def test_cleanup_happy_returns_cleaned(monkeypatch):
         assert payload["messages"][-1]["content"] == "spicciuto testo"
         # detected_language must NOT be smuggled in as authoritative
         assert payload["temperature"] == 0.2
-        # max_tokens is dynamic; short input floors at 1024
-        assert payload["max_tokens"] == 1024
+        # max_tokens is dynamic; short input floors at 1024 + reasoning allowance
+        assert payload["max_tokens"] == 1024 + stt_cleanup._REASONING_ALLOWANCE
         # no glossary passed -> base prompt, no GLOSSARY section
         assert "GLOSSARY" not in payload["messages"][0]["content"]
-        # the request stays clean — no `reasoning` override
-        assert "reasoning" not in payload
+        # thinking is explicitly switched off — cleanup is mechanical, and on
+        # OpenRouter reasoning tokens eat the same max_tokens budget
+        assert payload["reasoning"] == {"effort": "none"}
         return _ok("speech to text")
 
     monkeypatch.setattr(stt_cleanup, "_http_post_json", fake_http)
@@ -195,19 +196,21 @@ def test_max_tokens_scales_with_input_length(monkeypatch):
         return _ok("out")
 
     monkeypatch.setattr(stt_cleanup, "_http_post_json", fake_http)
+    allowance = stt_cleanup._REASONING_ALLOWANCE
 
-    # short input -> floored at 1024
+    # short input -> text budget floored at 1024, plus the reasoning allowance
     stt_cleanup.cleanup_text("short", model="m", fallback=None, api_key="KEY")
-    assert captured[-1]["max_tokens"] == 1024
+    assert captured[-1]["max_tokens"] == 1024 + allowance
 
-    # mid-length input (under the chunk threshold) -> single call, len//3 + 256
+    # mid-length input (under the chunk threshold) -> single call,
+    # (len//3 + 256) + allowance
     mid = "x" * 6000
     assert len(mid) <= stt_cleanup._CLEANUP_CHUNK_CHARS
     captured.clear()
     stt_cleanup.cleanup_text(mid, model="m", fallback=None, api_key="KEY")
     assert len(captured) == 1
-    assert captured[-1]["max_tokens"] == max(1024, len(mid) // 3 + 256)
-    assert captured[-1]["max_tokens"] == 2256
+    assert captured[-1]["max_tokens"] == max(1024, len(mid) // 3 + 256) + allowance
+    assert captured[-1]["max_tokens"] == 2256 + allowance
 
     # very long input -> chunked, and NO single call may reach the ceiling
     # (that ceiling is what silently truncated a 2h transcription).
@@ -307,9 +310,19 @@ def test_success_resets_breaker(monkeypatch):
 def test_chunk_threshold_can_never_reach_the_token_ceiling():
     """Structural invariant: the per-chunk max_tokens formula must stay below
     _MAX_TOKENS_CEIL for the largest possible chunk, otherwise a chunk could
-    be silently truncated exactly like the un-chunked call was."""
-    worst = stt_cleanup._CLEANUP_CHUNK_CHARS // 3 + 256
+    be silently truncated exactly like the un-chunked call was.
+
+    The formula is (max(FLOOR, len//3 + 256) + REASONING_ALLOWANCE) capped at
+    CEIL — the allowance is part of the invariant, not an afterthought: it is
+    exactly what a provider that ignores `reasoning: {"effort": "none"}` will
+    spend on thinking before writing a single character of the answer."""
+    worst = max(
+        stt_cleanup._MAX_TOKENS_FLOOR,
+        stt_cleanup._CLEANUP_CHUNK_CHARS // 3 + 256,
+    ) + stt_cleanup._REASONING_ALLOWANCE
     assert worst < stt_cleanup._MAX_TOKENS_CEIL
+    # and it is the formula the code actually uses, not a restatement of it
+    assert stt_cleanup._budget_for("x" * stt_cleanup._CLEANUP_CHUNK_CHARS) == worst
 
 
 def test_chunk_text_short_input_is_one_chunk():
@@ -470,6 +483,142 @@ def test_finish_reason_stop_or_absent_is_accepted(monkeypatch):
     monkeypatch.setattr(stt_cleanup, "_http_post_json", fake_absent)
     assert stt_cleanup.cleanup_text("raw", model="m", fallback=None,
                                     api_key="KEY") == "pulito"
+
+
+def test_truncation_message_reports_reasoning_tokens(monkeypatch, caplog):
+    """A truncation must be diagnosable from the log alone.
+
+    The field incident (18:54, gemini-2.5-flash) could only be explained by
+    guessing that thinking had eaten the budget. When OpenRouter reports
+    `usage.completion_tokens_details.reasoning_tokens` the failure message
+    must carry it, so the next incident is read, not inferred."""
+    monkeypatch.setattr(stt_cleanup.time, "sleep", lambda *a, **k: None)
+
+    def fake_http(url, body, headers, timeout):
+        return {
+            "choices": [{"message": {"content": "mezza fra"},
+                         "finish_reason": "length"}],
+            "usage": {"completion_tokens": 2915,
+                      "completion_tokens_details": {"reasoning_tokens": 2711}},
+        }
+
+    monkeypatch.setattr(stt_cleanup, "_http_post_json", fake_http)
+    with caplog.at_level("WARNING"):
+        assert stt_cleanup.cleanup_text("raw", model="m", fallback=None,
+                                        api_key="KEY") is None
+    log = caplog.text
+    assert "reasoning_tokens=2711" in log
+    assert "completion_tokens=2915" in log
+    assert "finish_reason=length" in log
+    assert "max_tokens=" in log
+
+
+def test_truncation_message_survives_a_response_without_usage(monkeypatch, caplog):
+    """Providers that omit `usage` must not turn a truncation into a crash."""
+    monkeypatch.setattr(stt_cleanup.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(
+        stt_cleanup, "_http_post_json",
+        lambda *a, **k: _ok("mezza fra", finish_reason="length"),
+    )
+    with caplog.at_level("WARNING"):
+        assert stt_cleanup.cleanup_text("raw", model="m", fallback=None,
+                                        api_key="KEY") is None
+    assert "finish_reason=length" in caplog.text
+    assert "reasoning_tokens" not in caplog.text  # nothing to report, nothing invented
+
+
+# --------------------------------------------------------------------------- #
+# FEATURE G — reasoning is switched off (thinking must not eat the budget)
+# --------------------------------------------------------------------------- #
+
+def test_reasoning_disabled_on_every_model_and_every_chunk(monkeypatch):
+    """`reasoning: {"effort": "none"}` is not a primary-model special case:
+    the fallback and every chunk of a long text must carry it too."""
+    monkeypatch.setattr(stt_cleanup.time, "sleep", lambda *a, **k: None)
+    captured = []
+
+    def fake_http(url, body, headers, timeout):
+        payload = json.loads(body.decode("utf-8"))
+        captured.append(payload)
+        if payload["model"] == "primary":
+            raise stt_cleanup._HttpError(status=500)
+        return _ok("pulito", finish_reason="stop")
+
+    monkeypatch.setattr(stt_cleanup, "_http_post_json", fake_http)
+    stt_cleanup.cleanup_text(_sentences(200), model="primary", fallback="second",
+                             api_key="KEY")
+
+    assert len(captured) > 2
+    assert {p["model"] for p in captured} == {"primary", "second"}
+    assert all(p["reasoning"] == stt_cleanup.CLEANUP_REASONING for p in captured)
+
+
+def test_reasoning_param_is_stripped_and_retried_when_rejected(monkeypatch):
+    """OpenRouter's docs do not promise that a non-thinking model ignores the
+    `reasoning` object. If a provider rejects the request because of it, the
+    call must be retried once WITHOUT the param rather than lost — no
+    hardcoded list of which models support thinking."""
+    monkeypatch.setattr(stt_cleanup.time, "sleep", lambda *a, **k: None)
+    captured = []
+
+    def fake_http(url, body, headers, timeout):
+        payload = json.loads(body.decode("utf-8"))
+        captured.append(payload)
+        if "reasoning" in payload:
+            raise stt_cleanup._HttpError(status=400, message="unsupported parameter")
+        return _ok("pulito dal modello senza thinking", finish_reason="stop")
+
+    monkeypatch.setattr(stt_cleanup, "_http_post_json", fake_http)
+    out = stt_cleanup.cleanup_text("raw", model="non-thinking", fallback=None,
+                                   api_key="KEY")
+
+    assert out == "pulito dal modello senza thinking"   # not lost to the reject
+    assert len(captured) == 2                           # exactly one re-send
+    assert "reasoning" in captured[0]
+    assert "reasoning" not in captured[1]
+    # the rest of the payload is unchanged by the strip
+    assert captured[0]["messages"] == captured[1]["messages"]
+    assert captured[0]["max_tokens"] == captured[1]["max_tokens"]
+
+
+def test_reasoning_strip_is_not_reattempted_forever(monkeypatch):
+    """A 400 that has nothing to do with `reasoning` must stay terminal: one
+    re-send without the param, then give up (never an infinite recursion)."""
+    monkeypatch.setattr(stt_cleanup.time, "sleep", lambda *a, **k: None)
+    calls = {"n": 0}
+
+    def fake_http(url, body, headers, timeout):
+        calls["n"] += 1
+        raise stt_cleanup._HttpError(status=400)
+
+    monkeypatch.setattr(stt_cleanup, "_http_post_json", fake_http)
+    assert stt_cleanup.cleanup_text("raw", model="m", fallback=None,
+                                    api_key="KEY") is None
+    assert calls["n"] == 2   # with reasoning, then without — and no more
+
+
+def test_reasoning_stays_stripped_across_the_5xx_retry(monkeypatch):
+    """Regression guard, same shape as the system_prompt one: once the param
+    has been rejected, the transport retry must not silently put it back."""
+    monkeypatch.setattr(stt_cleanup.time, "sleep", lambda *a, **k: None)
+    captured = []
+
+    def fake_http(url, body, headers, timeout):
+        payload = json.loads(body.decode("utf-8"))
+        captured.append(payload)
+        if "reasoning" in payload:
+            raise stt_cleanup._HttpError(status=400)
+        if len(captured) == 2:
+            raise stt_cleanup._HttpError(status=503)   # transport hiccup after the strip
+        return _ok("pulito", finish_reason="stop")
+
+    monkeypatch.setattr(stt_cleanup, "_http_post_json", fake_http)
+    out = stt_cleanup.cleanup_text("raw", model="m", fallback=None, api_key="KEY")
+
+    assert out == "pulito"
+    assert len(captured) == 3
+    assert "reasoning" in captured[0]
+    assert all("reasoning" not in p for p in captured[1:])
 
 
 # --------------------------------------------------------------------------- #
