@@ -47,6 +47,15 @@ Va prototipato sul flusso reale, non specificato a tavolino.
   in-place; oppure primo passo con modello locale a bassa latenza.
 - **Re-bench engine STT periodico** — oggi Whisper batte Qwen3-ASR sul reale, ma le
   versioni nuove vanno ri-testate; ledger + harness già pronti (`.work/stt-engine-scan/bench2/`).
+- **Bisezione on-truncation dei chunk cleanup** [Frisco, 2026-08-17] — caso reale
+  (Recording 16, chunk 3/12): micro-frasi ripetute nel parlato ("Ok." ×23) mandano
+  il modello in **runaway di generazione** fino al cap — `completion_tokens ==
+  max_tokens` con `reasoning_tokens=0`, output ~2,4× l'input — su gemini E qwen.
+  Oggi la degradazione tiene il chunk raw dentro un output integrale (corretto, zero
+  data loss). Mitigazione proposta: su `_TruncatedOutputError` con
+  `reasoning_tokens=0`, spezzare il chunk in due e ritentare (depth-limit 2):
+  dimezza la superficie del loop **senza** euristiche sul contenuto né
+  repetition-penalty che altererebbero la fedeltà minimal-edit del cleanup.
 - **Inserimento key OpenRouter da UI** [Frisco, 2026-06-30] — estendere il menu tray
   "Set API keys" (che già gestisce Groq/Deepgram con input mascherato) per includere la
   key OpenRouter del **cleanup LLM (affinamento output STT)**, così si imposta dall'app
