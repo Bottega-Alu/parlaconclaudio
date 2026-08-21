@@ -85,6 +85,13 @@ class WhisperRTXEngine(STTEngine):
         try:
             from faster_whisper import WhisperModel
 
+            from src.core.gpu_probe import ensure_cuda_dll_path
+
+            # Must run before the first CUDA inference: cuBLAS/cuDNN live in the
+            # nvidia-* wheels and nothing else puts them on the DLL search path.
+            if self.device != "cpu":
+                ensure_cuda_dll_path()
+
             logger.info("Loading Whisper model...")
 
             self.model = WhisperModel(
@@ -252,14 +259,9 @@ class WhisperRTXEngine(STTEngine):
             del self.model
             self.model = None
         gc.collect()
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                logger.info("VRAM purge: CUDA cache cleared")
-        except ImportError:
-            pass
+        # ctranslate2 owns its CUDA allocations and frees them when the model is
+        # destroyed - there is no cache to drain, so gc above is the whole job.
+        logger.info("VRAM purge: CUDA allocations released with the model")
         logger.info("VRAM purge: reloading model...")
         self._load_model()
         logger.info("VRAM purge: model reloaded fresh")

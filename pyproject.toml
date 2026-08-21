@@ -26,9 +26,13 @@ Pillow = "^10.0.0"
 faster-whisper = "^1.0.0"
 ctranslate2 = "^4.0.0"
 
-# GPU (CUDA)
-torch = "^2.7.0"
-torchaudio = "^2.7.0"
+# GPU (CUDA) - installed ONLY for the "gpu" profile, see src/core/gpu_probe.py.
+# ctranslate2 does NOT declare these itself but cannot run on CUDA without them:
+# its bundled cudnn64_9.dll is a 0.3 MB dispatcher stub, the real kernels live here.
+# torch was dropped (4.25 GB) - it was imported solely for a device check that
+# ctranslate2.get_cuda_device_count() + nvidia-smi answer natively.
+nvidia-cublas-cu12 = {version = "^12.9", optional = true}
+nvidia-cudnn-cu12 = {version = "^9.20", optional = true}
 
 # Windows paste simulation
 pywin32 = {version = "^306", markers = "sys_platform == 'win32'"}
@@ -36,13 +40,16 @@ pywin32 = {version = "^306", markers = "sys_platform == 'win32'"}
 # TTS (for notify-tts.py hook)
 edge-tts = "^6.1.0"
 
+[tool.poetry.extras]
+# poetry install -E gpu   -> local RTX path (adds ~1.6 GB of CUDA kernels)
+# poetry install          -> CPU / cloud-only path
+gpu = ["nvidia-cublas-cu12", "nvidia-cudnn-cu12"]
+
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
 
-[[tool.poetry.source]]
-name = "pytorch"
-url = "https://download.pytorch.org/whl/cu128"
-priority = "explicit"
+# Builds VoiceBridge.exe launcher stub (scripts/build_exe.ps1)
+pyinstaller = "^6.22"
 
 [build-system]
 requires = ["poetry-core"]

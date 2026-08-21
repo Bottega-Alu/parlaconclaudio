@@ -262,3 +262,7 @@ orkey.md
 # Bench-2: audio personali + output con trascrizioni (mai committare)
 .work/stt-engine-scan/bench2/audio/
 .work/stt-engine-scan/bench2/*.json
+
+# VoiceBridge branding asset: deterministic (scripts/make_icon.py) but versioned
+# so the installer icon cannot drift when the tray renderer changes.
+!assets/voicebridge.ico

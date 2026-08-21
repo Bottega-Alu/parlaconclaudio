@@ -40,27 +40,25 @@ class Transcriber:
         self._language = language
         self._engine = None
         self._gpu_available: bool | None = None  # cached after first check
+        self._gpu_info = None  # GpuInfo, populated by _detect_gpu()
 
     # ------------------------------------------------------------------
     # GPU detection
     # ------------------------------------------------------------------
 
     def _detect_gpu(self) -> bool:
-        """Check CUDA availability. Result is cached."""
+        """Check CUDA availability via ctranslate2 + nvidia-smi. Result is cached.
+
+        ctranslate2 is what actually runs inference, so its device count is the
+        authoritative answer; torch used to be imported here purely for the check.
+        """
         if self._gpu_available is not None:
             return self._gpu_available
-        try:
-            import torch
-            self._gpu_available = torch.cuda.is_available()
-        except Exception:
-            self._gpu_available = False
+        from src.core.gpu_probe import probe_gpu
+        self._gpu_info = probe_gpu()
+        self._gpu_available = self._gpu_info.cuda_usable
         if self._gpu_available:
-            try:
-                import torch
-                gpu_name = torch.cuda.get_device_name(0)
-                logger.info(f"GPU detected: {gpu_name}")
-            except Exception:
-                pass
+            logger.info(f"GPU detected: {self._gpu_info.name}")
         else:
             logger.info("No CUDA GPU detected")
         return self._gpu_available
@@ -69,11 +67,7 @@ class Transcriber:
         """Return GPU name or 'Not detected'."""
         if not self._detect_gpu():
             return "Not detected"
-        try:
-            import torch
-            return torch.cuda.get_device_name(0)
-        except Exception:
-            return "Unknown GPU"
+        return self._gpu_info.name if self._gpu_info else "Unknown GPU"
 
     # ------------------------------------------------------------------
     # Config reading
