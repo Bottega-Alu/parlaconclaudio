@@ -61,3 +61,25 @@ Va prototipato sul flusso reale, non specificato a tavolino.
   key OpenRouter del **cleanup LLM (affinamento output STT)**, così si imposta dall'app
   invece che a mano in `tts_config.json`/env. Riusa `key_manager` (entry `openrouter`
   già presente) + il pattern di input mascherato esistente nel tray.
+
+## 3. Installer / packaging [Frisco, 2026-10-12]
+
+- **Branding dell'installer** — oggi `installer/VoiceBridge.iss` usa `AppName "VoiceBridge"` ovunque:
+  nome in Installazione applicazioni, gruppo Start, collegamento desktop, voce di autostart,
+  nome del Setup (`VoiceBridge-Setup-<ver>.exe`). Va customizzato con il nome
+  **"parlaconclaudio - voice-bridge"** in tutti questi punti (`AppName`, `DefaultGroupName`,
+  `[Icons]` righe 65-68, `OutputBaseFilename`, `UninstallDisplayName`), icona dedicata
+  (`assets/voicebridge.ico`) su desktop, menu Start e voce di disinstallazione. Attenzione:
+  l'`AppId` GUID resta invariato così l'upgrade in place dalla 1.0.3 continua a funzionare;
+  `DefaultDirName` può restare `VoiceBridge` o cambiare con una migrazione del venv.
+- **Nessuna finestra shell nera all'avvio** — quando si lancia l'app non deve restare aperta una
+  console che, se chiusa, termina il bridge. Il launcher `VoiceBridge.exe` è già `--noconsole`
+  e avvia `venv\Scripts\pythonw.exe` (`scripts/build_exe.ps1:3-7,42-44`), quindi per prima cosa
+  **individuare da quale path arriva la console**: candidati (a) `VoiceBridge.bat` (usa
+  `python.exe` + `pause`, console per design: va allineato a `pythonw.exe` o rimosso dai
+  collegamenti), (b) la voce `[Run]` post-install che lancia `vb_bootstrap.exe` (console
+  visibile per design, ma deve chiudersi da sola a fine bootstrap), (c) un sottoprocesso del
+  bridge senza `CREATE_NO_WINDOW` (`gpu_probe.py` lo ha, verificare `ffplay`/`nvidia-smi`/
+  `powershell` in `bridge.py` e `tray_icon.py`). Criterio di accettazione: dopo doppio click
+  sul collegamento compare solo l'icona nel tray, nessuna finestra; chiudere qualunque
+  finestra residua non deve uccidere il processo.

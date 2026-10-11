@@ -4,7 +4,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0.0630-blueviolet?style=flat-square" alt="v1.0.0.0630">
+  <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest"><img src="https://img.shields.io/github/v/release/Bottega-Alu/parlaconclaudio?style=flat-square&color=blueviolet&label=version" alt="Latest release"></a>
+  <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/VoiceBridge-Setup.exe"><img src="https://img.shields.io/badge/download-Windows%20installer-0078D4?style=flat-square&logo=windows" alt="Download Windows installer"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078D4?style=flat-square&logo=windows" alt="Windows 11">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/GPU-NVIDIA%20CUDA-76B900?style=flat-square&logo=nvidia" alt="NVIDIA CUDA">
@@ -92,6 +93,12 @@ TTS Notifications
   Claude Code Hook -> notify-tts.py -> Chime + edge-tts voice announcement
 ```
 
+## Download (Windows installer)
+
+**[Download the latest Windows installer](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/VoiceBridge-Setup.exe)** (`VoiceBridge-Setup.exe`, ~23 MB) or pick a specific version from the **[Releases page](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest)**.
+
+The installer ships only the app (~20 MB) and installs per-user, no admin rights. On first launch a bootstrap creates the Python venv and downloads the dependencies and the Whisper model that match your machine: GPU profile on an NVIDIA box (~2.3 GB), CPU/cloud profile elsewhere (~0.3 GB). Upgrades install in place over the previous version.
+
 ## Prerequisites
 
 - Windows 10/11
@@ -100,7 +107,9 @@ TTS Notifications
 - Claude Code CLI
 - **One of:** NVIDIA GPU with CUDA **or** free Groq/Deepgram API key
 
-## Installation
+## Installation from source
+
+Prefer the installer above unless you want to hack on the code.
 
 ```bash
 git clone https://github.com/Bottega-Alu/parlaconclaudio.git
@@ -112,8 +121,8 @@ python -m venv venv
 # Core dependencies
 pip install faster-whisper pynput pyperclip pyaudio pystray Pillow pywin32 edge-tts
 
-# GPU support (optional - for local Whisper)
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+# GPU support (optional - for local Whisper): cuBLAS/cuDNN for ctranslate2, no torch needed
+pip install -e .[gpu]
 
 # Secure key storage (optional)
 pip install keyring
