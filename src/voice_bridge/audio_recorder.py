@@ -12,20 +12,30 @@ import numpy as np
 
 from ..core.audio_capture.audio_capture_base import AudioCaptureConfig
 from ..core.audio_capture.drivers.portaudio_driver import PortAudioDriver
+from .config import DEFAULT_RECORDING_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
-
-MAX_RECORDING_SECONDS = 120
 
 
 class AudioRecorder:
     """Records microphone audio and returns numpy arrays for transcription."""
 
-    def __init__(self, sample_rate: int = 16000, channels: int = 1, chunk_size: int = 1024, device_id: int | None = None):
+    def __init__(
+        self,
+        sample_rate: int = 16000,
+        channels: int = 1,
+        chunk_size: int = 1024,
+        device_id: int | None = None,
+        max_seconds: int = DEFAULT_RECORDING_TIMEOUT_SECONDS,
+    ):
         self._sample_rate = sample_rate
         self._channels = channels
         self._chunk_size = chunk_size
         self._device_id = device_id
+        # Buffer cap, in seconds. Caller (bridge.py) wires this to
+        # config.recording_timeout so the cap can never diverge from the
+        # watchdog's auto-stop timer -- see DEFAULT_RECORDING_TIMEOUT_SECONDS.
+        self.max_seconds = max_seconds
         self._config = AudioCaptureConfig(
             sample_rate=sample_rate,
             channels=channels,
@@ -52,7 +62,7 @@ class AudioRecorder:
             self._recording = True
             self._record_start = time.monotonic()
 
-        max_bytes = self._sample_rate * self._channels * 2 * MAX_RECORDING_SECONDS
+        max_bytes = self._sample_rate * self._channels * 2 * self.max_seconds
 
         def on_audio(data: bytes) -> None:
             with self._lock:
@@ -61,7 +71,7 @@ class AudioRecorder:
                 self._chunks.append(data)
                 total = sum(len(c) for c in self._chunks)
                 if total >= max_bytes:
-                    logger.warning(f"Recording capped at {MAX_RECORDING_SECONDS}s of audio data")
+                    logger.warning(f"Recording capped at {self.max_seconds}s of audio data")
                     self._recording = False
 
         self._driver.start(callback=on_audio)

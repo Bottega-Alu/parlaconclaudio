@@ -9,7 +9,7 @@
 ; Output: installer\Output\VoiceBridge-Setup-<version>.exe
 
 #define AppName        "VoiceBridge"
-#define AppVersion     "1.0.2"
+#define AppVersion     "1.0.3"
 #define AppPublisher   "Frisco"
 #define AppExeName     "VoiceBridge.exe"
 #define BootstrapExe   "vb_bootstrap.exe"

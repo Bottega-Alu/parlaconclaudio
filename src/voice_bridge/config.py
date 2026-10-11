@@ -4,6 +4,12 @@ Voice Bridge Configuration.
 
 from dataclasses import dataclass, field
 
+# Single source of truth for the recording length limit. AudioRecorder's
+# buffer cap and VoiceBridge's watchdog timeout must never diverge again:
+# both read this same constant (see 2026-10-11 fix — before it, 120s/180s
+# disagreed and audio recorded between the two was silently discarded).
+DEFAULT_RECORDING_TIMEOUT_SECONDS: int = 120
+
 
 @dataclass
 class VoiceBridgeConfig:
@@ -64,8 +70,10 @@ class VoiceBridgeConfig:
     transcribe_tts_dub: bool = True
     transcribe_extras_max_chars: int = 2500
 
-    # Recording timeout: auto-stop if recording exceeds this (seconds)
-    recording_timeout: int = 180  # 3 minutes
+    # Recording timeout: auto-stop if recording exceeds this (seconds).
+    # Also the AudioRecorder buffer cap (wired in bridge.py) -- one limit,
+    # never two that can drift apart.
+    recording_timeout: int = DEFAULT_RECORDING_TIMEOUT_SECONDS
 
     # Sound frequencies (Hz) and durations (ms)
     sound_start_freq: int = 800

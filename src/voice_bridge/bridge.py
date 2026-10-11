@@ -17,7 +17,7 @@ import time
 from enum import Enum
 
 from .config import VoiceBridgeConfig
-from .sounds import beep_start, beep_stop, beep_output, beep_ready
+from .sounds import beep_start, beep_stop, beep_output, beep_ready, beep_timeout
 from .audio_recorder import AudioRecorder
 from .transcriber import Transcriber
 from .output_handler import OutputHandler
@@ -66,6 +66,7 @@ class VoiceBridge:
             channels=self.config.channels,
             chunk_size=self.config.chunk_size,
             device_id=self._mic_device_id,
+            max_seconds=self.config.recording_timeout,
         )
         self._transcriber = Transcriber(
             model_name=self.config.whisper_model,
@@ -132,13 +133,19 @@ class VoiceBridge:
         ).start()
 
     def _recording_watchdog(self) -> None:
-        """Auto-stop recording after timeout. Prevents stuck recording sessions."""
+        """Auto-stop recording after timeout. Prevents stuck recording sessions.
+
+        Deadline-based (not accumulated-interval-based): a fixed poll of 5s
+        used to force-stop at ceil(timeout/5)*5 -- e.g. timeout=37 stopped at
+        40s, discarding 3s of audio past the AudioRecorder cap in silence,
+        the exact class of bug decision A eliminated for the cap/timeout
+        pair itself. Polling every <=1s keeps the overshoot under a second.
+        """
         timeout = self.config.recording_timeout
-        poll_interval = 5.0
-        elapsed = 0.0
-        while elapsed < timeout:
+        poll_interval = min(1.0, timeout) if timeout > 0 else 0.0
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
             time.sleep(poll_interval)
-            elapsed += poll_interval
             with self._lock:
                 if self._state != BridgeState.RECORDING:
                     return  # recording ended normally
@@ -147,18 +154,23 @@ class VoiceBridge:
             if self._state != BridgeState.RECORDING:
                 return
         logger.warning(f"Recording timeout ({timeout}s) — auto-stopping")
-        beep_stop(self.config.sound_stop_freq, self.config.sound_stop_duration)
-        self._on_hotkey_release()
+        self._on_hotkey_release(timed_out=True)
 
-    def _on_hotkey_release(self) -> None:
-        """Called when push-to-talk hotkey is released."""
+    def _on_hotkey_release(self, timed_out: bool = False) -> None:
+        """Called when push-to-talk hotkey is released, or by the recording
+        watchdog after an auto-stop (timed_out=True). The timeout path plays
+        a distinct, longer descending glissando (beep_timeout) instead of
+        the normal beep_stop, so the sound alone tells you which happened."""
         with self._lock:
             if self._state != BridgeState.RECORDING:
                 return
             self._set_state(BridgeState.TRANSCRIBING)
 
         if self.config.sound_on_stop and not self.config.muted and self.config.volume > 0:
-            beep_stop(self.config.sound_stop_freq, self.config.sound_stop_duration)
+            if timed_out:
+                beep_timeout()
+            else:
+                beep_stop(self.config.sound_stop_freq, self.config.sound_stop_duration)
 
         # Stop recording and get audio
         audio = self._recorder.stop()
