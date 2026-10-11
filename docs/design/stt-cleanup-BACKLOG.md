@@ -72,6 +72,13 @@ Va prototipato sul flusso reale, non specificato a tavolino.
   (`assets/voicebridge.ico`) su desktop, menu Start e voce di disinstallazione. Attenzione:
   l'`AppId` GUID resta invariato così l'upgrade in place dalla 1.0.3 continua a funzionare;
   `DefaultDirName` può restare `VoiceBridge` o cambiare con una migrazione del venv.
+  **Il rename vale anche per il nome del file e per git** [Frisco, 2026-10-12]: `OutputBaseFilename`
+  → `parlaconclaudio-voice-bridge-Setup-{#AppVersion}`, quindi l'exe committato in
+  `installer/Output/` cambia nome (rimuovere il vecchio `VoiceBridge-Setup-*.exe` dal tree nello
+  stesso commit), gli asset della GitHub Release cambiano nome, e il link stabile nel README
+  `releases/latest/download/VoiceBridge-Setup.exe` va aggiornato al nuovo nome stabile
+  (`parlaconclaudio-voice-bridge-Setup.exe`) nello stesso commit, altrimenti il badge "Download"
+  si rompe alla release successiva. Per una release caricare l'asset con entrambi i nomi stabili.
 - **Nessuna finestra shell nera all'avvio** — quando si lancia l'app non deve restare aperta una
   console che, se chiusa, termina il bridge. Il launcher `VoiceBridge.exe` è già `--noconsole`
   e avvia `venv\Scripts\pythonw.exe` (`scripts/build_exe.ps1:3-7,42-44`), quindi per prima cosa
