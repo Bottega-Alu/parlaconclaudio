@@ -88,4 +88,7 @@ class VoiceBridgeConfig:
     gesture_mouse_long_press_ms: int = 480
     gesture_caps_long_press_ms: int = 660
     gesture_double_click_ms: int = 350
+    # Cursor movement (physical px, either axis) while the button is held
+    # that turns a tray press into a drag: a drag never toggles REC.
+    gesture_mouse_drag_threshold_px: int = 10
     gesture_debounce_ms: int = 200

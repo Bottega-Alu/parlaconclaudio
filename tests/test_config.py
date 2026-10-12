@@ -9,6 +9,7 @@ def test_gesture_defaults():
     assert c.gesture_caps_long_press_ms == 660
     assert c.gesture_double_click_ms == 350
     assert c.gesture_debounce_ms == 200
+    assert c.gesture_mouse_drag_threshold_px == 10
 
 
 def test_gesture_overridable():

@@ -102,6 +102,7 @@ class VoiceBridge:
                 mouse_long_press_ms=self.config.gesture_mouse_long_press_ms,
                 caps_long_press_ms=self.config.gesture_caps_long_press_ms,
                 double_click_ms=self.config.gesture_double_click_ms,
+                drag_threshold_px=self.config.gesture_mouse_drag_threshold_px,
             )
 
     @property

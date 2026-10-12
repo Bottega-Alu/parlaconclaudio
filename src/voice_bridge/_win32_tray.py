@@ -51,6 +51,25 @@ _user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT,
                                   wintypes.WPARAM, wintypes.LPARAM]
 _user32.SendMessageW.restype = wintypes.LPARAM
 
+# DPI: pynput's low-level mouse hook reports per-monitor-aware (physical)
+# screen coordinates, and Explorer's TB_GETITEMRECT is physical too. In a
+# DPI-unaware process ClientToScreen adds a *logical* window origin to that
+# physical rect, producing a bogus, screen-sized "icon" (seen live on a 300%
+# display: (1061, 840, 3400, 2883)) — every click+drag there looked like a
+# tray long-press. The lookup therefore runs with the calling thread
+# temporarily per-monitor-aware, so both sides speak physical pixels.
+_DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
+# Sanity bound: a tray icon is ~16-48 logical px (up to ~150 physical at
+# 300%). Anything bigger is a coordinate-space bug, not an icon.
+_MAX_ICON_SIDE_PX = 256
+
+try:
+    _SetThreadDpiAwarenessContext = _user32.SetThreadDpiAwarenessContext
+    _SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+    _SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+except AttributeError:  # pre-Win10 1607
+    _SetThreadDpiAwarenessContext = None
+
 
 def is_inside_tray_icon(x: int, y: int) -> bool:
     """Return True if (x, y) is inside our tray icon rect."""
@@ -72,7 +91,43 @@ def _get_cached_rect(tooltip_prefix: str):
         return rect
 
 
+def _is_plausible_icon_rect(rect) -> bool:
+    """True if rect has the size of a tray icon (non-degenerate, not huge)."""
+    left, top, right, bottom = rect
+    width, height = right - left, bottom - top
+    if width <= 0 or height <= 0:
+        return False
+    return width <= _MAX_ICON_SIDE_PX and height <= _MAX_ICON_SIDE_PX
+
+
 def _find_tray_icon_rect(tooltip_prefix: str):
+    """Return our tray icon rect in physical screen coordinates, or None.
+
+    Decision tree:
+      - icon not found / Win32 failure  -> None
+      - rect not icon-sized             -> None (gestures off, never a
+                                           screen-wide false positive)
+      - otherwise                       -> rect
+    """
+    prev_ctx = None
+    if _SetThreadDpiAwarenessContext is not None:
+        prev_ctx = _SetThreadDpiAwarenessContext(
+            _DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+    try:
+        rect = _find_tray_icon_rect_raw(tooltip_prefix)
+    finally:
+        if prev_ctx:
+            _SetThreadDpiAwarenessContext(prev_ctx)
+    if rect is None:
+        return None
+    if not _is_plausible_icon_rect(rect):
+        logger.warning(f"Tray icon rect {rect} is not icon-sized — ignored "
+                       f"(mouse gestures disabled until it resolves)")
+        return None
+    return rect
+
+
+def _find_tray_icon_rect_raw(tooltip_prefix: str):
     """Enumerate the system tray and return rect of icon matching tooltip prefix.
 
     Returns (left, top, right, bottom) in screen coordinates, or None.

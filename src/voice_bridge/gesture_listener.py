@@ -24,28 +24,59 @@ class MouseGestureState:
       double_click_ms of the first release
 
     Both gestures invoke on_toggle() exactly once per recognition.
+
+    A drag is never a gesture: if the cursor moves more than
+    drag_threshold_px (either axis) while the button is held, the press
+    is marked as a drag. Decision on timer / release:
+      - dragging            -> nothing fires, no double-click pairing
+      - held >= long_press  -> long-press toggle
+      - short + paired      -> double-click toggle
     """
 
     def __init__(self, long_press_ms: int, double_click_ms: int,
-                 on_toggle: Callable[[], None]):
+                 on_toggle: Callable[[], None],
+                 drag_threshold_px: int = 10):
         self._long_ms = long_press_ms
         self._double_ms = double_click_ms
+        self._drag_px = drag_threshold_px
         self._on_toggle = on_toggle
         # Press tracking
         self._press_ts: float | None = None
+        self._press_pos: tuple[int, int] | None = None
+        self._dragging = False
         self._long_press_fired = False
         # Double-click tracking: timestamp of last *short* release
         self._last_short_release_ts: float | None = None
 
-    def on_press(self, t: float) -> None:
+    def on_press(self, t: float, x: int | None = None,
+                 y: int | None = None) -> None:
+        """x/y = press position; None disables drag detection for this press."""
         self._press_ts = t
+        self._press_pos = (x, y) if x is not None and y is not None else None
+        self._dragging = False
         self._long_press_fired = False
+
+    def on_move(self, x: int, y: int) -> None:
+        """Mark the current press as a drag once movement exceeds the threshold."""
+        if self._press_ts is None or self._press_pos is None or self._dragging:
+            return
+        px, py = self._press_pos
+        if abs(x - px) > self._drag_px or abs(y - py) > self._drag_px:
+            self._dragging = True
+            self._last_short_release_ts = None  # a drag never starts a double
 
     def on_release(self, t: float) -> None:
         if self._press_ts is None:
             return
         held_s = t - self._press_ts
         self._press_ts = None
+        self._press_pos = None
+
+        if self._dragging:
+            # Drag finished: not a click, never pairs into a double-click.
+            self._dragging = False
+            self._last_short_release_ts = None
+            return
 
         if self._long_press_fired:
             # Long-press already handled; this release closes the gesture.
@@ -70,9 +101,9 @@ class MouseGestureState:
     def on_timer_fire(self, t: float) -> None:
         """Called by an external Timer at press_ts + long_press_ms.
 
-        If still pressed, fires long-press toggle.
+        If still pressed and not dragging, fires long-press toggle.
         """
-        if self._press_ts is None:
+        if self._press_ts is None or self._dragging:
             return
         held_s = t - self._press_ts
         if held_s * 1000 + 1 >= self._long_ms:  # +1 ms tolerance
@@ -168,12 +199,14 @@ class GestureListener:
     def __init__(self, on_toggle_rec: Callable[[], None],
                  mouse_long_press_ms: int = 480,
                  caps_long_press_ms: int = 660,
-                 double_click_ms: int = 350):
+                 double_click_ms: int = 350,
+                 drag_threshold_px: int = 10):
         self._on_toggle = on_toggle_rec
         self._mouse_state = MouseGestureState(
             long_press_ms=mouse_long_press_ms,
             double_click_ms=double_click_ms,
             on_toggle=self._safe_toggle,
+            drag_threshold_px=drag_threshold_px,
         )
         self._caps_state = CapsLockGestureState(
             long_press_ms=caps_long_press_ms,
@@ -197,6 +230,7 @@ class GestureListener:
     def start(self) -> None:
         self._mouse_listener = mouse.Listener(
             on_click=self._on_mouse_click,
+            on_move=self._on_mouse_move,
         )
         self._mouse_listener.daemon = True
         self._mouse_listener.start()
@@ -212,7 +246,8 @@ class GestureListener:
             f"GestureListener started "
             f"(mouse_long={self._mouse_state._long_ms}ms, "
             f"caps_long={self._caps_state._long_ms}ms, "
-            f"double_click={self._mouse_state._double_ms}ms)"
+            f"double_click={self._mouse_state._double_ms}ms, "
+            f"drag_threshold={self._mouse_state._drag_px}px)"
         )
 
     def stop(self) -> None:
@@ -268,7 +303,7 @@ class GestureListener:
                     self._tray_warning_logged = True
                 return
             now = time.monotonic()
-            self._mouse_state.on_press(now)
+            self._mouse_state.on_press(now, x, y)
             # Arm long-press timer (ignore concurrent press if timer already armed)
             if self._mouse_timer is not None:
                 logger.debug("Mouse press while timer already armed — ignored")
@@ -290,6 +325,10 @@ class GestureListener:
             if self._mouse_timer:
                 self._mouse_timer.cancel()
                 self._mouse_timer = None
+
+    def _on_mouse_move(self, x: int, y: int) -> None:
+        # Cheap no-op unless a tray press is in progress (state machine guards).
+        self._mouse_state.on_move(x, y)
 
     # ─── keyboard callbacks ───
 
