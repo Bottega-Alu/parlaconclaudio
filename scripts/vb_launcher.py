@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 APP_TITLE = "Voice Bridge"
+BOOTSTRAP_LOG = "bootstrap.log"  # written by installer/vb_bootstrap.py into the install root
 
 # Last-resort root, used only if the exe was copied somewhere detached from the repo.
 FALLBACK_ROOT = Path(r"C:\PROJECTS\parlaconclaudio")
@@ -62,16 +63,41 @@ def _resolve_root() -> Path | None:
     return None
 
 
+def _not_found_message(roots: list[Path]) -> str:
+    """Error text for a missing install. Paths are built, never typed as literals:
+    a non-raw "venv\\Scripts" once rendered "src\\voice_bridge" as src<VT>oice_bridge.
+    """
+    pythonw = Path("venv", "Scripts", "pythonw.exe")
+    package = Path("src", "voice_bridge")
+    lines = [
+        "Could not locate the Voice Bridge installation.",
+        "",
+        f"Looked for '{pythonw}' + '{package}' in:",
+        *(f"  - {p}" for p in roots),
+    ]
+    # A bootstrap.log next to a missing venv means the post-install runtime
+    # setup ran and did not finish: point at its log and at the repair entry.
+    logs = [r / BOOTSTRAP_LOG for r in roots if (r / BOOTSTRAP_LOG).is_file()]
+    if logs:
+        lines += [
+            "",
+            "Setup incomplete: the runtime was not built. See:",
+            *(f"  {log}" for log in logs),
+            "then run Start > parlaconclaudio - voice-bridge > Repair runtime.",
+        ]
+    else:
+        lines += [
+            "",
+            "Keep VoiceBridge.exe inside the project folder, or edit "
+            "FALLBACK_ROOT in scripts/vb_launcher.py and rebuild.",
+        ]
+    return "\n".join(lines)
+
+
 def main() -> int:
     root = _resolve_root()
     if root is None:
-        _error(
-            "Could not locate the Voice Bridge installation.\n\n"
-            "Looked for 'venv\Scripts\pythonw.exe' + 'src\voice_bridge' in:\n"
-            + "\n".join(f"  - {p}" for p in _candidate_roots())
-            + "\n\nKeep VoiceBridge.exe inside the project folder, or edit "
-            "FALLBACK_ROOT in scripts/vb_launcher.py and rebuild."
-        )
+        _error(_not_found_message(_candidate_roots()))
         return 2
 
     pythonw = root / "venv" / "Scripts" / "pythonw.exe"

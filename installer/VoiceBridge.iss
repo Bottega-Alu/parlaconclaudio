@@ -9,7 +9,7 @@
 ; Output: installer\Output\parlaconclaudio-voice-bridge-Setup-<version>.exe
 
 #define AppName        "parlaconclaudio - voice-bridge"
-#define AppVersion     "1.0.4"
+#define AppVersion     "1.0.5"
 #define AppPublisher   "Frisco"
 #define AppExeName     "VoiceBridge.exe"
 #define BootstrapExe   "vb_bootstrap.exe"
@@ -70,15 +70,12 @@ Name: "{autodesktop}\{#AppName}";     Filename: "{app}\{#AppExeName}"; IconFilen
 Name: "{userstartup}\{#AppName}";     Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\assets\voicebridge.ico"; Tasks: autostart
 
 [Run]
-; The heavy lifting. Console stays visible: pip output is the user's only clue
-; if a wheel fails, and hiding it would turn a fixable error into a silent one.
-Filename: "{app}\{#BootstrapExe}"; \
-  Parameters: "--root ""{app}"" --profile {code:GetChosenProfile}"; \
-  StatusMsg: "Downloading and configuring the runtime (this takes a few minutes)..."; \
-  Flags: waituntilterminated
-
+; The runtime bootstrap is NOT here: [Run] ignores exit codes, so a failed
+; bootstrap used to end with "Launch" and a launcher that cannot find the venv.
+; It runs from [Code] (CurStepChanged/ssPostInstall -> RunBootstrap), which
+; checks the exit code. Launch is offered only if the bootstrap succeeded.
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; \
-  Flags: nowait postinstall skipifsilent
+  Flags: nowait postinstall skipifsilent; Check: BootstrapSucceeded
 
 [InstallDelete]
 ; v1.0.3 shipped as AppName "VoiceBridge": same AppId, so upgrading leaves its shortcuts behind
@@ -95,14 +92,42 @@ Type: filesandordirs; Name: "{app}\venv"
 Type: filesandordirs; Name: "{app}\src"
 Type: filesandordirs; Name: "{app}\scripts"
 Type: files;          Name: "{app}\install-state.json"
+Type: files;          Name: "{app}\bootstrap.log"
 Type: files;          Name: "{app}\voicebridge.log"
 Type: files;          Name: "{app}\voicebridge_debug.log"
 
+[CustomMessages]
+; No accented letters on purpose: this file stays plain ASCII.
+en.BootstrapStatus=Downloading and configuring the runtime (this takes a few minutes)...
+it.BootstrapStatus=Download e configurazione del runtime in corso (richiede qualche minuto)...
+en.BootstrapFailed=The runtime setup did not complete (exit code %1).%n%n%2%n%nFull log:%n%3%n%n{#AppName} cannot start until this is fixed. To retry:%nStart > {#AppName} > Repair runtime
+it.BootstrapFailed=La configurazione del runtime non si e' conclusa (codice di uscita %1).%n%n%2%n%nLog completo:%n%3%n%n{#AppName} non potra' avviarsi finche' non viene risolto. Per riprovare:%nStart > {#AppName} > Repair runtime
+en.BootstrapReasonBlocked=Windows blocked a program the setup needs (Smart App Control / Application Control / antivirus): uv.exe and python.exe are unsigned downloads. If Smart App Control is on, turn it off in Windows Security > App & browser control, or allow the file in your antivirus.
+it.BootstrapReasonBlocked=Windows ha bloccato un programma necessario al setup (Smart App Control / Controllo applicazioni / antivirus): uv.exe e python.exe sono download senza firma digitale. Se Smart App Control risulta attivo, disattivalo in Sicurezza di Windows > Controllo app e browser, oppure consenti il file nell'antivirus.
+en.BootstrapReasonPermission=Access denied while writing the runtime. Quit {#AppName} if it is running (tray icon > Exit) and check that the install folder is not read-only or locked by sync/antivirus. No administrator rights are needed.
+it.BootstrapReasonPermission=Accesso negato durante la scrittura del runtime. Chiudi {#AppName} se in esecuzione (icona nel tray > Exit) e verifica che la cartella di installazione non sia in sola lettura o bloccata da sync/antivirus. Non servono diritti di amministratore.
+en.BootstrapReasonNoPayload=The application files were not found in the install folder. Run this setup again.
+it.BootstrapReasonNoPayload=I file dell'applicazione non sono stati trovati nella cartella di installazione. Esegui di nuovo questo setup.
+en.BootstrapReasonGeneric=A download or a package install failed (network, or a package that could not be installed). The log shows the exact error.
+it.BootstrapReasonGeneric=Un download o l'installazione di un pacchetto non sono riusciti (rete, oppure pacchetto non installabile). Il log riporta l'errore esatto.
+en.BootstrapNoLog=The runtime builder exited (code %1) without writing its log, so it most likely could not run at all: Smart App Control or an antivirus blocking the unsigned vb_bootstrap.exe is the usual cause.%n%nIf Smart App Control is on, turn it off in Windows Security > App & browser control, then run:%nStart > {#AppName} > Repair runtime
+it.BootstrapNoLog=Il configuratore del runtime e' terminato (codice %1) senza scrivere il log, quindi con ogni probabilita' non e' riuscito nemmeno a partire: di solito e' Smart App Control o un antivirus che blocca vb_bootstrap.exe, privo di firma digitale.%n%nSe Smart App Control risulta attivo, disattivalo in Sicurezza di Windows > Controllo app e browser, poi esegui:%nStart > {#AppName} > Repair runtime
+en.BootstrapNotStarted=Setup could not start the runtime builder:%n%1%n%nWindows error %2: %3%n%nThis usually means Smart App Control (or another application-control policy / antivirus) blocked it: vb_bootstrap.exe is not digitally signed. Turn Smart App Control off in Windows Security > App & browser control, then run:%nStart > {#AppName} > Repair runtime
+it.BootstrapNotStarted=Il setup non ha potuto avviare il configuratore del runtime:%n%1%n%nErrore Windows %2: %3%n%nDi solito significa che Smart App Control (o un'altra policy di controllo applicazioni / antivirus) l'ha bloccato: vb_bootstrap.exe non ha firma digitale. Disattiva Smart App Control in Sicurezza di Windows > Controllo app e browser, poi esegui:%nStart > {#AppName} > Repair runtime
+
 [Code]
+const
+  { Exit codes of installer/vb_bootstrap.py (EXIT_* there). }
+  BOOT_OK         = 0;
+  BOOT_NO_PAYLOAD = 2;
+  BOOT_PERMISSION = 3;
+  BOOT_BLOCKED    = 4;
+
 var
   ProfilePage: TInputOptionWizardPage;
   DetectedInfo: String;
   RecommendedProfile: String;
+  BootstrapOk: Boolean;
 
 { Minimal JSON string reader - the probe output is a flat, machine-written object,
   so a full parser would be overkill here. }
@@ -212,4 +237,91 @@ begin
   else
     Result := 'auto';
   end;
+end;
+
+{ Message text with %n turned into real line breaks. }
+function Msg(const Text: String): String;
+begin
+  Result := Text;
+  StringChangeEx(Result, '%n', #13#10, True);
+end;
+
+{ Size of the bootstrap log, -1 if absent. Compared before/after the run to tell
+  "ran and failed" (log grew) from "never got to run" (log untouched). }
+function LogSize(const Path: String): Integer;
+begin
+  if not FileSize(Path, Result) then
+    Result := -1;
+end;
+
+{ Decision tree, in order:
+    1. Exec itself fails       -> Windows refused to start the exe (Smart App Control,
+                                  antivirus, policy): BootstrapNotStarted + Win32 error
+    2. exit 0                  -> success: the Finished page offers to launch
+    3. non-zero, log untouched -> the exe started but died before logging (e.g. the
+                                  PyInstaller bootloader was blocked): BootstrapNoLog
+    4. non-zero, log written   -> BootstrapFailed, reason picked by exit code
+  The console stays visible (SW_SHOW): pip output is the user's only live clue if a
+  wheel fails, and hiding it would turn a fixable error into a silent one. On a
+  failure the bootstrapper waits for Enter in that console, unless setup is silent. }
+procedure RunBootstrap;
+var
+  Exe, Params, LogPath, Reason, Text: String;
+  ResultCode, SizeBefore: Integer;
+begin
+  BootstrapOk := False;
+  Exe := ExpandConstant('{app}\{#BootstrapExe}');
+  LogPath := ExpandConstant('{app}\bootstrap.log');
+  Params := '--root "' + ExpandConstant('{app}') + '" --profile ' + GetChosenProfile('');
+  if WizardSilent then
+    Params := Params + ' --no-pause';
+
+  WizardForm.StatusLabel.Caption := CustomMessage('BootstrapStatus');
+  SizeBefore := LogSize(LogPath);
+  Log('Running bootstrap: ' + Exe + ' ' + Params);
+
+  if not Exec(Exe, Params, ExpandConstant('{app}'), SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Log('Bootstrap could not start, Win32 error ' + IntToStr(ResultCode));
+    { No line may start with "[" in [Code]: ISCC would read it as a section tag. }
+    Text := FmtMessage(CustomMessage('BootstrapNotStarted'), [Exe, IntToStr(ResultCode), SysErrorMessage(ResultCode)]);
+    SuppressibleMsgBox(Msg(Text), mbCriticalError, MB_OK, IDOK);
+    Exit;
+  end;
+
+  Log('Bootstrap exit code ' + IntToStr(ResultCode));
+  if ResultCode = BOOT_OK then
+  begin
+    BootstrapOk := True;
+    Exit;
+  end;
+
+  if LogSize(LogPath) = SizeBefore then
+  begin
+    Text := FmtMessage(CustomMessage('BootstrapNoLog'), [IntToStr(ResultCode)]);
+    SuppressibleMsgBox(Msg(Text), mbCriticalError, MB_OK, IDOK);
+    Exit;
+  end;
+
+  case ResultCode of
+    BOOT_NO_PAYLOAD: Reason := CustomMessage('BootstrapReasonNoPayload');
+    BOOT_PERMISSION: Reason := CustomMessage('BootstrapReasonPermission');
+    BOOT_BLOCKED:    Reason := CustomMessage('BootstrapReasonBlocked');
+  else
+    Reason := CustomMessage('BootstrapReasonGeneric');
+  end;
+  Text := FmtMessage(CustomMessage('BootstrapFailed'), [IntToStr(ResultCode), Reason, LogPath]);
+  SuppressibleMsgBox(Msg(Text), mbError, MB_OK, IDOK);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    RunBootstrap;
+end;
+
+{ Check: of the "Launch" postinstall entry. }
+function BootstrapSucceeded: Boolean;
+begin
+  Result := BootstrapOk;
 end;

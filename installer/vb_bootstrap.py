@@ -7,21 +7,60 @@ installer itself stays small and never ships CUDA kernels a machine cannot use.
     vb_bootstrap.exe --root "C:\\Program Files\\VoiceBridge"
     vb_bootstrap.exe --root . --profile cloud     # force, skip detection
     vb_bootstrap.exe --root . --dry-run           # print the plan, install nothing
+    vb_bootstrap.exe --root . --no-pause          # never wait for Enter (silent setup, CI)
+
+Every run is appended to <root>\\bootstrap.log (header with timestamp + argv),
+with the uv/pip child output teed into it as well: the console window closes
+when the process exits, so the log is what is left to read after a failure.
+The exit code tells the installer which kind of failure it was (EXIT_* below).
 """
 
 from __future__ import annotations
 
 import argparse
+import codecs
+import datetime as _dt
+import enum
+import errno
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import IO, Callable
 
 PYTHON_VERSION = "3.11"
 UV_INSTALL_URL = "https://astral.sh/uv/install.ps1"
 STATE_FILE = "install-state.json"
+LOG_FILE = "bootstrap.log"
+FALLBACK_LOG_FILE = "vb_bootstrap.log"  # in %TEMP%, used when <root> is not writable
+
+# Exit codes - VoiceBridge.iss reads them to pick the message it shows.
+EXIT_OK = 0
+EXIT_FAILED = 1
+EXIT_NO_PAYLOAD = 2
+EXIT_PERMISSION = 3
+EXIT_BLOCKED = 4
+
+# Windows error codes meaning "the OS refused to run this file", as opposed to
+# "the file ran and failed". 4550-4560 is the ERROR_SYSTEM_INTEGRITY_* family
+# raised by Code Integrity / App Control for Business / Smart App Control
+# (4551 = policy violation, 4556+ = reputation verdicts); 1260 = blocked by
+# group policy (SRP/AppLocker); 225 = ERROR_VIRUS_INFECTED (Defender).
+BLOCKED_WINERRORS = frozenset(range(4550, 4561)) | {1260, 225}
+ACCESS_DENIED_WINERRORS = frozenset({5, 32})  # ACCESS_DENIED, SHARING_VIOLATION
+ACCESS_DENIED_ERRNOS = frozenset({errno.EACCES, errno.EPERM})
+
+# Fixed-format error-code markers printed by child processes: Rust (uv) prints
+# "(os error 4551)", Python prints "[WinError 4551]". We match codes, never prose.
+_CHILD_ERRCODE = re.compile(r"(?:os error|WinError)\s+(\d+)", re.IGNORECASE)
+
+TAIL_CHARS = 4000  # child output kept in memory for classification
 
 # Base runtime: everything that works with or without a GPU.
 BASE_DEPS = [
@@ -43,6 +82,206 @@ GPU_DEPS = [
     "nvidia-cublas-cu12>=12.9",
     "nvidia-cudnn-cu12>=9.20",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# Run log
+# --------------------------------------------------------------------------- #
+
+
+class Tee:
+    """File-like writing to the console stream AND the run log.
+
+    The console side never raises: a cp1252/cp437 console that cannot render a
+    character from a pip log gets a replacement char, the log keeps UTF-8.
+    """
+
+    def __init__(self, primary: IO[str] | None, log: IO[str]) -> None:
+        self.primary = primary
+        self.log = log
+
+    def write(self, text: str) -> int:
+        if self.primary is not None:
+            try:
+                self.primary.write(text)
+            except UnicodeEncodeError:
+                enc = getattr(self.primary, "encoding", None) or "ascii"
+                self.primary.write(text.encode(enc, "replace").decode(enc))
+        self.log.write(text)
+        return len(text)
+
+    def flush(self) -> None:
+        if self.primary is not None:
+            self.primary.flush()
+        self.log.flush()
+
+    def isatty(self) -> bool:
+        return bool(self.primary is not None and self.primary.isatty())
+
+    @property
+    def encoding(self) -> str:
+        return getattr(self.primary, "encoding", None) or "utf-8"
+
+
+class NullLog:
+    """NullObject log: used when neither <root> nor %TEMP% is writable."""
+
+    def write(self, text: str) -> int:
+        return len(text)
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+def log_header(argv: list[str], now: _dt.datetime | None = None) -> str:
+    """One header per run, so appended runs stay distinguishable."""
+    stamp = (now or _dt.datetime.now()).isoformat(timespec="seconds")
+    return f"\n===== vb_bootstrap run {stamp} pid={os.getpid()} argv={argv!r} =====\n"
+
+
+def open_run_log(root: Path, argv: list[str], temp_dir: Path | None = None):
+    """Decision tree: <root>/bootstrap.log -> %TEMP%/vb_bootstrap.log -> NullLog.
+
+    Returns (handle, path or None). Append mode: a repair run must not erase
+    the evidence left by the failed run before it.
+    """
+    temp = temp_dir if temp_dir is not None else Path(tempfile.gettempdir())
+    for path in (root / LOG_FILE, temp / FALLBACK_LOG_FILE):
+        try:
+            handle = open(path, "a", encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        handle.write(log_header(argv))
+        handle.flush()
+        return handle, path
+    return NullLog(), None
+
+
+# --------------------------------------------------------------------------- #
+# Failure classification
+# --------------------------------------------------------------------------- #
+
+
+class ErrorKind(enum.Enum):
+    BLOCKED = "blocked"  # OS policy refused to run a binary (Smart App Control & co.)
+    PERMISSION = "permission"  # access denied / file in use
+    FAILED = "failed"  # anything else (network, wheel build, ...)
+
+
+EXIT_BY_KIND = {
+    ErrorKind.BLOCKED: EXIT_BLOCKED,
+    ErrorKind.PERMISSION: EXIT_PERMISSION,
+    ErrorKind.FAILED: EXIT_FAILED,
+}
+
+HINT_BY_KIND = {
+    ErrorKind.BLOCKED: (
+        "Windows blocked a program from running (Smart App Control / Application "
+        "Control / antivirus). uv.exe and python.exe are unsigned downloads. If "
+        "Smart App Control is on, turn it off (Windows Security > App & browser "
+        "control) or allow the file, then run Repair runtime."
+    ),
+    ErrorKind.PERMISSION: (
+        "Access denied. Quit any running VoiceBridge (tray icon > Exit), check the "
+        "install folder is not read-only or locked by sync/antivirus, then run "
+        "Repair runtime. No administrator rights are needed: this is a per-user install."
+    ),
+    ErrorKind.FAILED: (
+        "Check the network connection and the output above, then run Repair runtime."
+    ),
+}
+
+
+class CommandFailed(RuntimeError):
+    """A child process exited non-zero; carries the tail of its output."""
+
+    def __init__(self, cmd: list[str], returncode: int, tail: str) -> None:
+        super().__init__(f"command failed (exit {returncode}): {' '.join(cmd)}")
+        self.cmd = cmd
+        self.returncode = returncode
+        self.tail = tail
+
+
+def _kind_from_code(code: int | None) -> ErrorKind | None:
+    if code is None:
+        return None
+    if code in BLOCKED_WINERRORS:
+        return ErrorKind.BLOCKED
+    if code in ACCESS_DENIED_WINERRORS:
+        return ErrorKind.PERMISSION
+    return None
+
+
+def classify_error(exc: BaseException) -> ErrorKind:
+    """Explicit decision tree on exception type and OS error code.
+
+    1. OSError carrying a Windows code      -> blocked / permission by code
+    2. PermissionError, or errno EACCES/EPERM -> permission
+    3. other OSError                        -> failed
+    4. CommandFailed                        -> codes the child printed in its
+       output tail; the last recognised one wins (closest to the failure)
+    5. anything else                        -> failed
+    """
+    if isinstance(exc, OSError):
+        kind = _kind_from_code(getattr(exc, "winerror", None))
+        if kind is not None:
+            return kind
+        if isinstance(exc, PermissionError) or exc.errno in ACCESS_DENIED_ERRNOS:
+            return ErrorKind.PERMISSION
+        return ErrorKind.FAILED
+    if isinstance(exc, CommandFailed):
+        for code in reversed(_CHILD_ERRCODE.findall(exc.tail)):
+            kind = _kind_from_code(int(code))
+            if kind is not None:
+                return kind
+        return ErrorKind.FAILED
+    return ErrorKind.FAILED
+
+
+@dataclass(frozen=True)
+class Failure:
+    kind: ErrorKind
+    exit_code: int
+    reason: str
+    hint: str
+
+
+def describe_failure(exc: BaseException) -> Failure:
+    kind = classify_error(exc)
+    return Failure(kind, EXIT_BY_KIND[kind], f"{type(exc).__name__}: {exc}", HINT_BY_KIND[kind])
+
+
+def should_pause(no_pause: bool, stdin: IO[str] | None) -> bool:
+    """Wait for Enter only when a human can actually press it."""
+    if no_pause or stdin is None:
+        return False
+    try:
+        return bool(stdin.isatty())
+    except (ValueError, OSError):  # closed or detached stdin
+        return False
+
+
+def pause_for_user(
+    no_pause: bool,
+    stdin: IO[str] | None = None,
+    prompt: Callable[[str], str] = input,
+) -> bool:
+    """Returns True if it paused."""
+    if not should_pause(no_pause, sys.stdin if stdin is None else stdin):
+        return False
+    try:
+        prompt("\nPremi Invio per chiudere / Press Enter to close... ")
+    except (EOFError, KeyboardInterrupt):
+        pass
+    return True
+
+
+# --------------------------------------------------------------------------- #
+# Setup steps
+# --------------------------------------------------------------------------- #
 
 
 class Reporter:
@@ -74,7 +313,7 @@ def find_uv(root: Path, rep: Reporter) -> str:
         return on_path
 
     rep.info("uv: not found, downloading from astral.sh ...")
-    subprocess.run(
+    run_streamed(
         [
             "powershell",
             "-NoProfile",
@@ -83,7 +322,7 @@ def find_uv(root: Path, rep: Reporter) -> str:
             "-Command",
             f"irm {UV_INSTALL_URL} | iex",
         ],
-        check=True,
+        rep,
     )
     fetched = shutil.which("uv") or str(Path.home() / ".local" / "bin" / "uv.exe")
     if not Path(fetched).is_file():
@@ -127,12 +366,43 @@ def detect_profile(root: Path, rep: Reporter):
     return gpu, profile
 
 
-def run_streamed(cmd: list[str], rep: Reporter, cwd: Path | None = None) -> None:
-    """Run a child process, streaming its output; raise with context on failure."""
+def run_streamed(
+    cmd: list[str],
+    rep: Reporter,
+    cwd: Path | None = None,
+    out: IO[str] | None = None,
+) -> None:
+    """Run a child, relaying its merged stdout/stderr to `out` (console + log tee).
+
+    Reads chunks, not lines: uv/pip redraw progress with carriage returns and a
+    line reader would hold it back. Launch errors (OSError, e.g. WinError 4551
+    when Smart App Control blocks uv.exe) propagate untouched so classify_error
+    sees the code; a non-zero exit raises CommandFailed with the output tail.
+    """
+    sink = out if out is not None else sys.stdout
     rep.info(f"$ {' '.join(cmd)}")
-    proc = subprocess.run(cmd, cwd=str(cwd) if cwd else None)
-    if proc.returncode != 0:
-        raise RuntimeError(f"command failed (exit {proc.returncode}): {' '.join(cmd)}")
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    assert proc.stdout is not None
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    tail = ""
+    while True:
+        chunk = proc.stdout.read1(4096)
+        text = decoder.decode(chunk, final=not chunk)
+        if text:
+            sink.write(text)
+            sink.flush()
+            tail = (tail + text)[-TAIL_CHARS:]
+        if not chunk:
+            break
+    returncode = proc.wait()
+    if returncode != 0:
+        raise CommandFailed(cmd, returncode, tail)
 
 
 def build_model_prefetch_code(root: Path, profile) -> str:
@@ -151,7 +421,25 @@ def build_model_prefetch_code(root: Path, profile) -> str:
     )
 
 
-def main() -> int:
+def report_failure(root: Path, log_path: Path | None, reason: str, hint: str) -> None:
+    """Structured failure block: reason, hint, log path, how to retry."""
+    err = sys.stderr
+    print(f"\n*** setup failed: {reason}", file=err)
+    print(f"\n  Hint: {hint}", file=err)
+    if log_path is not None:
+        print(f"\n  Full log: {log_path}", file=err)
+    else:
+        print("\n  (no log written: neither the install folder nor %TEMP% is writable)", file=err)
+    print(
+        "\nThe installation is incomplete. Retry from the Start menu:\n"
+        "  parlaconclaudio - voice-bridge > Repair runtime\n"
+        "or from a terminal:",
+        file=err,
+    )
+    print(f'  vb_bootstrap.exe --root "{root}"', file=err, flush=True)
+
+
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Build the VoiceBridge runtime for this host"
     )
@@ -171,10 +459,16 @@ def main() -> int:
         metavar="FILE",
         help="write the detected profile as JSON and exit (used by the installer wizard)",
     )
-    args = ap.parse_args()
+    ap.add_argument(
+        "--no-pause",
+        action="store_true",
+        help="on failure exit at once instead of waiting for Enter",
+    )
+    raw_argv = sys.argv[1:] if argv is None else argv
+    args = ap.parse_args(raw_argv)
 
     if args.probe_json is not None:
-        # Silent mode for the Inno Setup wizard: no banner, machine-readable only.
+        # Silent mode for the Inno Setup wizard: no banner, no log, machine-readable only.
         quiet = Reporter()
         quiet.info = lambda _msg: None  # type: ignore[method-assign]
         try:
@@ -193,20 +487,46 @@ def main() -> int:
             payload = {"ok": False, "recommended": "cpu", "reason": f"probe failed: {exc}"}
         args.probe_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(json.dumps(payload))
-        return 0
+        return EXIT_OK
 
-    rep = Reporter()
     root: Path = args.root.resolve()
+    log, log_path = open_run_log(root, [sys.argv[0], *raw_argv])
+    saved = sys.stdout, sys.stderr
+    sys.stdout = Tee(saved[0], log)  # type: ignore[assignment]
+    sys.stderr = Tee(saved[1], log)  # type: ignore[assignment]
+    code: int | str = "exception"
+    try:
+        code = setup(args, root, log_path)
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        sys.stdout, sys.stderr = saved
+        log.write(f"===== exit {code} =====\n")
+        log.close()
+    if code != EXIT_OK:
+        pause_for_user(args.no_pause)
+    return code  # type: ignore[return-value]
+
+
+def setup(args: argparse.Namespace, root: Path, log_path: Path | None) -> int:
+    """The install itself. Every failure returns an EXIT_* code, never raises."""
+    rep = Reporter()
     venv = root / "venv"
 
     print("=" * 68)
     print(" VoiceBridge - runtime setup")
     print("=" * 68)
     rep.info(f"target: {root}")
+    rep.info(f"log   : {log_path or 'unavailable'}")
 
     if not (root / "src" / "voice_bridge" / "__main__.py").is_file():
-        rep.fail(f"payload not found under {root} (expected src/voice_bridge/)")
-        return 2
+        report_failure(
+            root,
+            log_path,
+            f"payload not found under {root} (expected src/voice_bridge/)",
+            "The application files are missing: re-run the installer.",
+        )
+        return EXIT_NO_PAYLOAD
 
     try:
         rep.step("Detecting hardware")
@@ -231,7 +551,7 @@ def main() -> int:
                 print(f"          - {dep}")
             print(f"\n          venv    : {venv}")
             print(f"          model   : {profile.model} ({profile.compute_type})")
-            return 0
+            return EXIT_OK
 
         rep.step("Locating uv")
         uv = find_uv(root, rep)
@@ -273,16 +593,13 @@ def main() -> int:
         rep.step("Done")
         print(f"\n  VoiceBridge is ready ({kind} profile).")
         print(f"  Launch it with {root / 'VoiceBridge.exe'}\n")
-        return 0
+        return EXIT_OK
 
     except Exception as exc:
-        rep.fail(f"setup failed: {exc}")
-        print(
-            "\nThe installation is incomplete. Re-run this bootstrapper to retry:",
-            file=sys.stderr,
-        )
-        print(f'  vb_bootstrap.exe --root "{root}"', file=sys.stderr)
-        return 1
+        failure = describe_failure(exc)
+        report_failure(root, log_path, failure.reason, failure.hint)
+        rep.info(f"error class: {failure.kind.value} -> exit {failure.exit_code}")
+        return failure.exit_code
 
 
 if __name__ == "__main__":
