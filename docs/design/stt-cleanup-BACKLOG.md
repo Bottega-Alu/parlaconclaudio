@@ -64,7 +64,7 @@ Va prototipato sul flusso reale, non specificato a tavolino.
 
 ## 3. Installer / packaging [Frisco, 2026-10-12]
 
-- **Branding dell'installer** — oggi `installer/VoiceBridge.iss` usa `AppName "VoiceBridge"` ovunque:
+- **Branding dell'installer** — **FATTO in v1.0.4.1012** [2026-10-12] (`DefaultDirName` lasciato `VoiceBridge`, AppId invariato; al rilascio ricordare di caricare l'asset anche col nome stabile `parlaconclaudio-voice-bridge-Setup.exe`). Testo originale: oggi `installer/VoiceBridge.iss` usa `AppName "VoiceBridge"` ovunque:
   nome in Installazione applicazioni, gruppo Start, collegamento desktop, voce di autostart,
   nome del Setup (`VoiceBridge-Setup-<ver>.exe`). Va customizzato con il nome
   **"parlaconclaudio - voice-bridge"** in tutti questi punti (`AppName`, `DefaultGroupName`,

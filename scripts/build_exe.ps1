@@ -2,7 +2,7 @@
 #
 #   VoiceBridge.exe        console-less launcher stub (repo root)
 #   vb_bootstrap.exe       post-install runtime builder (installer/)
-#   VoiceBridge-Setup.exe  Inno Setup package        (installer/Output/) - optional
+#   parlaconclaudio-voice-bridge-Setup-<ver>.exe Inno Setup package        (installer/Output/) - optional
 #
 # Neither exe bundles the app: VoiceBridge.exe starts venv\Scripts\pythonw.exe,
 # and vb_bootstrap.exe builds that venv on the target host. App code changes need
@@ -81,7 +81,7 @@ if (-not $Installer) {
     exit 0
 }
 
-Write-Host "`n=== 3/3  VoiceBridge-Setup.exe (Inno Setup)" -ForegroundColor Cyan
+Write-Host "`n=== 3/3  parlaconclaudio-voice-bridge-Setup.exe (Inno Setup)" -ForegroundColor Cyan
 # Per-user installs land in LOCALAPPDATA and are easy to miss - check it first.
 $Iscc = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",

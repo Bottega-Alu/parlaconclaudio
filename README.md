@@ -5,7 +5,7 @@
 
 <p align="center">
   <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest"><img src="https://img.shields.io/github/v/release/Bottega-Alu/parlaconclaudio?style=flat-square&color=blueviolet&label=version" alt="Latest release"></a>
-  <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/VoiceBridge-Setup.exe"><img src="https://img.shields.io/badge/download-Windows%20installer-0078D4?style=flat-square&logo=windows" alt="Download Windows installer"></a>
+  <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe"><img src="https://img.shields.io/badge/download-Windows%20installer-0078D4?style=flat-square&logo=windows" alt="Download Windows installer"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078D4?style=flat-square&logo=windows" alt="Windows 11">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/GPU-NVIDIA%20CUDA-76B900?style=flat-square&logo=nvidia" alt="NVIDIA CUDA">
@@ -95,7 +95,7 @@ TTS Notifications
 
 ## Download (Windows installer)
 
-**[Download the latest Windows installer](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/VoiceBridge-Setup.exe)** (`VoiceBridge-Setup.exe`, ~23 MB) or pick a specific version from the **[Releases page](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest)**.
+**[Download the latest Windows installer](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe)** (`parlaconclaudio-voice-bridge-Setup.exe`, ~23 MB) or pick a specific version from the **[Releases page](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest)**.
 
 The installer ships only the app (~20 MB) and installs per-user, no admin rights. On first launch a bootstrap creates the Python venv and downloads the dependencies and the Whisper model that match your machine: GPU profile on an NVIDIA box (~2.3 GB), CPU/cloud profile elsewhere (~0.3 GB). Upgrades install in place over the previous version.
 

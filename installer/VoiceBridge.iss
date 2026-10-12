@@ -6,10 +6,10 @@
 ; valid for an RTX box and a GPU-less laptop alike.
 ;
 ; Build:  ISCC.exe installer\VoiceBridge.iss
-; Output: installer\Output\VoiceBridge-Setup-<version>.exe
+; Output: installer\Output\parlaconclaudio-voice-bridge-Setup-<version>.exe
 
-#define AppName        "VoiceBridge"
-#define AppVersion     "1.0.3"
+#define AppName        "parlaconclaudio - voice-bridge"
+#define AppVersion     "1.0.4"
 #define AppPublisher   "Frisco"
 #define AppExeName     "VoiceBridge.exe"
 #define BootstrapExe   "vb_bootstrap.exe"
@@ -17,6 +17,7 @@
 [Setup]
 AppId={{7B3C1E42-9D5A-4F18-A6C7-2E8B4D1F9A03}
 AppName={#AppName}
+UninstallDisplayName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 VersionInfoVersion={#AppVersion}
@@ -25,15 +26,16 @@ VersionInfoVersion={#AppVersion}
 ; install stays writable, so repair and upgrade never need elevation.
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-DefaultDirName={localappdata}\Programs\{#AppName}
+; Folder name kept as "VoiceBridge" on purpose: changing it would orphan the existing venv.
+DefaultDirName={localappdata}\Programs\VoiceBridge
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
 
 OutputDir=Output
-OutputBaseFilename=VoiceBridge-Setup-{#AppVersion}
+OutputBaseFilename=parlaconclaudio-voice-bridge-Setup-{#AppVersion}
 SetupIconFile=..\assets\voicebridge.ico
-UninstallDisplayIcon={app}\{#AppExeName}
+UninstallDisplayIcon={app}\assets\voicebridge.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -46,7 +48,7 @@ Name: "it"; MessagesFile: "compiler:Languages\Italian.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "autostart";   Description: "Start VoiceBridge when I sign in"; GroupDescription: "Startup"
+Name: "autostart";   Description: "Start {#AppName} when I sign in"; GroupDescription: "Startup"
 
 [Files]
 Source: "..\{#AppExeName}";  DestDir: "{app}"; Flags: ignoreversion
@@ -62,10 +64,10 @@ Source: "..\LICENSE";        DestDir: "{app}"; Flags: ignoreversion
 Source: "bin\uv.exe";        DestDir: "{app}\bin"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
-Name: "{group}\{#AppName}";           Filename: "{app}\{#AppExeName}"
-Name: "{group}\Repair runtime";       Filename: "{app}\{#BootstrapExe}"; Parameters: "--root ""{app}"""
-Name: "{autodesktop}\{#AppName}";     Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
-Name: "{userstartup}\{#AppName}";     Filename: "{app}\{#AppExeName}"; Tasks: autostart
+Name: "{group}\{#AppName}";           Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\assets\voicebridge.ico"
+Name: "{group}\Repair runtime";       Filename: "{app}\{#BootstrapExe}"; Parameters: "--root ""{app}"""; IconFilename: "{app}\assets\voicebridge.ico"
+Name: "{autodesktop}\{#AppName}";     Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\assets\voicebridge.ico"; Tasks: desktopicon
+Name: "{userstartup}\{#AppName}";     Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\assets\voicebridge.ico"; Tasks: autostart
 
 [Run]
 ; The heavy lifting. Console stays visible: pip output is the user's only clue
@@ -77,6 +79,13 @@ Filename: "{app}\{#BootstrapExe}"; \
 
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; \
   Flags: nowait postinstall skipifsilent
+
+[InstallDelete]
+; v1.0.3 shipped as AppName "VoiceBridge": same AppId, so upgrading leaves its shortcuts behind
+; (double autostart). Remove them; the new ones are created under the renamed AppName.
+Type: files;          Name: "{userstartup}\VoiceBridge.lnk"
+Type: files;          Name: "{autodesktop}\VoiceBridge.lnk"
+Type: filesandordirs; Name: "{userprograms}\VoiceBridge"
 
 [UninstallDelete]
 ; Created after install, so Inno does not track them. src/ and scripts/ are wiped
