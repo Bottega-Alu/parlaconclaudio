@@ -188,6 +188,12 @@ Manual alternative for Claude Code, add to `~/.claude/settings.json`:
   failure. Not a Windows Service on purpose: services run in session 0, where there
   is no hotkey, clipboard, tray or per-user microphone. Manage it by hand with
   `.\venv\Scripts\python.exe -m src.voice_bridge.autostart enable|disable|status`.
+  If the task cannot be registered (access denied, schtasks/Task Scheduler error)
+  the same start is written as the per-user value `parlaconclaudio-voice-bridge`
+  under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (it runs
+  `scripts\start_voice_bridge.py`, which starts the same supervisor). The tray tick
+  is on when either is present, turning it off removes both, and so does the
+  uninstaller; the mechanism used is shown in the tray notification and logged.
 
 ## How to Use
 

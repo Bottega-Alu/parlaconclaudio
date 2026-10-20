@@ -1112,8 +1112,7 @@ class TrayIcon:
             from . import autostart
             result = autostart.disable() if autostart.is_enabled() else autostart.enable()
             log = logger.info if result.ok else logger.error
-            log(f"Autostart {result.action}: ok={result.ok} "
-                f"kind={result.error_kind.value if result.error_kind else '-'} {result.message}")
+            log(result.log_line())  # includes the mechanism: task | run_key
             self._notify(result.summary())
             self._rebuild_menu()
         threading.Thread(target=_run, daemon=True).start()

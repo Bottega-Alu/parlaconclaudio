@@ -170,8 +170,12 @@ def test_enable_without_venv_is_structured_error(tmp_path):
 
 def test_enable_access_denied_classified_by_code(tmp_path):
     runner = _Runner(1, stderr="ERRORE: Accesso negato. (0x80070005)")
-    res = autostart.enable(_fake_root(tmp_path), runner=runner, user_id="u")
-    assert res.error_kind is autostart.AutostartErrorKind.ACCESS_DENIED
+    from tests.conftest import FakeRunKey
+
+    res = autostart.enable(_fake_root(tmp_path), runner=runner, user_id="u",
+                           run_key=FakeRunKey(fail="set"))  # fallback fails too
+    assert res.error_kind is autostart.AutostartErrorKind.RUN_KEY_FAILED
+    assert res.task_error is autostart.AutostartErrorKind.ACCESS_DENIED
     assert "errore" in res.summary()
 
 

@@ -96,6 +96,10 @@ Type: filesandordirs; Name: "{userprograms}\VoiceBridge"
 ; Exit code 1 (task absent, e.g. autostart was off) is harmless here.
 Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""{#AutostartTask}"" /F"; \
   Flags: runhidden waituntilterminated; RunOnceId: "DeleteAutostartTask"
+; Remove the autostart fallback (per-user Run value, written when the task could
+; not be registered; RUN_KEY_PATH/RUN_VALUE_NAME in autostart.py). Exit 1 = absent.
+Filename: "{sys}\reg.exe"; Parameters: "delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v ""{#AutostartTask}"" /f"; \
+  Flags: runhidden waituntilterminated; RunOnceId: "DeleteAutostartRunValue"
 
 [UninstallDelete]
 ; Created after install, so Inno does not track them. src/ and scripts/ are wiped
