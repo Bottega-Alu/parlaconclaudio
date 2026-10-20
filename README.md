@@ -119,7 +119,7 @@ python -m venv venv
 .\venv\Scripts\activate
 
 # Core dependencies
-pip install faster-whisper pynput pyperclip pyaudio pystray Pillow pywin32 edge-tts
+pip install faster-whisper pynput pyperclip pyaudio pystray Pillow pywin32 "edge-tts>=7.3.1"
 
 # GPU support (optional - for local Whisper): cuBLAS/cuDNN for ctranslate2, no torch needed
 pip install -e .[gpu]
@@ -341,7 +341,7 @@ python -m venv venv
 .\venv\Scripts\activate
 
 # Dipendenze principali
-pip install faster-whisper pynput pyperclip pyaudio pystray Pillow pywin32 edge-tts
+pip install faster-whisper pynput pyperclip pyaudio pystray Pillow pywin32 "edge-tts>=7.3.1"
 
 # Supporto GPU (opzionale - per Whisper locale)
 pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
@@ -492,7 +492,7 @@ python -m venv venv
 .\venv\Scripts\activate
 
 # Dependencias principais
-pip install faster-whisper pynput pyperclip pyaudio pystray Pillow pywin32 edge-tts
+pip install faster-whisper pynput pyperclip pyaudio pystray Pillow pywin32 "edge-tts>=7.3.1"
 
 # Suporte GPU (opcional - para Whisper local)
 pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128

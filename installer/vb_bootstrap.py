@@ -8,6 +8,7 @@ installer itself stays small and never ships CUDA kernels a machine cannot use.
     vb_bootstrap.exe --root . --profile cloud     # force, skip detection
     vb_bootstrap.exe --root . --dry-run           # print the plan, install nothing
     vb_bootstrap.exe --root . --no-pause          # never wait for Enter (silent setup, CI)
+    vb_bootstrap.exe --root . --skip-hook         # leave the Claude Code TTS hook alone
 
 Every run is appended to <root>\\bootstrap.log (header with timestamp + argv),
 with the uv/pip child output teed into it as well: the console window closes
@@ -25,6 +26,7 @@ import errno
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -62,6 +64,14 @@ _CHILD_ERRCODE = re.compile(r"(?:os error|WinError)\s+(\d+)", re.IGNORECASE)
 
 TAIL_CHARS = 4000  # child output kept in memory for classification
 
+# edge-tts floor. 7.2.x sends the old Sec-MS-GEC token and gets HTTP 403 from the
+# Microsoft service: every TTS line goes silent. It is a FLOOR on purpose:
+# `uv pip install` leaves an already-satisfied requirement untouched, so on an
+# upgrade over an existing venv only a raised floor makes it fetch the new one.
+EDGE_TTS_MIN = "7.3.1"
+EDGE_TTS_REQ = f"edge-tts>={EDGE_TTS_MIN}"
+HOOK_SCRIPT_NAME = "notify-tts.py"
+
 # Base runtime: everything that works with or without a GPU.
 BASE_DEPS = [
     "numpy>=1.26,<2",
@@ -73,7 +83,7 @@ BASE_DEPS = [
     "faster-whisper>=1.2",
     "ctranslate2>=4.0,<5",
     "pywin32>=306",
-    "edge-tts>=6.1",
+    EDGE_TTS_REQ,
 ]
 
 # CUDA kernels. ctranslate2 does NOT declare these but cannot run on GPU without
@@ -405,6 +415,245 @@ def run_streamed(
         raise CommandFailed(cmd, returncode, tail)
 
 
+# --------------------------------------------------------------------------- #
+# Claude Code TTS hook
+# --------------------------------------------------------------------------- #
+#
+# The hook is NOT run by the venv: Claude Code spawns whatever command the user
+# put in settings.json (README: "python <...>/scripts/notify-tts.py"), so it
+# imports edge_tts from THAT interpreter and reads THAT copy of the script.
+# Upgrading the venv alone would leave the hook on the broken edge-tts. This
+# step reads settings.json (never writes it), and for every notify-tts.py hook:
+#   1. interpreter: edge-tts missing or < EDGE_TTS_MIN -> pip upgrade
+#      (retried with --user when the interpreter's site-packages is not writable)
+#   2. script: inside <root>  -> already replaced by the installer, nothing to do
+#              elsewhere, same -> nothing to do
+#              elsewhere, diff -> timestamped .bak, then copy <root>/scripts/notify-tts.py
+# Best effort: any failure here is reported and logged, never fails the setup.
+
+
+@dataclass(frozen=True)
+class HookTarget:
+    command: str  # raw command from settings.json
+    interpreter: tuple[str, ...]  # tokens before the script: ("python",), ("py", "-3")
+    script: Path
+
+
+def claude_config_dir(env: dict[str, str] | None = None) -> Path:
+    """Claude Code honours CLAUDE_CONFIG_DIR; default ~/.claude."""
+    env = os.environ if env is None else env
+    base = env.get("CLAUDE_CONFIG_DIR")
+    return Path(base) if base else Path.home() / ".claude"
+
+
+def find_hook_commands(settings: object) -> list[str]:
+    """Distinct hook commands that run notify-tts.py, in settings order."""
+    found: list[str] = []
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    if not isinstance(hooks, dict):
+        return found
+    for matchers in hooks.values():
+        for matcher in matchers if isinstance(matchers, list) else []:
+            entries = matcher.get("hooks") if isinstance(matcher, dict) else None
+            for entry in entries if isinstance(entries, list) else []:
+                cmd = entry.get("command") if isinstance(entry, dict) else None
+                if isinstance(cmd, str) and HOOK_SCRIPT_NAME in cmd.lower() and cmd not in found:
+                    found.append(cmd)
+    return found
+
+
+def _expand(token: str) -> str:
+    return os.path.expanduser(os.path.expandvars(token))
+
+
+def _is_hook_script(token: str) -> bool:
+    t = token.replace("\\", "/").lower()
+    return t == HOOK_SCRIPT_NAME or t.endswith("/" + HOOK_SCRIPT_NAME)
+
+
+def parse_hook_command(command: str) -> HookTarget | None:
+    """'<interpreter...> <path>/notify-tts.py [args]' -> HookTarget, else None.
+
+    posix=False keeps Windows backslashes; quotes are stripped afterwards. A
+    command starting with the script itself has no interpreter to upgrade: None.
+    """
+    try:
+        tokens = [t.strip('"').strip("'") for t in shlex.split(command, posix=False)]
+    except ValueError:
+        return None
+    for i, tok in enumerate(tokens):
+        if _is_hook_script(tok):
+            if i == 0:
+                return None
+            return HookTarget(command, tuple(_expand(t) for t in tokens[:i]), Path(_expand(tok)))
+    return None
+
+
+def version_tuple(text: str) -> tuple[int, ...]:
+    """Release segment only: '7.3.1' -> (7, 3, 1), '7.3.1rc1' -> (7, 3, 1)."""
+    m = re.match(r"\s*(\d+(?:\.\d+)*)", text)
+    return tuple(int(p) for p in m.group(1).split(".")) if m else ()
+
+
+def edge_tts_outdated(installed: str | None) -> bool:
+    return installed is None or version_tuple(installed) < version_tuple(EDGE_TTS_MIN)
+
+
+def resolve_interpreter(tokens: tuple[str, ...]) -> list[str] | None:
+    """First token through PATH (or as a file path); the rest passed through."""
+    exe = shutil.which(tokens[0]) or (tokens[0] if Path(tokens[0]).is_file() else None)
+    return [exe, *tokens[1:]] if exe else None
+
+
+_EDGE_TTS_PROBE = (
+    "import importlib.metadata as m\n"
+    "try:\n"
+    "    print(m.version('edge-tts'))\n"
+    "except m.PackageNotFoundError:\n"
+    "    print('')\n"
+)
+
+
+def installed_edge_tts(interp: list[str]) -> str | None:
+    out = subprocess.run(
+        [*interp, "-c", _EDGE_TTS_PROBE],
+        capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
+    )
+    if out.returncode != 0:
+        raise RuntimeError(
+            f"interpreter probe failed (exit {out.returncode}): {out.stderr.strip()[-300:]}"
+        )
+    return out.stdout.strip() or None
+
+
+def upgrade_edge_tts(interp: list[str], rep: Reporter) -> None:
+    cmd = [*interp, "-m", "pip", "install", "--upgrade", "--disable-pip-version-check", EDGE_TTS_REQ]
+    try:
+        run_streamed(cmd, rep)
+    except CommandFailed as exc:
+        if classify_error(exc) is ErrorKind.BLOCKED:
+            raise
+        rep.info("retrying with --user (interpreter site-packages not writable?)")
+        run_streamed([*cmd, "--user"], rep)
+
+
+def sync_hook_script(
+    src: Path, target: Path, root: Path, rep: Reporter, now: _dt.datetime | None = None
+) -> str:
+    """Returns 'in-root' | 'missing' | 'same' | 'updated'."""
+    try:
+        target.resolve().relative_to(root.resolve())
+        return "in-root"
+    except ValueError:
+        pass
+    if not target.is_file():
+        rep.info(f"hook script not found, left alone: {target}")
+        return "missing"
+    if target.read_bytes() == src.read_bytes():
+        return "same"
+    stamp = (now or _dt.datetime.now()).strftime("%Y%m%d-%H%M%S")
+    backup = target.with_name(f"{target.name}.bak-{stamp}")
+    shutil.copy2(target, backup)
+    shutil.copy2(src, target)
+    rep.info(f"hook script updated: {target} (previous copy: {backup.name})")
+    return "updated"
+
+
+def sync_tts_hook(root: Path, rep: Reporter, settings_file: Path | None = None) -> list[str]:
+    """Bring the hook's interpreter and script up to date. Never raises.
+
+    Returns one status line per action (logged, and asserted by the tests).
+    """
+    results: list[str] = []
+    settings_file = settings_file or claude_config_dir() / "settings.json"
+    src = root / "scripts" / HOOK_SCRIPT_NAME
+    try:
+        if not settings_file.is_file():
+            rep.info(f"no Claude Code settings at {settings_file}: TTS hook not configured, skipped")
+            return results
+        settings = json.loads(settings_file.read_text(encoding="utf-8"))
+        targets = [t for t in map(parse_hook_command, find_hook_commands(settings)) if t]
+        if not targets:
+            rep.info("no notify-tts.py hook in Claude Code settings: skipped")
+            return results
+        seen_interp: set[tuple[str, ...]] = set()
+        seen_script: set[str] = set()
+        for t in targets:
+            rep.info(f"hook: {t.command}")
+            interp = resolve_interpreter(t.interpreter)
+            if interp is None:
+                results.append(f"interpreter-not-found {' '.join(t.interpreter)}")
+                rep.info(f"interpreter not found: {' '.join(t.interpreter)}")
+            elif tuple(interp) not in seen_interp:
+                seen_interp.add(tuple(interp))
+                try:
+                    before = installed_edge_tts(interp)
+                    if edge_tts_outdated(before):
+                        rep.info(f"edge-tts {before or 'missing'} < {EDGE_TTS_MIN}: upgrading")
+                        upgrade_edge_tts(interp, rep)
+                        after = installed_edge_tts(interp)
+                        status = "ineffective" if edge_tts_outdated(after) else "upgraded"
+                        results.append(f"{status} {interp[0]} edge-tts {before} -> {after}")
+                        rep.info(f"edge-tts now {after}")
+                    else:
+                        results.append(f"ok {interp[0]} edge-tts {before}")
+                        rep.info(f"edge-tts {before}: ok")
+                except Exception as exc:  # one bad interpreter must not stop the rest
+                    results.append(f"error {interp[0]} {type(exc).__name__}")
+                    rep.info(f"WARNING edge-tts upgrade failed for {interp[0]}: {exc}")
+            key = os.path.normcase(str(t.script))
+            if key not in seen_script and src.is_file():
+                seen_script.add(key)
+                try:
+                    results.append(f"script-{sync_hook_script(src, t.script, root, rep)} {t.script}")
+                except OSError as exc:
+                    results.append(f"script-error {t.script}")
+                    rep.info(f"WARNING could not update {t.script}: {exc}")
+    except Exception as exc:
+        results.append(f"error {type(exc).__name__}")
+        rep.info(f"WARNING TTS hook check skipped: {type(exc).__name__}: {exc}")
+    return results
+
+
+# --------------------------------------------------------------------------- #
+# Virtual environment: create / reuse / recreate
+# --------------------------------------------------------------------------- #
+#
+# Installing over an existing version runs this bootstrap again. uv >= 0.8
+# refuses `uv venv` on an existing venv ("Use --clear to replace it", exit 2),
+# older uv replaced it silently - and the uv we get is whatever is on PATH or
+# freshly downloaded. Never ask uv: decide here, the same way for every uv.
+#   no venv dir                      -> create
+#   venv python runs                 -> reuse (uv pip install upgrades what the
+#                                       new requirement floors no longer satisfy)
+#   dir present, python missing/dead -> recreate (rmtree, then create)
+
+VENV_CREATE = "create"
+VENV_REUSE = "reuse"
+VENV_RECREATE = "recreate"
+
+
+def venv_python_runs(python: Path) -> bool:
+    if not python.is_file():
+        return False
+    try:
+        out = subprocess.run(
+            [str(python), "-c", "import sys"],
+            capture_output=True, timeout=60, stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.returncode == 0
+
+
+def venv_action(venv: Path, runs: Callable[[Path], bool] = venv_python_runs) -> str:
+    if not venv.exists():
+        return VENV_CREATE
+    if runs(venv / "Scripts" / "python.exe"):
+        return VENV_REUSE
+    return VENV_RECREATE
+
+
 def build_model_prefetch_code(root: Path, profile) -> str:
     """Code run inside the fresh venv to pull the model into the HF cache."""
     return "\n".join(
@@ -458,6 +707,11 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         metavar="FILE",
         help="write the detected profile as JSON and exit (used by the installer wizard)",
+    )
+    ap.add_argument(
+        "--skip-hook",
+        action="store_true",
+        help="leave the Claude Code TTS hook alone (its interpreter's edge-tts, its script copy)",
     )
     ap.add_argument(
         "--no-pause",
@@ -559,8 +813,15 @@ def setup(args: argparse.Namespace, root: Path, log_path: Path | None) -> int:
         rep.step(f"Installing Python {PYTHON_VERSION}")
         run_streamed([uv, "python", "install", PYTHON_VERSION], rep)
 
-        rep.step("Creating virtual environment")
-        run_streamed([uv, "venv", str(venv), "--python", PYTHON_VERSION], rep)
+        action = venv_action(venv)
+        rep.step(f"Virtual environment ({action})")
+        if action == VENV_REUSE:
+            rep.info(f"keeping {venv}: packages below are upgraded in place")
+        else:
+            if action == VENV_RECREATE:
+                rep.info(f"{venv} exists but its interpreter does not run: rebuilding")
+                shutil.rmtree(venv)
+            run_streamed([uv, "venv", str(venv), "--python", PYTHON_VERSION], rep)
 
         rep.step(f"Installing {len(deps)} packages")
         env_python = venv / "Scripts" / "python.exe"
@@ -574,6 +835,10 @@ def setup(args: argparse.Namespace, root: Path, log_path: Path | None) -> int:
                 rep,
                 cwd=root,
             )
+
+        if not args.skip_hook:
+            rep.step("Claude Code TTS hook (edge-tts, notify-tts.py)")
+            sync_tts_hook(root, rep)
 
         rep.step("Writing install state")
         state = {

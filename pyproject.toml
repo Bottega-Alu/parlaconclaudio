@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "parlaconclaudio"
-version = "1.0.5"
+version = "1.0.6"
 description = "Voice bridge for Claude Code: push-to-talk STT + TTS notifications"
 authors = ["Fra"]
 license = "MIT"
@@ -38,7 +38,7 @@ nvidia-cudnn-cu12 = {version = "^9.20", optional = true}
 pywin32 = {version = "^306", markers = "sys_platform == 'win32'"}
 
 # TTS (for notify-tts.py hook)
-edge-tts = "^6.1.0"
+edge-tts = ">=7.3.1"
 
 [tool.poetry.extras]
 # poetry install -E gpu   -> local RTX path (adds ~1.6 GB of CUDA kernels)

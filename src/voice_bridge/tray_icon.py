@@ -672,7 +672,7 @@ class TrayIcon:
         vol_icon = "🔇" if is_muted or current_vol == 0 else "🔊"
 
         return pystray.Menu(
-            pystray.MenuItem("✨ parlaconclaudio v1.0.5.1012 ✨", None, enabled=False),
+            pystray.MenuItem("✨ parlaconclaudio v1.0.6.1020 ✨", None, enabled=False),
             pystray.Menu.SEPARATOR,
             # --- Status dashboard (always visible, read-only) ---
             pystray.MenuItem(f"  🧠 {engine_display}  │  {lang_display}  │  🎤 {mic_display}", None, enabled=False),
