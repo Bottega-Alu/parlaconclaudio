@@ -9,8 +9,16 @@ the user's token and still gets service-like behaviour:
   principal  InteractiveToken, LeastPrivilege                     -> no UAC
   settings   no execution time limit, restart on failure 3x / 1 min,
              runs on battery, IgnoreNew if already running
-  action     <root>\\venv\\Scripts\\pythonw.exe -m src.voice_bridge  (no console),
+  action     <base pythonw.exe> -m src.voice_bridge  (no console),
              working dir <root>
+
+The interpreter comes from gui_python.resolve(<root>\\venv): the venv's BASE
+pythonw.exe (pyvenv.cfg `home`), not venv\\Scripts\\pythonw.exe - under a uv
+venv that file is a console-subsystem trampoline, and a task that starts a
+console program opens a console window. A task cannot set __PYVENV_LAUNCHER__,
+so the supervisor runs outside the venv (it is stdlib-only) and starts the
+bridge child inside it. Without a base pythonw.exe it falls back to
+venv\\Scripts\\pythonw.exe. The Run value below uses the same interpreter.
 
 The action runs pythonw directly, not the VoiceBridge.exe stub: the stub exits
 at once (the task would end immediately) and it is an unsigned exe that Smart
@@ -51,6 +59,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 from xml.sax.saxutils import escape
+
+from . import gui_python
 
 TASK_NAME = "parlaconclaudio-voice-bridge"  # keep in sync with installer/VoiceBridge.iss
 APP_ROOT = Path(__file__).resolve().parents[2]
@@ -168,12 +178,18 @@ def current_user_id(env: dict[str, str] | None = None) -> str:
 
 
 def pythonw_path(root: Path) -> Path:
-    return root / "venv" / "Scripts" / "pythonw.exe"
+    """The venv's launcher: its presence is the "installed" check."""
+    return gui_python.venv_launcher(root / "venv")
+
+
+def launch_exe(root: Path) -> Path:
+    """GUI-subsystem interpreter for the task / Run value (see module doc)."""
+    return gui_python.resolve(root / "venv").exe
 
 
 def build_task_xml(root: Path, user_id: str) -> str:
     """Task Scheduler 1.2 definition. Pure: no I/O, asserted by the tests."""
-    exe = escape(str(pythonw_path(root)))
+    exe = escape(str(launch_exe(root)))
     workdir = escape(str(root))
     user = escape(user_id)
     return f"""<?xml version="1.0" encoding="UTF-16"?>
@@ -233,7 +249,7 @@ def build_task_xml(root: Path, user_id: str) -> str:
 def run_command(root: Path) -> str:
     """Run-key command line: same supervisor as the task, via the start script
     (a Run value has no working directory for `-m src.voice_bridge`)."""
-    return f'"{pythonw_path(root)}" "{root / START_SCRIPT}"'
+    return f'"{launch_exe(root)}" "{root / START_SCRIPT}"'
 
 
 def create_command(xml_path: Path) -> list[str]:

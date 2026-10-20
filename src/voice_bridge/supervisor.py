@@ -10,8 +10,18 @@ place where the supervisor lives:
   supervisor  holds the single-instance mutex for its whole life
      |        (a second launch sees the mutex and exits; a dead child never
      |         held it, so a relaunch is never blocked by a stale lock)
-     +-- child  <same interpreter> -m src.voice_bridge --child [--append-log]
+     +-- child  -m src.voice_bridge --child [--append-log]
                 runs bridge.main(); never touches the mutex
+
+Child interpreter (child_launch), so no level of the chain ever owns a console:
+  supervisor runs as python.exe (console run from a terminal)
+      -> same interpreter, shares that console (live log, Ctrl+C reaches both)
+  anything else (pythonw / base pythonw / a uv trampoline named pythonw.exe)
+      -> gui_python.resolve(venv): the base pythonw.exe + __PYVENV_LAUNCHER__
+         (one process, GUI subsystem), started with CREATE_NO_WINDOW and all
+         std streams on DEVNULL; CREATE_NO_WINDOW also keeps a console
+         trampoline fallback hidden. child.pid is the bridge itself, not a
+         trampoline, so waiting on / terminating it covers the whole child tree.
 
 Decision tree on child exit (supervise):
   exit 0                                   -> voluntary (tray Exit): stop, return 0
@@ -36,8 +46,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
 
+from . import gui_python
+
 APP_ROOT = Path(__file__).resolve().parents[2]
 LOG_PATH = APP_ROOT / "voicebridge.log"
+VENV_DIR = APP_ROOT / "venv"
+CREATE_NO_WINDOW = 0x08000000
 
 CHILD_FLAG = "--child"
 APPEND_LOG_FLAG = "--append-log"
@@ -66,13 +80,44 @@ def child_command(append_log: bool, executable: str | None = None) -> list[str]:
     return cmd
 
 
+@dataclass(frozen=True)
+class ChildLaunch:
+    cmd: list[str]
+    env_overrides: dict[str, str]
+    creationflags: int
+    console: bool  # True: shares the supervisor's console, std streams inherited
+    via: str
+
+
+def is_console_run(executable: str) -> bool:
+    """Only an explicit python.exe run keeps a shared console. Under a uv venv
+    sys.executable is the launcher NAME (pythonw.exe) even though the process
+    is the base python.exe: the name states the intent, the process does not."""
+    return Path(executable).name.lower() == "python.exe"
+
+
+def child_launch(append_log: bool, executable: str | None = None,
+                 venv: Path | None = None) -> ChildLaunch:
+    """Pure: which interpreter, env and flags the child gets (see module doc)."""
+    executable = executable or sys.executable
+    if is_console_run(executable):
+        return ChildLaunch(child_command(append_log, executable), {}, 0, True, "console")
+    gui = gui_python.resolve(venv or VENV_DIR)
+    return ChildLaunch(child_command(append_log, str(gui.exe)), dict(gui.env),
+                       CREATE_NO_WINDOW, False, gui.via)
+
+
 def spawn_child(append_log: bool) -> subprocess.Popen:
-    """Same interpreter as the supervisor: pythonw stays console-less, a console
-    python run keeps sharing its console (live log output, Ctrl+C reaches both)."""
+    launch = child_launch(append_log)
     env = os.environ.copy()
+    env.pop(gui_python.PYVENV_LAUNCHER_ENV, None)  # never leak the supervisor's own
+    env.update(launch.env_overrides)
     env.setdefault("PYTHONIOENCODING", "utf-8")
-    return subprocess.Popen(child_command(append_log), cwd=str(APP_ROOT), env=env,
-                            stdin=subprocess.DEVNULL)
+    streams = {} if launch.console else {"stdout": subprocess.DEVNULL,
+                                         "stderr": subprocess.DEVNULL}
+    return subprocess.Popen(launch.cmd, cwd=str(APP_ROOT), env=env,
+                            stdin=subprocess.DEVNULL, creationflags=launch.creationflags,
+                            **streams)
 
 
 def log_line(level: str, event: str, **fields) -> str:
@@ -114,7 +159,7 @@ def supervise(
             child = spawn(append)
         except OSError as exc:
             log(log_line("ERROR", "supervisor_spawn_failed", kind="spawn_failed",
-                         error=str(exc), command=child_command(append)))
+                         error=str(exc), command=child_launch(append).cmd))
             return SupervisorOutcome(EXIT_SPAWN_FAILED, "spawn_failed", exit_codes, len(relaunch_times))
         started = clock()
         try:

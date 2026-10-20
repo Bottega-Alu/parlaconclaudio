@@ -5,7 +5,11 @@ a Run value cannot set a working directory, so `pythonw -m src.voice_bridge`
 would not find the package. This script sits in <root>/scripts, moves to <root>
 and runs exactly that module - the supervisor, same as the logon task.
 
-    <root>\\venv\\Scripts\\pythonw.exe <root>\\scripts\\start_voice_bridge.py
+    <base pythonw.exe> <root>\\scripts\\start_voice_bridge.py
+
+The interpreter is the venv's BASE pythonw.exe (gui_python.resolve), so this
+runs outside the venv: the supervisor path is stdlib-only and starts the bridge
+child inside the venv.
 """
 
 import os

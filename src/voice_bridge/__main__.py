@@ -12,7 +12,11 @@ Order matters:
   1. console-less streams: under pythonw sys.stdout/sys.stderr are None and any
      library that writes to them (tqdm progress, warnings) would raise; route
      them to os.devnull - the real log is voicebridge.log.
-  2. single instance BEFORE anything imports bridge: bridge.py opens
+  2. the supervisor path (this module, single_instance, supervisor, gui_python)
+     is stdlib-only: the logon task and the Run value start it with the base
+     pythonw.exe, outside the venv (a task cannot set __PYVENV_LAUNCHER__).
+     The child gets the venv (supervisor.child_launch).
+  3. single instance BEFORE anything imports bridge: bridge.py opens
      voicebridge.log in "w" mode at import, so a second launch would truncate
      the live log. The supervisor never imports bridge at all.
 """
@@ -24,6 +28,10 @@ from pathlib import Path
 for _name in ("stdout", "stderr"):
     if getattr(sys, _name) is None:
         setattr(sys, _name, open(os.devnull, "w", encoding="utf-8"))
+
+# Consumed at interpreter start-up (gui_python.py): left in the environment it
+# would make any CPython the bridge spawns believe it is this venv.
+os.environ.pop("__PYVENV_LAUNCHER__", None)
 
 from .single_instance import ensure_single_instance  # noqa: E402
 from .supervisor import CHILD_FLAG, supervise  # noqa: E402
