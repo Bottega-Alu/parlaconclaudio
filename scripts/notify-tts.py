@@ -1010,14 +1010,114 @@ def burst_check_should_play(wait_ms: int = BURST_WAIT_MS) -> bool:
     return latest == my_id
 
 
-def main() -> None:
+# ══════════════════════════════════════════════════
+# INPUT: Claude Code hooks, Codex hooks, legacy Codex notify
+# ══════════════════════════════════════════════════
+
+SOURCE_CLAUDE = "claude"
+SOURCE_CODEX = "codex"
+
+# Codex: only the two events that matter - "done" and "needs you".
+_CODEX_PHRASES = {
+    "stop": "Progetto {repo}. Codex ha finito.",
+    "stop_hook": "Progetto {repo}. Codex, ciclo completato.",
+    "permission": "Progetto {repo}. Codex ha bisogno del tuo permesso. {detail}",
+}
+
+
+def _source_from_argv(argv: list[str]) -> str:
+    """`--source codex` (as written by the tray / voice_hooks); default claude."""
+    for i, arg in enumerate(argv):
+        if arg == "--source" and i + 1 < len(argv):
+            return argv[i + 1].strip().lower()
+        if arg.startswith("--source="):
+            return arg.split("=", 1)[1].strip().lower()
+    return SOURCE_CLAUDE
+
+
+def _json_arg(argv: list[str]) -> dict | None:
+    """Legacy Codex `notify`: the event is a JSON object in the last argument."""
+    for arg in reversed(argv):
+        s = arg.strip()
+        if s.startswith("{"):
+            try:
+                obj = json.loads(s)
+            except json.JSONDecodeError:
+                return None
+            return obj if isinstance(obj, dict) else None
+    return None
+
+
+def _short(text: object, limit: int = 80) -> str:
+    if not isinstance(text, str):
+        return ""
+    t = " ".join(text.split()).rstrip(".")
+    return t[: limit - 3] + "..." if len(t) > limit else t
+
+
+def codex_to_event(data: dict) -> dict | None:
+    """Codex payload -> Claude-shaped event (hook_event_name Stop/Notification),
+    tagged agent=codex. Unknown/irrelevant events -> None (stay silent).
+
+      hooks  Stop               -> Stop        ("Codex ha finito")
+      hooks  PermissionRequest  -> Notification permission_prompt
+      notify agent-turn-complete-> Stop        (legacy `notify` program)
+    """
+    event = data.get("hook_event_name") or data.get("type") or ""
+    base = {"agent": SOURCE_CODEX, "cwd": data.get("cwd"), "session_id": data.get("session_id")}
+    if event in ("Stop", "agent-turn-complete"):
+        return {**base, "hook_event_name": "Stop", "stop_hook_active": bool(data.get("stop_hook_active"))}
+    if event == "PermissionRequest":
+        tool_input = data.get("tool_input") if isinstance(data.get("tool_input"), dict) else {}
+        detail = _short(tool_input.get("description")) or _short(data.get("tool_name"), 40)
+        return {**base, "hook_event_name": "Notification",
+                "notification_type": "permission_prompt", "message": detail}
+    return None
+
+
+def read_event(argv: list[str], read_stdin) -> tuple[str, dict] | None:
+    """(source, Claude-shaped event) or None. Decision tree:
+      1. JSON object in argv          -> legacy Codex notify
+      2. stdin JSON, --source codex   -> Codex hooks engine
+      3. stdin JSON                   -> Claude Code
+    """
+    legacy = _json_arg(argv)
+    if legacy is not None:
+        ev = codex_to_event(legacy)
+        return (SOURCE_CODEX, ev) if ev else None
     try:
-        raw = sys.stdin.read()
-        if not raw.strip():
-            return
+        raw = read_stdin()
+    except Exception:
+        return None
+    if not raw or not raw.strip():
+        return None
+    try:
         data = json.loads(raw)
-    except (json.JSONDecodeError, Exception):
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if _source_from_argv(argv) == SOURCE_CODEX:
+        ev = codex_to_event(data)
+        return (SOURCE_CODEX, ev) if ev else None
+    return SOURCE_CLAUDE, data
+
+
+def build_codex_message(data: dict, repo: str) -> str:
+    if data.get("hook_event_name") == "Stop":
+        key = "stop_hook" if data.get("stop_hook_active") else "stop"
+        return _CODEX_PHRASES[key].format(repo=repo)
+    return _CODEX_PHRASES["permission"].format(repo=repo, detail=data.get("message", "")).strip()
+
+
+def main(argv: list[str] | None = None, read_stdin=None) -> None:
+    argv = sys.argv[1:] if argv is None else argv
+    if read_stdin is None:
+        read_stdin = (lambda: sys.stdin.read()) if sys.stdin is not None else (lambda: "")
+    got = read_event(argv, read_stdin)
+    if got is None:
         return
+    source, data = got
 
     event_name = data.get("hook_event_name", "")
 
@@ -1067,6 +1167,9 @@ def main() -> None:
         chime_key = chime_map.get(sub_type, "default")
     else:
         return
+
+    if source == SOURCE_CODEX:
+        message = build_codex_message(data, repo)
 
     # Check TTS mode
     tts_mode = load_config().get("tts_mode", "full")

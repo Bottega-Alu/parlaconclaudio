@@ -8,7 +8,7 @@ installer itself stays small and never ships CUDA kernels a machine cannot use.
     vb_bootstrap.exe --root . --profile cloud     # force, skip detection
     vb_bootstrap.exe --root . --dry-run           # print the plan, install nothing
     vb_bootstrap.exe --root . --no-pause          # never wait for Enter (silent setup, CI)
-    vb_bootstrap.exe --root . --skip-hook         # leave the Claude Code TTS hook alone
+    vb_bootstrap.exe --root . --skip-hook         # leave the Claude Code / Codex TTS hooks alone
 
 Every run is appended to <root>\\bootstrap.log (header with timestamp + argv),
 with the uv/pip child output teed into it as well: the console window closes
@@ -35,6 +35,23 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Callable
+
+# Reading the voice hooks is shared with the app (tray connect/disconnect):
+# one implementation in src/core/voice_hooks.py (stdlib only). Compiled into
+# vb_bootstrap.exe (--hidden-import); from a source checkout the repo root is
+# put on sys.path first.
+try:
+    from src.core import voice_hooks
+except ImportError:  # python installer/vb_bootstrap.py from a checkout
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from src.core import voice_hooks
+
+HOOK_SCRIPT_NAME = voice_hooks.HOOK_SCRIPT_NAME
+HookTarget = voice_hooks.HookTarget
+claude_config_dir = voice_hooks.claude_config_dir
+codex_home = voice_hooks.codex_home
+find_hook_commands = voice_hooks.find_hook_commands
+parse_hook_command = voice_hooks.parse_hook_command
 
 PYTHON_VERSION = "3.11"
 UV_INSTALL_URL = "https://astral.sh/uv/install.ps1"
@@ -70,7 +87,6 @@ TAIL_CHARS = 4000  # child output kept in memory for classification
 # upgrade over an existing venv only a raised floor makes it fetch the new one.
 EDGE_TTS_MIN = "7.3.1"
 EDGE_TTS_REQ = f"edge-tts>={EDGE_TTS_MIN}"
-HOOK_SCRIPT_NAME = "notify-tts.py"
 
 # Base runtime: everything that works with or without a GPU.
 BASE_DEPS = [
@@ -416,77 +432,21 @@ def run_streamed(
 
 
 # --------------------------------------------------------------------------- #
-# Claude Code TTS hook
+# Voice (TTS) hooks: Claude Code + Codex
 # --------------------------------------------------------------------------- #
 #
-# The hook is NOT run by the venv: Claude Code spawns whatever command the user
-# put in settings.json (README: "python <...>/scripts/notify-tts.py"), so it
-# imports edge_tts from THAT interpreter and reads THAT copy of the script.
-# Upgrading the venv alone would leave the hook on the broken edge-tts. This
-# step reads settings.json (never writes it), and for every notify-tts.py hook:
+# The hook is NOT run by the venv: Claude Code / Codex spawn whatever command the
+# config names (README: "python <...>/scripts/notify-tts.py"), so it imports
+# edge_tts from THAT interpreter and reads THAT copy of the script. Upgrading the
+# venv alone would leave the hook on the broken edge-tts. This step reads
+# Claude's settings.json and Codex's hooks.json (never writes either), and for
+# every notify-tts.py hook:
 #   1. interpreter: edge-tts missing or < EDGE_TTS_MIN -> pip upgrade
 #      (retried with --user when the interpreter's site-packages is not writable)
 #   2. script: inside <root>  -> already replaced by the installer, nothing to do
 #              elsewhere, same -> nothing to do
 #              elsewhere, diff -> timestamped .bak, then copy <root>/scripts/notify-tts.py
 # Best effort: any failure here is reported and logged, never fails the setup.
-
-
-@dataclass(frozen=True)
-class HookTarget:
-    command: str  # raw command from settings.json
-    interpreter: tuple[str, ...]  # tokens before the script: ("python",), ("py", "-3")
-    script: Path
-
-
-def claude_config_dir(env: dict[str, str] | None = None) -> Path:
-    """Claude Code honours CLAUDE_CONFIG_DIR; default ~/.claude."""
-    env = os.environ if env is None else env
-    base = env.get("CLAUDE_CONFIG_DIR")
-    return Path(base) if base else Path.home() / ".claude"
-
-
-def find_hook_commands(settings: object) -> list[str]:
-    """Distinct hook commands that run notify-tts.py, in settings order."""
-    found: list[str] = []
-    hooks = settings.get("hooks") if isinstance(settings, dict) else None
-    if not isinstance(hooks, dict):
-        return found
-    for matchers in hooks.values():
-        for matcher in matchers if isinstance(matchers, list) else []:
-            entries = matcher.get("hooks") if isinstance(matcher, dict) else None
-            for entry in entries if isinstance(entries, list) else []:
-                cmd = entry.get("command") if isinstance(entry, dict) else None
-                if isinstance(cmd, str) and HOOK_SCRIPT_NAME in cmd.lower() and cmd not in found:
-                    found.append(cmd)
-    return found
-
-
-def _expand(token: str) -> str:
-    return os.path.expanduser(os.path.expandvars(token))
-
-
-def _is_hook_script(token: str) -> bool:
-    t = token.replace("\\", "/").lower()
-    return t == HOOK_SCRIPT_NAME or t.endswith("/" + HOOK_SCRIPT_NAME)
-
-
-def parse_hook_command(command: str) -> HookTarget | None:
-    """'<interpreter...> <path>/notify-tts.py [args]' -> HookTarget, else None.
-
-    posix=False keeps Windows backslashes; quotes are stripped afterwards. A
-    command starting with the script itself has no interpreter to upgrade: None.
-    """
-    try:
-        tokens = [t.strip('"').strip("'") for t in shlex.split(command, posix=False)]
-    except ValueError:
-        return None
-    for i, tok in enumerate(tokens):
-        if _is_hook_script(tok):
-            if i == 0:
-                return None
-            return HookTarget(command, tuple(_expand(t) for t in tokens[:i]), Path(_expand(tok)))
-    return None
 
 
 def version_tuple(text: str) -> tuple[int, ...]:
@@ -559,22 +519,45 @@ def sync_hook_script(
     return "updated"
 
 
-def sync_tts_hook(root: Path, rep: Reporter, settings_file: Path | None = None) -> list[str]:
-    """Bring the hook's interpreter and script up to date. Never raises.
+def _hook_commands_in(path: Path, rep: Reporter, results: list[str]) -> list[str]:
+    """notify-tts commands in one config file; [] when absent or unreadable
+    (an unreadable one also adds "error <ExcType>" to results)."""
+    if not path.is_file():
+        rep.info(f"no hook config at {path}: skipped")
+        return []
+    try:
+        return find_hook_commands(json.loads(path.read_text(encoding="utf-8-sig")))
+    except (OSError, ValueError) as exc:
+        results.append(f"error {type(exc).__name__}")
+        rep.info(f"WARNING TTS hook check skipped for {path}: {type(exc).__name__}: {exc}")
+        return []
 
+
+def sync_tts_hook(
+    root: Path,
+    rep: Reporter,
+    settings_file: Path | None = None,
+    codex_hooks_file: Path | None = None,
+) -> list[str]:
+    """Bring the hooks' interpreters and script copies up to date. Never raises.
+
+    Explicit files (tests) are the only ones read; with none given, the real
+    Claude settings.json and Codex hooks.json (CLAUDE_CONFIG_DIR / CODEX_HOME).
     Returns one status line per action (logged, and asserted by the tests).
     """
     results: list[str] = []
-    settings_file = settings_file or claude_config_dir() / "settings.json"
+    if settings_file is None and codex_hooks_file is None:
+        settings_file = claude_config_dir() / "settings.json"
+        codex_hooks_file = codex_home() / "hooks.json"
     src = root / "scripts" / HOOK_SCRIPT_NAME
     try:
-        if not settings_file.is_file():
-            rep.info(f"no Claude Code settings at {settings_file}: TTS hook not configured, skipped")
-            return results
-        settings = json.loads(settings_file.read_text(encoding="utf-8"))
-        targets = [t for t in map(parse_hook_command, find_hook_commands(settings)) if t]
+        commands: list[str] = []
+        for path in (settings_file, codex_hooks_file):
+            if path is not None:
+                commands += [c for c in _hook_commands_in(path, rep, results) if c not in commands]
+        targets = [t for t in map(parse_hook_command, commands) if t]
         if not targets:
-            rep.info("no notify-tts.py hook in Claude Code settings: skipped")
+            rep.info("no notify-tts.py hook in Claude Code / Codex config: skipped")
             return results
         seen_interp: set[tuple[str, ...]] = set()
         seen_script: set[str] = set()
@@ -711,7 +694,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--skip-hook",
         action="store_true",
-        help="leave the Claude Code TTS hook alone (its interpreter's edge-tts, its script copy)",
+        help="leave the voice hooks alone (their interpreters' edge-tts, their script copies)",
     )
     ap.add_argument(
         "--no-pause",
@@ -837,7 +820,7 @@ def setup(args: argparse.Namespace, root: Path, log_path: Path | None) -> int:
             )
 
         if not args.skip_hook:
-            rep.step("Claude Code TTS hook (edge-tts, notify-tts.py)")
+            rep.step("Voice hooks: Claude Code + Codex (edge-tts, notify-tts.py)")
             sync_tts_hook(root, rep)
 
         rep.step("Writing install state")

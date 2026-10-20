@@ -11,6 +11,7 @@ Right-click menu:
 - Whisper Language selector
 - Sound Pack + Volume
 - Preview sounds on click
+- Voice hooks for Claude Code / Codex (checked = wired in the real config files)
 - Start at sign-in (Task Scheduler logon task, checked = registered)
 - Exit
 """
@@ -118,6 +119,8 @@ EDGE_VOICES = {
 }
 
 VOLUME_LEVELS = [0, 25, 50, 75, 100, 125, 150, 200, 250, 300]
+
+_VOICE_HOOKS_LOCK = threading.Lock()
 
 TTS_MODES = {
     "Full": "full",              # Chime + voice always
@@ -674,6 +677,7 @@ class TrayIcon:
 
         from . import autostart
         autostart_on = autostart.is_enabled()
+        hooks_item = self._build_voice_hooks_menu()
 
         return pystray.Menu(
             pystray.MenuItem("✨ parlaconclaudio v1.0.6.1020 ✨", None, enabled=False),
@@ -696,6 +700,7 @@ class TrayIcon:
             pystray.Menu.SEPARATOR,
             # --- Settings & Info ---
             pystray.MenuItem("⚙️ Settings & Info", settings_menu),
+            hooks_item,
             pystray.MenuItem(
                 "🚀 Avvio automatico all'accesso",
                 self._toggle_autostart_clicked,
@@ -1044,6 +1049,63 @@ class TrayIcon:
                 self._icon.notify(message, "parlaconclaudio")
             except Exception as e:
                 logger.debug(f"tray notify failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Voice hooks (notify-tts.py) for Claude Code and Codex
+    # ------------------------------------------------------------------
+
+    def _build_voice_hooks_menu(self) -> "pystray.MenuItem":
+        """Checked state is read from the real config files at every rebuild."""
+        from ..core import voice_hooks as vh
+
+        items = []
+        for agent in vh.AGENTS:
+            state = vh.status(agent)  # True / False / None = unreadable
+            suffix = "  ⚠️ config non leggibile" if state is None else ""
+            items.append(pystray.MenuItem(
+                f"{vh.AGENT_LABEL[agent]}{suffix}",
+                self._make_toggle_voice_hook(agent),
+                checked=lambda item, on=bool(state): on,
+            ))
+        items += [
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("🔗 Collega hook per voci interattive (tutti)",
+                             self._make_set_all_voice_hooks(True)),
+            pystray.MenuItem("✂️ Scollega hook Codex e Claude Code",
+                             self._make_set_all_voice_hooks(False)),
+        ]
+        return pystray.MenuItem("🗣️ Hook voci", pystray.Menu(*items))
+
+    def _apply_voice_hooks(self, plan: list[tuple[str, bool]]) -> None:
+        """Run connect/disconnect per agent; log + one notification for all."""
+        from ..core import voice_hooks as vh
+
+        lines = []
+        with _VOICE_HOOKS_LOCK:  # two quick clicks must not interleave read/modify/write
+            results = [vh.connect(a) if want else vh.disconnect(a) for a, want in plan]
+        for res in results:
+            agent = res.agent
+            log = logger.info if res.ok else logger.error
+            log(f"Voice hook {agent} {res.action}: ok={res.ok} changed={res.changed} "
+                f"kind={res.error_kind.value if res.error_kind else '-'} path={res.path} "
+                f"backup={res.backup} {res.message}")
+            lines.append(res.summary())
+        self._notify("\n".join(lines)[:250])  # Windows balloon text limit ~256
+        self._rebuild_menu()
+
+    def _make_toggle_voice_hook(self, agent: str):
+        def handler(icon, item):
+            from ..core import voice_hooks as vh
+            want = vh.status(agent) is not True
+            threading.Thread(target=self._apply_voice_hooks, args=([(agent, want)],), daemon=True).start()
+        return handler
+
+    def _make_set_all_voice_hooks(self, want: bool):
+        def handler(icon, item):
+            from ..core import voice_hooks as vh
+            plan = [(a, want) for a in vh.AGENTS]
+            threading.Thread(target=self._apply_voice_hooks, args=(plan,), daemon=True).start()
+        return handler
 
     def _toggle_autostart_clicked(self, icon, item):
         def _run():

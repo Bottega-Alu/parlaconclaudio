@@ -128,9 +128,28 @@ pip install -e .[gpu]
 pip install keyring
 ```
 
-## Configure Claude Code Hooks
+## Configure the voice hooks (Claude Code and Codex)
 
-Add to `~/.claude/settings.json`:
+Easiest: tray menu > **🗣️ Hook voci** > tick *Claude Code* and/or *Codex* (or
+*Collega hook per voci interattive (tutti)*); untick, or *Scollega hook Codex e
+Claude Code*, to remove them. The ticks are read from the real files:
+
+| Agent | File | Events wired |
+|---|---|---|
+| Claude Code | `%CLAUDE_CONFIG_DIR%` or `~/.claude/settings.json` | `Stop`, `TaskCompleted` (done), `Notification` (needs you) |
+| Codex | `%CODEX_HOME%` or `~/.codex/hooks.json` | `Stop` (done), `PermissionRequest` (needs you) |
+
+Connecting only adds the missing entries; disconnecting removes only the entries
+that run `notify-tts.py`, everything else is preserved. Every write is parsed first
+(a malformed file is reported, never overwritten), backed up as
+`<file>.bak-<timestamp>`, and written atomically. The command reuses the
+interpreter + script of an existing notify-tts hook, else the app's
+`venv\Scripts\python.exe`; Codex gets `--source codex`. Codex runs a new hook only
+after you trust it: open `/hooks` in Codex and approve the two entries. Codex's
+`notify` key in `config.toml` is left alone (it holds a single program and is often
+already used).
+
+Manual alternative for Claude Code, add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -271,7 +290,7 @@ src/core/audio_capture/    # Audio Capture
   drivers/portaudio_driver.py
 
 scripts/
-  notify-tts.py            # Claude Code TTS hook
+  notify-tts.py            # Claude Code + Codex TTS hook
   download_packs.py        # Sound pack downloader
   generate_manifests.py    # Manifest generator
 ```

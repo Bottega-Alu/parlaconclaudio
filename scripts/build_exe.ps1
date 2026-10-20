@@ -56,7 +56,8 @@ if ($LASTEXITCODE -ne 0) { throw "launcher build failed (exit $LASTEXITCODE)" }
 Write-Host "`n=== 2/2  vb_bootstrap.exe (installer helper, console visible)" -ForegroundColor Cyan
 # Console is intentional: pip output is the user's only diagnostic if a wheel fails.
 # gpu_probe is compiled IN so --probe-json works during the wizard, before the
-# payload is extracted to disk.
+# payload is extracted to disk. voice_hooks is imported at module load (shared
+# hook parsing with the app), so it must be compiled in for the same reason.
 & $Py -m PyInstaller `
     --onefile --noconfirm `
     --name vb_bootstrap `
@@ -66,6 +67,7 @@ Write-Host "`n=== 2/2  vb_bootstrap.exe (installer helper, console visible)" -Fo
     --specpath $Work `
     --paths $Root `
     --hidden-import src.core.gpu_probe `
+    --hidden-import src.core.voice_hooks `
     @CommonExcludes `
     --exclude-module ctranslate2 `
     (Join-Path $Root "installer\vb_bootstrap.py")
