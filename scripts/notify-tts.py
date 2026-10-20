@@ -1150,14 +1150,57 @@ def build_codex_message(data: dict, repo: str) -> str:
     return _CODEX_PHRASES["permission"].format(repo=repo, detail=data.get("message", "")).strip()
 
 
-def main(argv: list[str] | None = None, read_stdin=None) -> None:
+# Codex runs its hooks synchronously (see voice_hooks._HANDLER_OPTS): the hook
+# process hands the payload to a detached worker and exits at once, so the
+# turn is not held for synthesis + playback and `codex exec` shutting down
+# cannot kill the voice line.
+WORKER_FLAG = "--worker"
+_DETACHED_PROCESS = 0x00000008
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
+_CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+
+def spawn_detached_worker(argv: list[str], raw: str | None) -> bool:
+    """Re-run this script detached with `--worker`, payload on its stdin.
+    Breakaway from the caller's job first (Codex's job allows it); if refused,
+    plain detached (Codex preserves descendants of a hook that completed).
+    False = could not spawn: the caller handles the event inline."""
+    cmd = [sys.executable, os.path.abspath(__file__), *argv, WORKER_FLAG]
+    base = _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP
+    for flags in (base | _CREATE_BREAKAWAY_FROM_JOB, base):
+        try:
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, creationflags=flags)
+        except (OSError, ValueError):
+            continue
+        try:
+            proc.stdin.write((raw or "").encode("utf-8"))
+            proc.stdin.close()
+        except OSError:
+            pass
+        return True
+    return False
+
+
+def main(argv: list[str] | None = None, read_stdin=None, detach=None) -> None:
+    """detach: callable(argv, raw) -> bool, used for Codex events only (the
+    __main__ entry passes spawn_detached_worker; tests leave it None)."""
     argv = sys.argv[1:] if argv is None else argv
     if read_stdin is None:
         read_stdin = (lambda: sys.stdin.read()) if sys.stdin is not None else (lambda: "")
-    got = read_event(argv, read_stdin)
+    captured: dict[str, str] = {}
+
+    def _read() -> str:
+        captured["raw"] = read_stdin()
+        return captured["raw"]
+
+    got = read_event(argv, _read)
     if got is None:
         return
     source, data = got
+    if (source == SOURCE_CODEX and detach is not None and WORKER_FLAG not in argv
+            and detach(argv, captured.get("raw"))):
+        return
 
     event_name = data.get("hook_event_name", "")
 
@@ -1252,7 +1295,7 @@ def main(argv: list[str] | None = None, read_stdin=None) -> None:
 
 if __name__ == "__main__":
     try:
-        main()
+        main(detach=spawn_detached_worker)
     except Exception:
         pass
     sys.exit(0)

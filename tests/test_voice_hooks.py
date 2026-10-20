@@ -179,7 +179,7 @@ def test_codex_connect_reuses_claude_command_with_source_flag(env):
     doc = _read(_codex(env))
     assert set(doc["hooks"]) == {"Stop", "PermissionRequest"}
     h = doc["hooks"]["Stop"][0]["hooks"][0]
-    assert h == {"type": "command", "command": VOICE + " --source codex", "timeout": 30, "async": True}
+    assert h == {"type": "command", "command": VOICE + " --source codex", "timeout": 30, "async": False}
     assert vh.status(vh.CODEX, env) is True
 
 

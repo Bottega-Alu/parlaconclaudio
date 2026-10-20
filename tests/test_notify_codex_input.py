@@ -125,3 +125,43 @@ def test_nothing_printed_to_stdout(spoken, capsys):
     # A Codex Stop hook must print JSON or nothing.
     nt.main(["--source", "codex"], lambda: json.dumps(CODEX_STOP))
     assert capsys.readouterr().out == ""
+
+
+# --------------------------------------------------------------------------- detached worker (Codex)
+
+
+def test_codex_event_is_handed_to_detached_worker(spoken):
+    calls = []
+    nt.main(["--source", "codex"], lambda: json.dumps(CODEX_STOP),
+            detach=lambda argv, raw: calls.append((argv, raw)) or True)
+    assert calls == [(["--source", "codex"], json.dumps(CODEX_STOP))]
+    assert spoken == []  # the hook process itself says nothing: the worker does
+
+
+def test_worker_handles_event_inline(spoken):
+    def never(argv, raw):
+        raise AssertionError("a worker must not re-spawn")
+
+    nt.main(["--source", "codex", nt.WORKER_FLAG], lambda: json.dumps(CODEX_STOP), detach=never)
+    assert spoken == ["chime:stop", "Progetto alpha. Codex ha finito."]
+
+
+def test_failed_spawn_falls_back_to_inline(spoken):
+    nt.main(["--source", "codex"], lambda: json.dumps(CODEX_STOP), detach=lambda argv, raw: False)
+    assert spoken[-1] == "Progetto alpha. Codex ha finito."
+
+
+def test_claude_events_never_detach(spoken):
+    def never(argv, raw):
+        raise AssertionError("Claude Code hooks are async already")
+
+    nt.main([], lambda: json.dumps({"hook_event_name": "Stop", "cwd": "C:/x/alpha"}), detach=never)
+    assert spoken[0] == "chime:stop"
+
+
+def test_silent_codex_events_do_not_spawn(spoken):
+    def never(argv, raw):
+        raise AssertionError("nothing to say -> no worker")
+
+    nt.main(["--source", "codex"], lambda: json.dumps({"hook_event_name": "SessionStart"}), detach=never)
+    assert spoken == []

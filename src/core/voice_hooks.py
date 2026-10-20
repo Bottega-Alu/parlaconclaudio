@@ -65,11 +65,18 @@ AGENT_EVENTS: dict[str, tuple[tuple[str, str | None], ...]] = {
     CODEX: (("Stop", None), ("PermissionRequest", None)),
 }
 
-# Handler options. async: the voice line must never delay the agent, and an
-# async Codex hook cannot block/approve anything (it is fire-and-forget).
+# Handler options. The voice line must never delay the agent.
+#   Claude Code: async (fire-and-forget).
+#   Codex: SYNC on purpose. codex-cli 0.163.0 aborts pending async hook tasks
+#   on shutdown and its Windows JobObject guard kills the hook's process tree
+#   (codex-rs/hooks/src/engine/command_runner.rs: shutdown -> abort_all,
+#   ProcessTreeGuard::drop -> job.terminate), so an async Stop hook dies with
+#   `codex exec` before the voice is synthesized. Only a hook that COMPLETES
+#   gets preserve_descendants(): notify-tts.py --source codex hands the payload
+#   to a detached worker and exits in well under a second.
 _HANDLER_OPTS: dict[str, dict] = {
     CLAUDE: {"timeout": 10, "async": True},
-    CODEX: {"timeout": 30, "async": True},
+    CODEX: {"timeout": 30, "async": False},
 }
 
 # Repo / install root: src/core/voice_hooks.py -> parents[2]
