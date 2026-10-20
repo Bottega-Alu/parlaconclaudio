@@ -30,6 +30,16 @@ TTS_CONFIG = CACHE_DIR / "tts_config.json"
 TRACKER_FILE = CACHE_DIR / "subtask_tracker.json"
 CHIME_STATE_FILE = CACHE_DIR / "chime_state.json"
 NOTIFY_BURST_FILE = CACHE_DIR / "notify_burst.txt"
+ERROR_LOG_FILE = CACHE_DIR / "notify-tts.log"
+ERROR_BEEP_FILE = CACHE_DIR / "error_beep.txt"
+
+# Synthesis-failure diagnostics: the log is truncated to its newest half
+# once it passes the cap; the audible beep is rate-limited so a persistent
+# outage (e.g. edge-tts 403) does not beep on every hook.
+ERROR_LOG_MAX_BYTES = 256 * 1024
+ERROR_LOG_SNIPPET_CHARS = 80
+ERROR_BEEP_MIN_INTERVAL_S = 30
+ERROR_BEEP_TONES = ((330, 120), (220, 120), (150, 250))  # (Hz, ms) descending
 
 # Burst suppression: when several hooks fire in quick succession only
 # the last invocation actually plays audio. Each invocation writes its
@@ -365,6 +375,52 @@ def get_cached_path(text: str, profile: dict) -> Path:
 _MIN_TTS_MP3_BYTES = 512
 
 
+def log_tts_error(kind: str, text: str, profile: dict, exc: BaseException | None = None) -> None:
+    """Append one structured line to ERROR_LOG_FILE. Best-effort, never raises."""
+    try:
+        ERROR_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        snippet = " ".join(text.split())[:ERROR_LOG_SNIPPET_CHARS]
+        record = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "kind": kind,
+            "exc_type": type(exc).__name__ if exc else None,
+            "message": str(exc) if exc else None,
+            "voice": profile.get("voice"),
+            "text": snippet,
+        }
+        with ERROR_LOG_FILE.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        if ERROR_LOG_FILE.stat().st_size > ERROR_LOG_MAX_BYTES:
+            # Keep the newest half, aligned to a line boundary.
+            tail = ERROR_LOG_FILE.read_bytes()[-ERROR_LOG_MAX_BYTES // 2:]
+            tail = tail.split(b"\n", 1)[-1]
+            ERROR_LOG_FILE.write_bytes(tail)
+    except Exception:
+        pass
+
+
+def play_error_beep() -> None:
+    """Descending low tones, unlike the soundpack MP3s. Rate-limited, best-effort."""
+    try:
+        if get_muted() or get_volume() <= 0:
+            return
+        if (ERROR_BEEP_FILE.is_file()
+                and time.time() - ERROR_BEEP_FILE.stat().st_mtime < ERROR_BEEP_MIN_INTERVAL_S):
+            return
+        ERROR_BEEP_FILE.parent.mkdir(parents=True, exist_ok=True)
+        ERROR_BEEP_FILE.write_text(str(time.time()), encoding="utf-8")
+        import winsound
+        for freq, dur in ERROR_BEEP_TONES:
+            winsound.Beep(freq, dur)
+    except Exception:
+        pass
+
+
+def report_tts_failure(kind: str, text: str, profile: dict, exc: BaseException | None = None) -> None:
+    log_tts_error(kind, text, profile, exc)
+    play_error_beep()
+
+
 async def generate_tts(text: str, profile: dict, output_path: Path) -> bool:
     try:
         import edge_tts
@@ -380,12 +436,17 @@ async def generate_tts(text: str, profile: dict, output_path: Path) -> bool:
         # the next call retries instead of caching a silent file forever.
         if output_path.is_file() and output_path.stat().st_size < _MIN_TTS_MP3_BYTES:
             output_path.unlink(missing_ok=True)
+            report_tts_failure("empty_output", text, profile)
             return False
         return True
-    except Exception:
+    except Exception as exc:
         # If the file was partially written, drop it so we don't cache garbage.
-        if output_path.is_file() and output_path.stat().st_size < _MIN_TTS_MP3_BYTES:
-            output_path.unlink(missing_ok=True)
+        try:
+            if output_path.is_file() and output_path.stat().st_size < _MIN_TTS_MP3_BYTES:
+                output_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        report_tts_failure("synthesis_error", text, profile, exc)
         return False
 
 
