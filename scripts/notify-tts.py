@@ -63,7 +63,7 @@ BURST_WAIT_MS = 300
 # voice line instead of overlapping into cacophony.
 SUBAGENT_BURST_WAIT_MS = 1500
 
-# "Ho bisogno di una tua scelta" (PreToolUse/AskUserQuestion) vs the Notification
+# "Claudio ha bisogno di una tua scelta" (PreToolUse/AskUserQuestion) vs the Notification
 # Claude Code may send for the same pending prompt about six seconds later (its
 # "needs your input" gate): the burst file above is last-wins over 300 ms and
 # cannot span that gap, so the question leaves a marker {session_id, ts} and a
@@ -72,7 +72,7 @@ SUBAGENT_BURST_WAIT_MS = 1500
 QUESTION_MARK_FILE = CACHE_DIR / "notify_question.json"
 QUESTION_DEDUP_S = 20
 ASK_USER_QUESTION = "AskUserQuestion"
-QUESTION_PHRASE = "Progetto {repo}. Ho bisogno di una tua scelta."
+QUESTION_PHRASE = "ha bisogno di una tua scelta."
 SUBAGENT_PHRASE = "Subagente terminato."
 
 # Cache cleanup settings
@@ -522,6 +522,9 @@ def git_main_repo_root(cwd: str) -> Path | None:
     return Path(top) if top else None
 
 
+UNKNOWN_REPO = "sconosciuto"
+
+
 def extract_repo_name(data: dict) -> str:
     cwd = data.get("cwd") or data.get("working_directory") or os.environ.get("CLAUDE_CWD") or os.getcwd()
     if cwd:
@@ -529,7 +532,7 @@ def extract_repo_name(data: dict) -> str:
         name = (root or Path(cwd)).name
         if name and name.lower() not in ("", "users", "fra", "home", "c:\\"):
             return name
-    return "sconosciuto"
+    return UNKNOWN_REPO
 
 
 def extract_task_detail(data: dict) -> str:
@@ -629,48 +632,45 @@ _TASK_DEFAULT = {
     "simple": "Task completata.",
 }
 
-# Stop: richer context-aware messages
-_STOP_TEMPLATES = {
-    "testing": {
-        "detail": "Progetto {repo}. Test completati. {detail}{plan_info}",
-        "no_detail": "Progetto {repo}. Sessione di test terminata.{plan_info}",
-    },
-    "fixing": {
-        "detail": "Progetto {repo}. Bug risolto. {detail}{plan_info}",
-        "no_detail": "Progetto {repo}. Fix completato.{plan_info}",
-    },
-    "deploying": {
-        "detail": "Progetto {repo}. Deploy eseguito. {detail}{plan_info}",
-        "no_detail": "Progetto {repo}. Rilascio completato.{plan_info}",
-    },
-    "refactoring": {
-        "detail": "Progetto {repo}. Refactoring concluso. {detail}{plan_info}",
-        "no_detail": "Progetto {repo}. Codice rifattorizzato.{plan_info}",
-    },
-    "creating": {
-        "detail": "Progetto {repo}. Implementazione completata. {detail}{plan_info}",
-        "no_detail": "Progetto {repo}. Nuova funzionalita' pronta.{plan_info}",
-    },
-    "researching": {
-        "detail": "Progetto {repo}. Analisi completata. {detail}{plan_info}",
-        "no_detail": "Progetto {repo}. Ricerca conclusa.{plan_info}",
-    },
-}
+# Who is speaking. One sentence shape for every announcement, both agents:
+#   "Progetto <repo>, <who> <phrase>[ <extra>]"   e.g. "Progetto alpha, Claudio ha finito."
+# Unknown project (or one named like an agent) -> just "<who> <phrase>".
+SPEAKER_CLAUDE = "Claudio"   # Claude Code (name chosen by Frisco)
+SPEAKER_CODEX = "Codex"
+_NOT_A_PROJECT = {UNKNOWN_REPO, "claudio", "claude", "codex"}
 
-_STOP_DEFAULT = {
-    "detail": "Progetto {repo}. {detail}{plan_info}",
-    "hook_detail": "Progetto {repo}. Ciclo completato. {detail}{plan_info}",
-    "no_detail": "Progetto {repo}. Attivita' completata.{plan_info}",
-    "hook_no_detail": "Progetto {repo}. Ciclo completato.{plan_info}",
-}
 
-# Notification: context-aware
+def _is_project_name(repo: str) -> bool:
+    name = (repo or "").strip().lower().lstrip(".")
+    return bool(name) and name not in _NOT_A_PROJECT
+
+
+def announce(repo: str, who: str, phrase: str, extra: str = "") -> str:
+    lead = f"Progetto {repo}, {who}" if _is_project_name(repo) else who
+    text = f"{lead} {phrase}"
+    extra = (extra or "").strip()
+    return f"{text} {extra}" if extra else text
+
+
+# Stop: "<who> ha finito." + (activity label + task detail, when the payload has one)
+_STOP_ACTIVITY_LABEL = {
+    "testing": "Test completati.",
+    "fixing": "Bug risolto.",
+    "deploying": "Deploy eseguito.",
+    "refactoring": "Refactoring concluso.",
+    "creating": "Implementazione completata.",
+    "researching": "Analisi completata.",
+}
+STOP_PHRASE = "ha finito."
+STOP_HOOK_PHRASE = "ha finito un ciclo."
+
+# Notification: (phrase, keeps the detail?)
 _NOTIF_PHRASES = {
-    "permission_prompt": "Progetto {repo}. Ho bisogno del tuo permesso. {detail}",
-    "idle_prompt": "Progetto {repo}. In attesa del tuo input.",
-    "auth_success": "Progetto {repo}. Autenticazione completata.",
-    "elicitation_dialog": "Progetto {repo}. Ho una domanda. {detail}",
-    None: "Progetto {repo}. Notifica. {detail}",
+    "permission_prompt": ("ha bisogno del tuo permesso.", True),
+    "idle_prompt": ("ha bisogno del tuo aiuto.", False),
+    "elicitation_dialog": ("ha bisogno di una tua scelta.", True),
+    "auth_success": ("ha completato l'autenticazione.", False),
+    None: ("ti manda una notifica.", True),
 }
 
 
@@ -691,33 +691,19 @@ def build_task_message(completed: int, total: int, detail: str) -> str:
 
 
 def build_stop_message(sub_type: str | None, repo: str, plan_info: str,
-                       detail: str) -> str:
-    activity = _detect_activity_type(detail)
-    templates = _STOP_TEMPLATES.get(activity, {})
-
-    is_hook = sub_type == "hook_active"
-
+                       detail: str, who: str = SPEAKER_CLAUDE) -> str:
+    phrase = STOP_HOOK_PHRASE if sub_type == "hook_active" else STOP_PHRASE
+    extra = ""
     if detail:
-        if templates:
-            tmpl = templates.get("detail", _STOP_DEFAULT["detail"])
-        elif is_hook:
-            tmpl = _STOP_DEFAULT["hook_detail"]
-        else:
-            tmpl = _STOP_DEFAULT["detail"]
-        return tmpl.format(repo=repo, plan_info=plan_info, detail=detail)
-    else:
-        if templates:
-            tmpl = templates.get("no_detail", _STOP_DEFAULT["no_detail"])
-        elif is_hook:
-            tmpl = _STOP_DEFAULT["hook_no_detail"]
-        else:
-            tmpl = _STOP_DEFAULT["no_detail"]
-        return tmpl.format(repo=repo, plan_info=plan_info)
+        label = _STOP_ACTIVITY_LABEL.get(_detect_activity_type(detail), "")
+        extra = f"{label} {detail}".strip()
+    return announce(repo, who, phrase, extra) + (plan_info or "")
 
 
-def build_notif_message(sub_type: str | None, repo: str, detail: str) -> str:
-    template = _NOTIF_PHRASES.get(sub_type, _NOTIF_PHRASES[None])
-    return template.format(repo=repo, detail=detail)
+def build_notif_message(sub_type: str | None, repo: str, detail: str,
+                        who: str = SPEAKER_CLAUDE) -> str:
+    phrase, keeps_detail = _NOTIF_PHRASES.get(sub_type, _NOTIF_PHRASES[None])
+    return announce(repo, who, phrase, detail if keeps_detail else "")
 
 
 # ══════════════════════════════════════════════════
@@ -1057,14 +1043,6 @@ def question_just_announced(session_id: str | None, now: float | None = None) ->
 SOURCE_CLAUDE = "claude"
 SOURCE_CODEX = "codex"
 
-# Codex: only the two events that matter - "done" and "needs you".
-_CODEX_PHRASES = {
-    "stop": "Progetto {repo}. Codex ha finito.",
-    "stop_hook": "Progetto {repo}. Codex, ciclo completato.",
-    "permission": "Progetto {repo}. Codex ha bisogno del tuo permesso. {detail}",
-}
-
-
 def _source_from_argv(argv: list[str]) -> str:
     """`--source codex` (as written by the tray / voice_hooks); default claude."""
     for i, arg in enumerate(argv):
@@ -1141,13 +1119,6 @@ def read_event(argv: list[str], read_stdin) -> tuple[str, dict] | None:
         ev = codex_to_event(data)
         return (SOURCE_CODEX, ev) if ev else None
     return SOURCE_CLAUDE, data
-
-
-def build_codex_message(data: dict, repo: str) -> str:
-    if data.get("hook_event_name") == "Stop":
-        key = "stop_hook" if data.get("stop_hook_active") else "stop"
-        return _CODEX_PHRASES[key].format(repo=repo)
-    return _CODEX_PHRASES["permission"].format(repo=repo, detail=data.get("message", "")).strip()
 
 
 # Codex runs its hooks synchronously (see voice_hooks._HANDLER_OPTS): the hook
@@ -1239,6 +1210,7 @@ def main(argv: list[str] | None = None, read_stdin=None, detach=None) -> None:
 
     sub_type = data.get("notification_type") or data.get("type") or data.get("sub_type")
     repo = extract_repo_name(data)
+    who = SPEAKER_CODEX if source == SOURCE_CODEX else SPEAKER_CLAUDE
     voice = get_voice()
     progress = 0.0
 
@@ -1246,17 +1218,17 @@ def main(argv: list[str] | None = None, read_stdin=None, detach=None) -> None:
         plan_info = extract_plan_info(data)
         detail = extract_task_detail(data)
         stop_type = "hook_active" if data.get("stop_hook_active") else None
-        message = build_stop_message(stop_type, repo, plan_info, detail)
+        message = build_stop_message(stop_type, repo, plan_info, detail, who)
         chime_key = "stop"
         progress = 1.0  # Stop = end of session = max intensity
 
     elif event_name == "PreToolUse":  # AskUserQuestion (filtered above)
-        message = QUESTION_PHRASE.format(repo=repo)
+        message = announce(repo, who, QUESTION_PHRASE)
         chime_key = "question"
 
     elif event_name == "Notification":
         detail = extract_notification_detail(data)
-        message = build_notif_message(sub_type, repo, detail)
+        message = build_notif_message(sub_type, repo, detail, who)
         chime_map = {
             "permission_prompt": "permission",
             "elicitation_dialog": "question",
@@ -1266,9 +1238,6 @@ def main(argv: list[str] | None = None, read_stdin=None, detach=None) -> None:
         chime_key = chime_map.get(sub_type, "default")
     else:
         return
-
-    if source == SOURCE_CODEX:
-        message = build_codex_message(data, repo)
 
     # Check TTS mode
     tts_mode = load_config().get("tts_mode", "full")

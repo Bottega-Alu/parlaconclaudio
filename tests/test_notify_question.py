@@ -57,7 +57,7 @@ def _main(payload: dict) -> None:
 
 def test_ask_user_question_says_needs_your_choice(spoken):
     _main(ASK)
-    assert spoken == ["chime:question", "Progetto alpha. Ho bisogno di una tua scelta."]
+    assert spoken == ["chime:question", "Progetto alpha, Claudio ha bisogno di una tua scelta."]
 
 
 def test_other_pretooluse_tools_are_silent(spoken):
@@ -68,19 +68,19 @@ def test_other_pretooluse_tools_are_silent(spoken):
 def test_notification_right_after_question_same_session_is_silent(spoken):
     _main(ASK)
     _main(NOTIF)
-    assert spoken == ["chime:question", "Progetto alpha. Ho bisogno di una tua scelta."]
+    assert spoken == ["chime:question", "Progetto alpha, Claudio ha bisogno di una tua scelta."]
 
 
 def test_notification_other_session_still_speaks(spoken):
     _main(ASK)
     _main({**NOTIF, "session_id": "s2"})
-    assert spoken[-1].startswith("Progetto alpha. Ho bisogno del tuo permesso.")
+    assert spoken[-1].startswith("Progetto alpha, Claudio ha bisogno del tuo permesso.")
 
 
 def test_auth_success_is_never_suppressed(spoken):
     _main(ASK)
     _main({**NOTIF, "notification_type": "auth_success"})
-    assert spoken[-1] == "Progetto alpha. Autenticazione completata."
+    assert spoken[-1] == "Progetto alpha, Claudio ha completato l'autenticazione."
 
 
 def test_dedup_window_expires(spoken, monkeypatch):
@@ -93,7 +93,7 @@ def test_dedup_window_expires(spoken, monkeypatch):
 def test_corrupt_marker_does_not_suppress(spoken):
     nt.QUESTION_MARK_FILE.write_text("{not json", encoding="utf-8")
     _main(NOTIF)
-    assert spoken[-1].startswith("Progetto alpha. Ho bisogno del tuo permesso.")
+    assert spoken[-1].startswith("Progetto alpha, Claudio ha bisogno del tuo permesso.")
 
 
 def test_question_hook_prints_nothing(spoken, capsys):

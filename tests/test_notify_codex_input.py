@@ -103,22 +103,22 @@ def spoken(monkeypatch):
 
 def test_codex_stop_says_codex_finished(spoken):
     nt.main(["--source", "codex"], lambda: json.dumps(CODEX_STOP))
-    assert spoken == ["chime:stop", "Progetto alpha. Codex ha finito."]
+    assert spoken == ["chime:stop", "Progetto alpha, Codex ha finito."]
 
 
 def test_codex_permission_says_needs_you(spoken):
     nt.main(["--source", "codex"], lambda: json.dumps(CODEX_PERM))
-    assert spoken == ["chime:permission", "Progetto alpha. Codex ha bisogno del tuo permesso. Pulisci la build"]
+    assert spoken == ["chime:permission", "Progetto alpha, Codex ha bisogno del tuo permesso. Pulisci la build"]
 
 
 def test_legacy_notify_says_codex_finished(spoken):
     nt.main([json.dumps(LEGACY_NOTIFY)], lambda: "")
-    assert spoken[-1] == "Progetto alpha. Codex ha finito."
+    assert spoken[-1] == "Progetto alpha, Codex ha finito."
 
 
-def test_claude_stop_still_claude_phrasing(spoken):
+def test_claude_stop_says_claudio_finished(spoken):
     nt.main([], lambda: json.dumps({"hook_event_name": "Stop", "cwd": "C:/x/alpha"}))
-    assert spoken == ["chime:stop", "Progetto alpha. Attivita' completata."]
+    assert spoken == ["chime:stop", "Progetto alpha, Claudio ha finito."]
 
 
 def test_nothing_printed_to_stdout(spoken, capsys):
@@ -143,12 +143,12 @@ def test_worker_handles_event_inline(spoken):
         raise AssertionError("a worker must not re-spawn")
 
     nt.main(["--source", "codex", nt.WORKER_FLAG], lambda: json.dumps(CODEX_STOP), detach=never)
-    assert spoken == ["chime:stop", "Progetto alpha. Codex ha finito."]
+    assert spoken == ["chime:stop", "Progetto alpha, Codex ha finito."]
 
 
 def test_failed_spawn_falls_back_to_inline(spoken):
     nt.main(["--source", "codex"], lambda: json.dumps(CODEX_STOP), detach=lambda argv, raw: False)
-    assert spoken[-1] == "Progetto alpha. Codex ha finito."
+    assert spoken[-1] == "Progetto alpha, Codex ha finito."
 
 
 def test_claude_events_never_detach(spoken):
