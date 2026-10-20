@@ -44,6 +44,7 @@ class AudioRecorder:
         )
         self._driver: PortAudioDriver | None = None
         self._chunks: list[bytes] = []
+        self._buffer_bytes = 0
         self._lock = threading.Lock()
         self._recording = False
         self._record_start: float = 0.0
@@ -59,6 +60,7 @@ class AudioRecorder:
         self._ensure_driver()
         with self._lock:
             self._chunks.clear()
+            self._buffer_bytes = 0
             self._recording = True
             self._record_start = time.monotonic()
 
@@ -68,13 +70,27 @@ class AudioRecorder:
             with self._lock:
                 if not self._recording:
                     return
+                # Bound the actual allocation too, even for oversized driver chunks.
+                data = data[:max(0, max_bytes - self._buffer_bytes)]
                 self._chunks.append(data)
-                total = sum(len(c) for c in self._chunks)
-                if total >= max_bytes:
+                self._buffer_bytes += len(data)
+                if self._buffer_bytes >= max_bytes:
                     logger.warning(f"Recording capped at {self.max_seconds}s of audio data")
                     self._recording = False
 
-        self._driver.start(callback=on_audio)
+        try:
+            self._driver.start(callback=on_audio)
+        except Exception:
+            with self._lock:
+                self._recording = False
+                self._chunks.clear()
+                self._buffer_bytes = 0
+            try:
+                self._driver.stop()
+            except Exception:
+                pass
+            self._driver = None
+            raise
         logger.info("Recording started")
 
     def stop(self) -> np.ndarray:
@@ -95,6 +111,7 @@ class AudioRecorder:
             chunk_count = len(self._chunks)
             raw = b"".join(self._chunks)
             self._chunks.clear()
+            self._buffer_bytes = 0
 
         audio_int16 = np.frombuffer(raw, dtype=np.int16)
         audio_float32 = audio_int16.astype(np.float32) / 32768.0

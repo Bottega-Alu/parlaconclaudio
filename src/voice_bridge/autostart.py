@@ -61,8 +61,9 @@ from typing import Callable, Protocol
 from xml.sax.saxutils import escape
 
 from . import gui_python
+from .build_info import IS_TEST_BUILD
 
-TASK_NAME = "parlaconclaudio-voice-bridge"  # keep in sync with installer/VoiceBridge.iss
+TASK_NAME = "parlaconclaudio-voice-bridge" + ("-test" if IS_TEST_BUILD else "")
 APP_ROOT = Path(__file__).resolve().parents[2]
 CREATE_NO_WINDOW = 0x08000000
 

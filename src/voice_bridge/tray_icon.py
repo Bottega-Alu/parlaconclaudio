@@ -2,7 +2,7 @@
 System Tray Icon - Voice Bridge control panel.
 
 Animated marble sphere icon that shifts colors:
-- Idle: slow mystical rainbow shift
+- Idle: static teal marble (no animation wakeups)
 - Recording: pulsing red/magenta
 - Transcribing: fast golden shimmer
 
@@ -123,13 +123,13 @@ VOLUME_LEVELS = [0, 25, 50, 75, 100, 125, 150, 200, 250, 300]
 _VOICE_HOOKS_LOCK = threading.Lock()
 
 TTS_MODES = {
-    "Full": "full",              # Chime + voice always
-    "Semi-silent": "semi-silent", # Chime always, voice only on Stop
-    "Silent": "silent",           # Chime only, no voice
+    "Voce e suoni": "full",              # Chime + voice always
+    "Voce solo al termine": "semi-silent", # Chime always, voice only on Stop
+    "Solo suoni": "silent",           # Chime only, no voice
 }
 
 WHISPER_LANGUAGES = {
-    "Auto-detect": None,
+    "Rilevamento automatico": None,
     "Italiano": "it",
     "English": "en",
     "Portugues": "pt",
@@ -163,7 +163,7 @@ LANG_FLAGS = {
     "Francais": "🇫🇷",
     "Deutsch": "🇩🇪",
     "Japanese": "🇯🇵",
-    "Auto-detect": "🌍",
+    "Rilevamento automatico": "🌍",
     "English": "🇺🇸",
     "Portugues": "🇧🇷",
 }
@@ -191,9 +191,9 @@ REPO_URL = "https://github.com/fra-itc/parlaconclaudio"
 
 # STT mode labels for menu display
 STT_MODES = {
-    "auto": "Auto (recommended)",
-    "local": "Local GPU (NVIDIA CUDA)",
-    "cloud_groq": "Cloud: Groq (free)",
+    "auto": "Automatico (consigliato)",
+    "local": "GPU locale (NVIDIA CUDA)",
+    "cloud_groq": "Cloud: Groq",
     "cloud_deepgram": "Cloud: Deepgram",
 }
 
@@ -370,28 +370,27 @@ _ANIM_PRESETS = {
     },
 }
 
-ICON_SIZE = 192  # Crisp + fast enough for on-the-fly generation (~90ms/frame)
+ICON_SIZE = 64  # Native tray sizes scale cleanly, with bounded rendering cost.
 
 
 class _IconAnimator:
-    """Background thread that animates the tray icon.
-
-    ALL states are generated on-the-fly for smooth, fluid animation.
-    """
+    """Static at rest, bounded reusable frames while work is in progress."""
 
     def __init__(self):
         self._state = "idle"
         self._running = False
-        self._thread: threading.Thread | None = None
+        self._thread = None
         self._icon_ref = None
-        self._time_val = 0.0
-        self._base_hue = 0.0
+        self._wake = threading.Event()
+        self._frames = {}
 
     def set_icon(self, icon):
         self._icon_ref = icon
 
     def set_state(self, state: str):
-        self._state = state
+        if self._state != state:
+            self._state = state
+            self._wake.set()
 
     def start(self):
         self._running = True
@@ -400,47 +399,37 @@ class _IconAnimator:
 
     def stop(self):
         self._running = False
+        self._wake.set()
+
+    def _frame(self, state, index):
+        state = state if state in _ANIM_PRESETS else "idle"
+        index = 0 if state == "idle" else index % 12
+        key = (state, index)
+        if key not in self._frames:
+            preset = _ANIM_PRESETS[state]
+            phase = index * math.tau / 12
+            hue = preset.get("base_hue", 0.45)
+            brightness = 0.8 + 0.15 * math.sin(phase) if preset.get("pulse") else preset["brightness"]
+            self._frames[key] = _generate_marble_sphere(
+                ICON_SIZE, hue, hue_range=preset["hue_range"],
+                saturation=preset["saturation"], brightness=brightness,
+                time_val=phase,
+            )
+        return self._frames[key]
 
     def _animation_loop(self):
-        """Main animation loop — all states generated on-the-fly."""
+        index = 0
         while self._running:
-            preset = _ANIM_PRESETS.get(self._state, _ANIM_PRESETS["idle"])
-            interval = preset["interval"]
-
+            self._wake.clear()
+            state = self._state
             try:
-                self._time_val += preset["time_speed"]
-                if "base_hue" in preset:
-                    self._base_hue = preset["base_hue"] + preset["hue_speed"] * self._time_val
-                else:
-                    self._base_hue += preset["hue_speed"]
-                hue = self._base_hue % 1.0
-
-                # Clamp to allowed hue range (e.g. skip red zone for idle)
-                hue_min = preset.get("hue_min")
-                hue_max = preset.get("hue_max")
-                if hue_min is not None and hue_max is not None:
-                    hue = hue_min + (hue % 1.0) * (hue_max - hue_min)
-
-                brightness = preset["brightness"]
-                if preset.get("pulse"):
-                    pulse = 0.5 + 0.5 * math.sin(self._time_val * 3.0)
-                    brightness = 0.60 + pulse * 0.40
-
-                frame = _generate_marble_sphere(
-                    ICON_SIZE, hue,
-                    hue_range=preset["hue_range"],
-                    saturation=preset["saturation"],
-                    brightness=brightness,
-                    time_val=self._time_val,
-                )
-
                 if self._icon_ref:
-                    self._icon_ref.icon = frame
-
-            except Exception as e:
-                logger.debug(f"Animation frame error: {e}")
-
-            time.sleep(interval)
+                    self._icon_ref.icon = self._frame(state, index)
+            except Exception as exc:
+                logger.debug("Animation frame error: %s", exc)
+            index = (index + 1) % 12
+            # No periodic rendering, shell updates or wakeups while idle.
+            self._wake.wait(None if state == "idle" else 0.12)
 
 
 class TrayIcon:
@@ -456,7 +445,16 @@ class TrayIcon:
         on_muted_changed: Callable[[bool], None] | None = None,
         transcriber=None,
         recorder=None,
+        on_toggle_recording=None,
+        on_unload_vram=None,
+        is_busy=None,
     ):
+        self._on_toggle_recording = on_toggle_recording
+        self._on_unload_vram = on_unload_vram
+        self._is_busy = is_busy
+        self._state = "idle"
+        self._batch_lock = threading.Lock()
+        self._panel = None
         self._on_exit = on_exit
         self._on_purge_vram = on_purge_vram
         self._on_stt_mode_changed = on_stt_mode_changed
@@ -468,6 +466,10 @@ class TrayIcon:
         self._icon: "pystray.Icon | None" = None
         self._thread: threading.Thread | None = None
         self._animator = _IconAnimator()
+
+    @property
+    def batch_busy(self):
+        return self._batch_lock.locked()
 
     def _voice_display_name(self, voice_id: str) -> str:
         """Get short display name for a voice ID."""
@@ -510,7 +512,7 @@ class TrayIcon:
         current_voice = config.get("voice", {"voice": "it-IT-IsabellaNeural"})
         current_voice_id = current_voice.get("voice", "it-IT-IsabellaNeural")
 
-        # --- Quick Presets submenu ---
+        # --- Voci rapide submenu ---
         preset_items = []
         for preset_name, preset_data in VOICE_PRESETS.items():
             is_current = (preset_data["voice"] == current_voice_id)
@@ -541,7 +543,7 @@ class TrayIcon:
         random_checked = (current_pack == "random")
         random_sel = E_SELECTED if random_checked else E_UNSELECTED
         pack_items.append(pystray.MenuItem(
-            f"{random_sel} 🎲 Random (mix all packs)",
+            f"{random_sel} 🎲 Casuale (tutti i pacchetti)",
             self._make_set_sound_pack("random"),
         ))
         if SOUNDS_DIR.is_dir():
@@ -559,6 +561,7 @@ class TrayIcon:
 
         # --- TTS Mode submenu ---
         current_mode = config.get("tts_mode", "full")
+        current_mode_label = next((label for label, value in TTS_MODES.items() if value == current_mode), current_mode)
         mode_items = []
         for mode_label, mode_value in TTS_MODES.items():
             checked = (current_mode == mode_value)
@@ -610,9 +613,10 @@ class TrayIcon:
                 ))
 
         # === Resolve status labels for top-level display ===
+        devices = self._list_mics()
         stt_status = self._get_stt_status(config)
         stt_engine_item = self._build_stt_engine_menu(config)
-        mic_item = self._build_mic_menu(config)
+        mic_item = self._build_mic_menu(config, devices)
 
         # Language display
         lang_display = "Auto"
@@ -628,7 +632,7 @@ class TrayIcon:
         mic_display = "Default"
         if self._recorder and mic_device is not None:
             try:
-                for dev in self._recorder.list_devices():
+                for dev in devices:
                     if dev.device_id == mic_device:
                         mic_display = dev.name[:25]
                         break
@@ -646,22 +650,23 @@ class TrayIcon:
             # Microphone
             mic_item,
             pystray.Menu.SEPARATOR,
-            # TTS Voice
-            pystray.MenuItem(f"{E_VOICE} TTS Voice [{voice_display}]", pystray.Menu(
-                pystray.MenuItem(f"{E_PRESETS} Quick Presets", pystray.Menu(*preset_items)),
+            # Voce notifiche
+            pystray.MenuItem(f"{E_VOICE} Voce notifiche [{voice_display}]", pystray.Menu(
+                pystray.MenuItem(f"{E_PRESETS} Voci rapide", pystray.Menu(*preset_items)),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem(f"{E_BROWSE} Browse All", voice_browser),
+                pystray.MenuItem(f"{E_BROWSE} Tutte le voci", voice_browser),
             )),
-            # STT Language
-            pystray.MenuItem(f"{E_LANG} STT Language [{lang_display}]", pystray.Menu(*lang_items)),
+            # Lingua dettatura
+            pystray.MenuItem(f"{E_LANG} Lingua dettatura [{lang_display}]", pystray.Menu(*lang_items)),
             pystray.Menu.SEPARATOR,
             # System
-            pystray.MenuItem(f"{E_PURGE} Purge VRAM", self._purge_vram_clicked),
+            pystray.MenuItem("Ricarica modello GPU", self._purge_vram_clicked),
+            pystray.MenuItem("Libera memoria GPU", self._unload_vram_clicked, enabled=bool(self._on_unload_vram)),
             pystray.Menu.SEPARATOR,
             # Links
-            pystray.MenuItem(f"{E_REPO} GitHub Repo", self._open_repo),
-            pystray.MenuItem(f"{E_KEY} Get Groq API Key (free)", self._open_groq_console),
-            pystray.MenuItem(f"{E_KEY} Get Deepgram API Key", self._open_deepgram_console),
+            pystray.MenuItem(f"{E_REPO} Progetto su GitHub", self._open_repo),
+            pystray.MenuItem(f"{E_KEY} Ottieni chiave API Groq", self._open_groq_console),
+            pystray.MenuItem(f"{E_KEY} Ottieni chiave API Deepgram", self._open_deepgram_console),
         )
 
         # === Mode emoji for status ===
@@ -679,27 +684,29 @@ class TrayIcon:
         autostart_on = autostart.is_enabled()
         hooks_item = self._build_voice_hooks_menu()
 
+        from .build_info import VERSION
         return pystray.Menu(
-            pystray.MenuItem("✨ parlaconclaudio v1.0.9.1020 ✨", None, enabled=False),
+            pystray.MenuItem(f"parlaconclaudio {VERSION}", None, enabled=False),
+            pystray.MenuItem("Apri pannello", self._open_panel, default=True),
             pystray.Menu.SEPARATOR,
             # --- Status dashboard (always visible, read-only) ---
             pystray.MenuItem(f"  🧠 {engine_display}  │  {lang_display}  │  🎤 {mic_display}", None, enabled=False),
-            pystray.MenuItem(f"  {mode_icon} {current_mode}  │  {vol_icon} {vol_display}  │  {pack_icon} {pack_display}", None, enabled=False),
+            pystray.MenuItem(f"  {mode_icon} {current_mode_label}  │  {vol_icon} {vol_display}  │  {pack_icon} {pack_display}", None, enabled=False),
             pystray.Menu.SEPARATOR,
             # --- Quick access ---
-            pystray.MenuItem(f"🔔 Mode [{current_mode}]", pystray.Menu(*mode_items)),
+            pystray.MenuItem(f"🔔 Notifiche [{current_mode_label}]", pystray.Menu(*mode_items)),
             pystray.MenuItem(f"{vol_icon} Volume [{vol_display}]", pystray.Menu(*vol_items)),
             pystray.MenuItem(
-                f"🎵 Sound Pack [{'🎲 random' if current_pack == 'random' else current_pack}]",
+                f"🎵 Pacchetto suoni [{'🎲 random' if current_pack == 'random' else current_pack}]",
                 pystray.Menu(*pack_items),
             ),
-            pystray.MenuItem(f"🎧 Preview [{current_pack}]", pystray.Menu(*preview_items) if preview_items else None),
+            pystray.MenuItem(f"🎧 Ascolta anteprima [{current_pack}]", pystray.Menu(*preview_items) if preview_items else None),
             pystray.Menu.SEPARATOR,
             # --- Audio file batch transcription ---
             pystray.MenuItem("🎙️ Trascrivi audio file…", self._transcribe_files_clicked),
             pystray.Menu.SEPARATOR,
             # --- Settings & Info ---
-            pystray.MenuItem("⚙️ Settings & Info", settings_menu),
+            pystray.MenuItem("⚙️ Impostazioni e informazioni", settings_menu),
             hooks_item,
             pystray.MenuItem(
                 "🚀 Avvio automatico all'accesso",
@@ -707,21 +714,28 @@ class TrayIcon:
                 checked=lambda item, on=autostart_on: on,
             ),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("🚪 Exit", self._exit_clicked),
+            pystray.MenuItem("🚪 Esci", self._exit_clicked),
         )
 
     # ------------------------------------------------------------------
     # Microphone selector
     # ------------------------------------------------------------------
 
-    def _build_mic_menu(self, config: dict) -> "pystray.MenuItem":
+    def _list_mics(self):
+        try:
+            return self._recorder.list_devices() if self._recorder else []
+        except Exception as exc:
+            logger.warning("Failed to list microphones: %s", exc)
+            return []
+
+    def _build_mic_menu(self, config: dict, devices=None) -> "pystray.MenuItem":
         """Build microphone selection submenu."""
         current_device = config.get("mic_device_id")  # None = default
+        devices = self._list_mics() if devices is None else devices
 
         mic_items = []
         if self._recorder:
             try:
-                devices = self._recorder.list_devices()
                 for dev in devices:
                     is_current = (current_device == dev.device_id) or (current_device is None and dev.is_default)
                     sel = E_SELECTED if is_current else E_UNSELECTED
@@ -735,12 +749,12 @@ class TrayIcon:
                 logger.warning(f"Failed to list mic devices: {e}")
 
         if not mic_items:
-            mic_items.append(pystray.MenuItem("  No devices found", None, enabled=False))
+            mic_items.append(pystray.MenuItem("  Nessun microfono trovato", None, enabled=False))
 
         current_name = "Default"
         if self._recorder and current_device is not None:
             try:
-                for dev in self._recorder.list_devices():
+                for dev in devices:
                     if dev.device_id == current_device:
                         current_name = dev.name[:20]
                         break
@@ -748,17 +762,18 @@ class TrayIcon:
                 current_name = f"Device {current_device}"
 
         return pystray.MenuItem(
-            f"🎤 Microphone [{current_name}]",
+            f"🎤 Microfono [{current_name}]",
             pystray.Menu(*mic_items),
         )
 
     def _make_set_mic(self, device_id: int):
         def handler(icon, item):
+            if self._on_mic_changed and self._on_mic_changed(device_id) is False:
+                self._notify("Microfono invariato: termina la registrazione prima di cambiarlo.")
+                return
             config = _load_config()
             config["mic_device_id"] = device_id
             _save_config(config)
-            if self._on_mic_changed:
-                self._on_mic_changed(device_id)
             logger.info(f"Microphone set to device {device_id}")
             self._rebuild_menu()
         return handler
@@ -779,17 +794,17 @@ class TrayIcon:
         elif gpu == "Not detected":
             gpu_state = "not_detected"
         elif active == "not_loaded":
-            gpu_state = "loading"
+            gpu_state = "not_loaded"
         else:
             gpu_state = "cloud"  # GPU present but using cloud
 
         # Determine display label for active backend
         _labels = {
-            "whisper_local": "Local GPU",
+            "whisper_local": "GPU locale",
             "groq": "Groq",
             "deepgram": "Deepgram",
-            "disabled": "Disabled",
-            "not_loaded": "Loading...",
+            "disabled": "Disabilitato",
+            "not_loaded": "In attesa del primo utilizzo",
         }
         active_label = _labels.get(active, active)
 
@@ -806,7 +821,7 @@ class TrayIcon:
         status = self._get_stt_status(config)
         stt_mode = status["mode"]
 
-        # Title shows resolved backend: [Auto → Groq] or [Local GPU]
+        # Title shows resolved backend: [Auto → Groq] or [GPU locale]
         if stt_mode == "auto":
             title_suffix = f"Auto → {status['active_label']}"
         else:
@@ -824,7 +839,7 @@ class TrayIcon:
 
         # Status dashboard (read-only)
         gpu_state = status["gpu_state"]
-        gpu_icons = {"loaded": "✅", "loading": "⏳", "not_detected": "❌", "cloud": "☁️"}
+        gpu_icons = {"loaded": "✅", "loading": "⏳", "not_loaded": "○", "not_detected": "❌", "cloud": "☁️"}
         gpu_mark = gpu_icons.get(gpu_state, "❓")
 
         from ..core.stt_engine.key_manager import KeyManager
@@ -847,7 +862,7 @@ class TrayIcon:
         ]
 
         # Test connection
-        test_item = pystray.MenuItem(f"{E_TEST} Test Connection", self._test_cloud_connection)
+        test_item = pystray.MenuItem(f"{E_TEST} Verifica connessione", self._test_cloud_connection)
 
         # Warning if disabled
         warn_items = []
@@ -855,7 +870,7 @@ class TrayIcon:
             warn_items.append(pystray.MenuItem("⚠️ Configure cloud STT below", None, enabled=False))
 
         return pystray.MenuItem(
-            f"{E_ENGINE} STT Engine [{title_suffix}]",
+            f"{E_ENGINE} Motore dettatura [{title_suffix}]",
             pystray.Menu(
                 *warn_items,
                 *mode_items,
@@ -870,7 +885,9 @@ class TrayIcon:
     def _make_set_stt_mode(self, mode: str):
         def handler(icon, item):
             if self._on_stt_mode_changed:
-                self._on_stt_mode_changed(mode)
+                if self._on_stt_mode_changed(mode) is False:
+                    self._notify("Motore invariato: attendi la fine del lavoro in corso.")
+                    return
             else:
                 # Direct config write if no callback
                 config = _load_config()
@@ -1135,7 +1152,7 @@ class TrayIcon:
         self._icon = pystray.Icon(
             "voice_bridge",
             initial_img,
-            "parlaconclaudio - Ready",
+            "parlaconclaudio - Pronto",
             self._build_menu(),
         )
 
@@ -1149,13 +1166,14 @@ class TrayIcon:
         logger.info("Tray icon started with animated marble sphere")
 
     def set_state(self, state: str) -> None:
+        self._state = state
         if not self._icon:
             return
         title_map = {
-            "loading": "parlaconclaudio - Loading STT engine...",
-            "idle": "parlaconclaudio - Ready",
-            "recording": "parlaconclaudio - Recording...",
-            "transcribing": "parlaconclaudio - Transcribing...",
+            "loading": "parlaconclaudio - Caricamento motore…",
+            "idle": "parlaconclaudio - Pronto",
+            "recording": "parlaconclaudio - Registrazione…",
+            "transcribing": "parlaconclaudio - Trascrizione…",
         }
         self._animator.set_state(state)
         self._icon.title = title_map.get(state, f"parlaconclaudio - {state}")
@@ -1188,7 +1206,18 @@ class TrayIcon:
         if not self._transcriber:
             logger.warning("Transcribe-files: no transcriber available")
             return
-        threading.Thread(target=self._transcribe_files_flow, daemon=True).start()
+        if self._is_busy and self._is_busy():
+            self._notify("Termina la dettatura prima di trascrivere un file.")
+            return
+        if not self._batch_lock.acquire(blocking=False):
+            self._notify("Una trascrizione file è già aperta o in corso.")
+            return
+        def run():
+            try:
+                self._transcribe_files_flow()
+            finally:
+                self._batch_lock.release()
+        threading.Thread(target=run, daemon=True).start()
 
     def _transcribe_files_flow(self) -> None:
         """Background-thread flow: pick files, process, set clipboard,
@@ -1238,9 +1267,11 @@ class TrayIcon:
         # 3) Run the pipeline
         processor = AudioFileProcessor(self._transcriber)
         try:
-            batch = processor.process_files(paths, on_progress=on_progress)
+            with self._transcriber.operation():
+                batch = processor.process_files(paths, on_progress=on_progress)
         except Exception as e:
             logger.error(f"Transcribe batch failed: {e}")
+            self._notify("Trascrizione file non riuscita. Verifica il motore e riprova.")
             if self._icon and original_title is not None:
                 self._icon.title = original_title
             return
@@ -1270,6 +1301,16 @@ class TrayIcon:
             except Exception:
                 pass
 
+    def _unload_vram_clicked(self, icon=None, item=None):
+        if self._on_unload_vram:
+            threading.Thread(target=self._on_unload_vram, daemon=True).start()
+
+    def _open_panel(self, icon=None, item=None):
+        from .control_panel import ControlPanel
+        if self._panel is None:
+            self._panel = ControlPanel(self)
+        self._panel.show()
+
     def _exit_clicked(self, icon, item):
         if self._on_exit:
             self._on_exit()
@@ -1277,6 +1318,8 @@ class TrayIcon:
 
     def stop(self) -> None:
         self._animator.stop()
+        if self._panel:
+            self._panel.stop()
         if self._icon:
             try:
                 self._icon.stop()

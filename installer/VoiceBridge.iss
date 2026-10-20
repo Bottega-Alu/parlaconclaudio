@@ -8,40 +8,42 @@
 ; Build:  ISCC.exe installer\VoiceBridge.iss
 ; Output: installer\Output\parlaconclaudio-voice-bridge-Setup-<version>.exe
 
-#define AppName        "parlaconclaudio - voice-bridge"
-#define AppVersion     "1.0.9"
+#define AppName        "parlaconclaudio - voice-bridge TEST"
+#define AppVersion     "1.0.10-test.1"
 #define AppPublisher   "Frisco"
 #define AppExeName     "VoiceBridge.exe"
 #define BootstrapExe   "vb_bootstrap.exe"
 ; Scheduled task that starts the bridge at sign-in. Same name as TASK_NAME in
 ; src/voice_bridge/autostart.py, which creates it (installer, tray toggle).
-#define AutostartTask  "parlaconclaudio-voice-bridge"
+#define AutostartTask  "parlaconclaudio-voice-bridge-test"
 
 [Setup]
-AppId={{7B3C1E42-9D5A-4F18-A6C7-2E8B4D1F9A03}
+AppId={{983D2492-73BD-4E41-92D3-A33EE16EA41D}
 AppName={#AppName}
 UninstallDisplayName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion=1.0.10.1
 
 ; Per-user install: no UAC prompt, and - crucially - the venv created after the
 ; install stays writable, so repair and upgrade never need elevation.
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-; Folder name kept as "VoiceBridge" on purpose: changing it would orphan the existing venv.
-DefaultDirName={localappdata}\Programs\VoiceBridge
+; Test payload and runtime stay separate from the production installation.
+DefaultDirName={localappdata}\Programs\VoiceBridge-Test
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
+DisableWelcomePage=no
 
 OutputDir=Output
-OutputBaseFilename=parlaconclaudio-voice-bridge-Setup-{#AppVersion}
+OutputBaseFilename=parlaconclaudio-voice-bridge-TEST-Setup-{#AppVersion}
 SetupIconFile=..\assets\voicebridge.ico
 UninstallDisplayIcon={app}\assets\voicebridge.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+WizardSizePercent=120,120
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
@@ -51,7 +53,9 @@ Name: "it"; MessagesFile: "compiler:Languages\Italian.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "autostart";   Description: "Start {#AppName} when I sign in"; GroupDescription: "Startup"
+Name: "autostart"; Description: "{cm:AutostartTaskLabel}"; GroupDescription: "{cm:StartupGroup}"; Flags: unchecked
+Name: "claudehooks"; Description: "{cm:ClaudeHooksTask}"; GroupDescription: "{cm:HooksGroup}"
+Name: "codexhooks"; Description: "{cm:CodexHooksTask}"; GroupDescription: "{cm:HooksGroup}"
 
 [Files]
 Source: "..\{#AppExeName}";  DestDir: "{app}"; Flags: ignoreversion
@@ -82,15 +86,6 @@ Name: "{autodesktop}\{#AppName}";     Filename: "{app}\{#AppExeName}"; IconFilen
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; \
   Flags: nowait postinstall skipifsilent; Check: BootstrapSucceeded
 
-[InstallDelete]
-; v1.0.3 shipped as AppName "VoiceBridge": same AppId, so upgrading leaves its shortcuts behind
-; (double autostart). Remove them; the new ones are created under the renamed AppName.
-Type: files;          Name: "{userstartup}\VoiceBridge.lnk"
-; v1.0.4-1.0.6 autostart was this Startup shortcut; v1.0.7 uses the logon task.
-Type: files;          Name: "{userstartup}\{#AppName}.lnk"
-Type: files;          Name: "{autodesktop}\VoiceBridge.lnk"
-Type: filesandordirs; Name: "{userprograms}\VoiceBridge"
-
 [UninstallRun]
 ; Remove the logon task. schtasks directly, not the venv: it may already be gone.
 ; Exit code 1 (task absent, e.g. autostart was off) is harmless here.
@@ -113,7 +108,43 @@ Type: files;          Name: "{app}\bootstrap.log"
 Type: files;          Name: "{app}\voicebridge.log"
 Type: files;          Name: "{app}\voicebridge_debug.log"
 
+[Messages]
+en.WelcomeLabel2=TEST BUILD - evaluate before merging.%n%nDictate into the active application: press Ctrl+Alt+Space to start, then press it again to transcribe and paste. Change microphone and engine from the tray icon.%n%nUse local GPU transcription or configure a cloud provider. Optional voice hooks announce when Claude Code or Codex finishes or needs your attention.%n%nThis build uses a separate install folder; app settings and agent hooks remain shared. Close the production app before starting this test build.
+it.WelcomeLabel2=VERSIONE TEST - da valutare prima del merge.%n%nDetta nell'applicazione attiva: premi Ctrl+Alt+Spazio per iniziare, poi di nuovo per trascrivere e incollare. Cambia microfono e motore dall'icona nella tray.%n%nTrascrizione locale su GPU oppure provider cloud da configurare. Gli hook vocali opzionali avvisano quando Claude Code o Codex termina o richiede attenzione.%n%nLa cartella di installazione e' separata; impostazioni e hook degli agenti restano condivisi. Chiudi l'app di produzione prima di avviare il test.
+
 [CustomMessages]
+en.StartupGroup=Windows sign-in
+it.StartupGroup=Accesso a Windows
+en.AutostartTaskLabel=Start the TEST app when I sign in
+it.AutostartTaskLabel=Avvia l'app TEST all'accesso a Windows
+en.HooksGroup=Optional voice notifications (existing hooks are kept if unchecked)
+it.HooksGroup=Avvisi vocali opzionali (se deselezionati, gli hook esistenti restano invariati)
+en.ClaudeHooksTask=Connect Claude Code voice hooks
+it.ClaudeHooksTask=Collega gli hook vocali di Claude Code
+en.CodexHooksTask=Connect Codex voice hooks (manual trust in /hooks)
+it.CodexHooksTask=Collega gli hook vocali di Codex (approvazione manuale in /hooks)
+en.ProfileTitle=Transcription on this computer
+it.ProfileTitle=Trascrizione su questo computer
+en.ProfileSubtitle=Choose what to download. Cloud providers must be configured after setup with your API keys.
+it.ProfileSubtitle=Scegli cosa scaricare. Configura i provider cloud dopo il setup con le tue chiavi API.
+en.ProfileHelp=Local dictation requires a supported NVIDIA GPU. Without one, configure a cloud provider from the tray menu after setup. Cloud transcription sends audio to that provider.
+it.ProfileHelp=La dettatura locale richiede una GPU NVIDIA compatibile. Senza GPU, configura un provider cloud dal menu tray dopo il setup. La trascrizione cloud invia l'audio al provider.
+en.ProfileAuto=Automatic - use detected hardware (recommended)
+it.ProfileAuto=Automatico - usa l'hardware rilevato (consigliato)
+en.ProfileGpu=Local GPU - CUDA (adds about 1.6 GB of libraries)
+it.ProfileGpu=GPU locale - CUDA (aggiunge circa 1,6 GB di librerie)
+en.ProfileCpu=Base without CUDA - configure a cloud provider to dictate
+it.ProfileCpu=Base senza CUDA - configura un provider cloud per dettare
+en.ProfileCloud=Cloud dependencies only - configure Groq / Deepgram after setup
+it.ProfileCloud=Solo dipendenze cloud - configura Groq / Deepgram dopo il setup
+en.AutoGpu=Automatic - local GPU detected (recommended)
+it.AutoGpu=Automatico - GPU locale rilevata (consigliato)
+en.AutoCpu=Automatic - base without CUDA; configure a cloud provider
+it.AutoCpu=Automatico - base senza CUDA; configura un provider cloud
+en.HookFinish=Voice hooks were requested. Check bootstrap.log for the result. Restart Claude Code / Codex; in Codex open /hooks and manually review and trust new voice hooks. Setup never approves them for you or installs either CLI.
+it.HookFinish=Collegamento hook vocali richiesto: verifica l'esito in bootstrap.log. Riavvia Claude Code / Codex; in Codex apri /hooks, verifica e approva manualmente i nuovi hook vocali. Il setup non li approva e non installa le CLI.
+en.InspectHardware=Inspecting hardware...
+it.InspectHardware=Rilevamento hardware...
 ; No accented letters on purpose: this file stays plain ASCII.
 en.BootstrapStatus=Downloading and configuring the runtime (this takes a few minutes)...
 it.BootstrapStatus=Download e configurazione del runtime in corso (richiede qualche minuto)...
@@ -193,7 +224,7 @@ begin
               '--root "' + ExpandConstant('{app}') + '" --probe-json "' + TmpJson + '"',
               '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
-    DetectedInfo := 'Could not run hardware detection; defaulting to the CPU profile.';
+    DetectedInfo := 'Could not detect hardware; base dependencies selected. Configure a cloud provider after setup.';
     Exit;
   end;
 
@@ -216,16 +247,12 @@ end;
 procedure InitializeWizard;
 begin
   ProfilePage := CreateInputOptionPage(wpSelectTasks,
-    'Runtime profile',
-    'Choose what VoiceBridge should download for this machine.',
-    'Setup inspected your hardware. The recommended option is preselected; ' +
-    'change it only if you know better.',
-    True, False);
-
-  ProfilePage.Add('Automatic - use the detected hardware (recommended)');
-  ProfilePage.Add('Local GPU - force CUDA (adds ~1.6 GB of CUDA kernels)');
-  ProfilePage.Add('CPU only - slower transcription, no CUDA download');
-  ProfilePage.Add('Cloud only - Groq / Deepgram, smallest download, needs API keys');
+    CustomMessage('ProfileTitle'), CustomMessage('ProfileSubtitle'),
+    CustomMessage('ProfileHelp'), True, False);
+  ProfilePage.Add(CustomMessage('ProfileAuto'));
+  ProfilePage.Add(CustomMessage('ProfileGpu'));
+  ProfilePage.Add(CustomMessage('ProfileCpu'));
+  ProfilePage.Add(CustomMessage('ProfileCloud'));
   ProfilePage.SelectedValueIndex := 0;
 end;
 
@@ -235,15 +262,15 @@ begin
   // Detect once, right before showing the choice page.
   if CurPageID = wpSelectTasks then
   begin
-    WizardForm.StatusLabel.Caption := 'Inspecting hardware...';
+    WizardForm.StatusLabel.Caption := CustomMessage('InspectHardware');
     DetectHardware;
     ProfilePage.SubCaptionLabel.Caption := DetectedInfo;
     if RecommendedProfile = 'gpu' then
       ProfilePage.CheckListBox.ItemCaption[0] :=
-        'Automatic - local GPU detected (recommended)'
+        CustomMessage('AutoGpu')
     else
       ProfilePage.CheckListBox.ItemCaption[0] :=
-        'Automatic - no usable GPU, CPU will be used (recommended)';
+        CustomMessage('AutoCpu');
   end;
 end;
 
@@ -292,6 +319,14 @@ begin
   Exe := ExpandConstant('{app}\{#BootstrapExe}');
   LogPath := ExpandConstant('{app}\bootstrap.log');
   Params := '--root "' + ExpandConstant('{app}') + '" --profile ' + GetChosenProfile('');
+  if WizardIsTaskSelected('claudehooks') then
+    Params := Params + ' --claude-hooks yes'
+  else
+    Params := Params + ' --claude-hooks no';
+  if WizardIsTaskSelected('codexhooks') then
+    Params := Params + ' --codex-hooks yes'
+  else
+    Params := Params + ' --codex-hooks no';
   if WizardSilent then
     Params := Params + ' --no-pause';
 
@@ -375,4 +410,12 @@ end;
 function BootstrapSucceeded: Boolean;
 begin
   Result := BootstrapOk;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and BootstrapOk and
+     (WizardIsTaskSelected('claudehooks') or WizardIsTaskSelected('codexhooks')) then
+    WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + #13#10 + #13#10 +
+      CustomMessage('HookFinish');
 end;

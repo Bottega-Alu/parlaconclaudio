@@ -46,6 +46,8 @@ except ImportError:  # python installer/vb_bootstrap.py from a checkout
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from src.core import voice_hooks
 
+from src.voice_bridge.build_info import IS_TEST_BUILD
+
 HOOK_SCRIPT_NAME = voice_hooks.HOOK_SCRIPT_NAME
 HookTarget = voice_hooks.HookTarget
 claude_config_dir = voice_hooks.claude_config_dir
@@ -598,6 +600,60 @@ def sync_tts_hook(
     return results
 
 
+def resolve_hook_choices(args: argparse.Namespace, root: Path) -> dict[str, bool | None]:
+    """Explicit wizard choices win; repair reuses the last successful install.
+
+    None preserves the legacy repair behavior (sync existing hooks only), never
+    silently opts an old installation into a new integration.
+    """
+    try:
+        state = json.loads((root / STATE_FILE).read_text(encoding="utf-8"))
+        saved = state.get("voice_hooks", {}) if isinstance(state, dict) else {}
+        if not isinstance(saved, dict):
+            saved = {}
+    except (OSError, ValueError):
+        saved = {}
+    choices = {}
+    for agent in voice_hooks.AGENTS:
+        value = getattr(args, f"{agent}_hooks", None)
+        previous = saved.get(agent)
+        choices[agent] = (value == "yes") if value is not None else (
+            previous if isinstance(previous, bool) else None
+        )
+    return choices
+
+
+def configure_voice_hooks(root: Path, rep: Reporter, choices: dict[str, bool | None],
+                          maintain_existing: bool = True) -> list[str]:
+    """Connect selected integrations and sync only selected/legacy configs.
+
+    Deselection leaves existing agent configuration untouched. The shared writer
+    handles backups, atomic replacement and idempotency; no CLI is installed and
+    Codex hook trust always remains a manual /hooks action.
+    """
+    results = []
+    paths: dict[str, Path] = {}
+    for agent, selected in choices.items():
+        if selected is False:
+            rep.info(f"{voice_hooks.AGENT_LABEL[agent]} hooks: not selected; left untouched")
+            continue
+        paths[agent] = voice_hooks.config_path(agent)
+        if selected is True:
+            result = voice_hooks.connect(agent, root=root)
+            results.append(result.summary())
+            rep.info(result.summary())
+            if agent == voice_hooks.CODEX and result.ok:
+                rep.info("Codex: open /hooks and manually review/trust the voice hooks before use.")
+    # Passing no paths invokes legacy auto-discovery in sync_tts_hook: do not
+    # call it at all when both integrations were explicitly deselected.
+    if paths and maintain_existing:
+        results.extend(sync_tts_hook(root, rep, paths.get(voice_hooks.CLAUDE),
+                                     paths.get(voice_hooks.CODEX)))
+    elif paths:
+        rep.info("Test build: existing hook interpreters and script copies left untouched.")
+    return results
+
+
 # --------------------------------------------------------------------------- #
 # Virtual environment: create / reuse / recreate
 # --------------------------------------------------------------------------- #
@@ -696,6 +752,9 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="leave the voice hooks alone (their interpreters' edge-tts, their script copies)",
     )
+    for agent in voice_hooks.AGENTS:
+        ap.add_argument(f"--{agent}-hooks", choices=["yes", "no"], default=None,
+                        help="connect voice hooks when selected; no leaves existing config untouched")
     ap.add_argument(
         "--no-pause",
         action="store_true",
@@ -810,7 +869,10 @@ def setup(args: argparse.Namespace, root: Path, log_path: Path | None) -> int:
         env_python = venv / "Scripts" / "python.exe"
         run_streamed([uv, "pip", "install", "--python", str(env_python), *deps], rep)
 
-        if not args.skip_model and kind != "cloud":
+        # The app currently supports local CUDA transcription only. CPU/base
+        # installs need a configured cloud provider, so downloading a CPU model
+        # here wastes disk/network without enabling dictation.
+        if not args.skip_model and kind == "gpu":
             rep.step(f"Pre-fetching Whisper model '{profile.model}'")
             rep.info("first download only; later starts read it from cache")
             run_streamed(
@@ -819,9 +881,10 @@ def setup(args: argparse.Namespace, root: Path, log_path: Path | None) -> int:
                 cwd=root,
             )
 
+        hook_choices = resolve_hook_choices(args, root)
         if not args.skip_hook:
             rep.step("Voice hooks: Claude Code + Codex (edge-tts, notify-tts.py)")
-            sync_tts_hook(root, rep)
+            configure_voice_hooks(root, rep, hook_choices, maintain_existing=not IS_TEST_BUILD)
 
         rep.step("Writing install state")
         state = {
@@ -834,6 +897,7 @@ def setup(args: argparse.Namespace, root: Path, log_path: Path | None) -> int:
             "vram_mb": gpu.vram_mb,
             "driver_version": gpu.driver_version,
             "python_version": PYTHON_VERSION,
+            "voice_hooks": hook_choices,
         }
         (root / STATE_FILE).write_text(json.dumps(state, indent=2), encoding="utf-8")
         rep.info(str(root / STATE_FILE))

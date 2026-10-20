@@ -47,12 +47,32 @@ import json
 import logging
 import re
 import time
+import threading
 
 logger = logging.getLogger(__name__)
 
 # OpenRouter, OpenAI-compatible Chat Completions endpoint. NOT Groq.
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_TIMEOUT_S = 30
+_live_worker_lock = threading.Lock()
+_request_context = threading.local()
+
+
+def _remaining_timeout() -> float:
+    deadline = getattr(_request_context, "deadline", None)
+    if deadline is None:
+        return OPENROUTER_TIMEOUT_S
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Live cleanup deadline exceeded")
+    return min(OPENROUTER_TIMEOUT_S, remaining)
+
+
+def _retry_wait(seconds: float) -> None:
+    remaining = _remaining_timeout()
+    if getattr(_request_context, "deadline", None) is not None and seconds >= remaining:
+        raise TimeoutError("Live cleanup retry exceeds remaining budget")
+    time.sleep(seconds)
 
 # Some edge networks block Python's default urllib User-Agent; send a
 # browser-style UA so the request isn't classified as bot traffic.
@@ -415,7 +435,7 @@ def _chat_completion(text: str, *, model: str, api_key: str,
     }
 
     try:
-        data = _http_post_json(OPENROUTER_API_URL, body, headers, OPENROUTER_TIMEOUT_S)
+        data = _http_post_json(OPENROUTER_API_URL, body, headers, _remaining_timeout())
     except _HttpError as e:
         if e.status == 429:
             if _retry < _MAX_RETRIES and e.retry_after:
@@ -424,7 +444,7 @@ def _chat_completion(text: str, *, model: str, api_key: str,
                     "STT cleanup [%s]: rate limited (429), retrying in %.1fs",
                     model, wait,
                 )
-                time.sleep(wait)
+                _retry_wait(wait)
                 return _chat_completion(text, model=model, api_key=api_key,
                                         system_prompt=system_prompt,
                                         _retry=_retry + 1, _reasoning=_reasoning)
@@ -449,7 +469,7 @@ def _chat_completion(text: str, *, model: str, api_key: str,
                 "STT cleanup [%s]: %s, retrying...",
                 model, "server error" if e.status else "network error",
             )
-            time.sleep(1)
+            _retry_wait(1)
             return _chat_completion(text, model=model, api_key=api_key,
                                     system_prompt=system_prompt,
                                     _retry=_retry + 1, _reasoning=_reasoning)
@@ -514,7 +534,7 @@ def _cleanup_chunk(chunk: str, *, candidates: list[str], api_key: str,
     return None
 
 
-def cleanup_text(
+def _cleanup_text_unbounded(
     text: str,
     *,
     model: str,
@@ -593,3 +613,42 @@ def cleanup_text(
     # Blank line between blocks: the boundaries are sentence-aligned, so this
     # only adds paragraph breaks to what was one unreadable wall of text.
     return "\n\n".join(p for p in parts if p)
+
+
+def cleanup_text(
+    text: str, *, model: str, fallback: str | None, api_key: str | None,
+    glossary: list[str] | None = None, timeout_s: float | None = None,
+) -> str | None:
+    """Best-effort cleanup with an optional total wall-clock budget.
+
+    File processing retains the existing retry policy. Live callers use a short
+    budget including retries and alternate models. Only one live request worker
+    may remain in flight, even if a transport ignores its socket timeout.
+    """
+    kwargs = dict(model=model, fallback=fallback, api_key=api_key, glossary=glossary)
+    if timeout_s is None:
+        return _cleanup_text_unbounded(text, **kwargs)
+    if timeout_s <= 0 or not text.strip() or not api_key:
+        return None
+    if not _live_worker_lock.acquire(blocking=False):
+        return None
+    done = threading.Event()
+    result: list[str | None] = []
+    deadline = time.monotonic() + timeout_s
+
+    def work():
+        _request_context.deadline = deadline
+        try:
+            result.append(_cleanup_text_unbounded(text, **kwargs))
+        except Exception:
+            logger.warning("Live STT cleanup skipped", exc_info=True)
+        finally:
+            del _request_context.deadline
+            _live_worker_lock.release()
+            done.set()
+
+    threading.Thread(target=work, name="live-stt-cleanup", daemon=True).start()
+    if not done.wait(max(0, deadline - time.monotonic())):
+        logger.info("Live STT cleanup budget exhausted; using raw transcription")
+        return None
+    return result[0] if result else None

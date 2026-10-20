@@ -253,8 +253,15 @@ class WhisperRTXEngine(STTEngine):
 
     def purge_vram(self) -> None:
         """Unload model, clear CUDA cache, and reload fresh into VRAM."""
-        import gc
         logger.info("VRAM purge: unloading Whisper model...")
+        self.cleanup()
+        logger.info("VRAM purge: reloading model...")
+        self._load_model()
+        logger.info("VRAM purge: model reloaded fresh")
+
+    def cleanup(self) -> None:
+        """Release CTranslate2 allocations without immediately loading again."""
+        import gc
         if self.model is not None:
             del self.model
             self.model = None
@@ -262,9 +269,6 @@ class WhisperRTXEngine(STTEngine):
         # ctranslate2 owns its CUDA allocations and frees them when the model is
         # destroyed - there is no cache to drain, so gc above is the whole job.
         logger.info("VRAM purge: CUDA allocations released with the model")
-        logger.info("VRAM purge: reloading model...")
-        self._load_model()
-        logger.info("VRAM purge: model reloaded fresh")
 
     def __del__(self):
         """Cleanup on deletion."""
