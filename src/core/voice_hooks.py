@@ -16,10 +16,16 @@ handlers with "type": "command"):
                config.toml holds ONE program and is often already taken - e.g. by
                the computer-use plugin - so it is never touched here.)
 
-Events wired, per Frisco's two needs ("attivita' completata" / "ho bisogno di te"):
+Events wired, per Frisco's needs ("attivita' completata" / "ho bisogno di te" /
+"ho bisogno di una tua scelta"):
 
   Claude  Stop + TaskCompleted      -> done        Notification -> needs you
+          PreToolUse [matcher AskUserQuestion]     -> needs your choice
   Codex   Stop                      -> done        PermissionRequest -> needs you
+
+The PreToolUse handler is async like the others: per the Claude Code hooks docs
+an async hook "can't block or control Claude's behavior" (permissionDecision has
+no effect), so the question is never delayed, approved or denied by the voice.
 
 Writes are conservative by construction:
   * parse first; a malformed file raises HookConfigError(MALFORMED) and is never written
@@ -50,10 +56,13 @@ CODEX = "codex"
 AGENTS = (CLAUDE, CODEX)
 AGENT_LABEL = {CLAUDE: "Claude Code", CODEX: "Codex"}
 
-# Events per agent. Order is the order they are added in.
-AGENT_EVENTS: dict[str, tuple[str, ...]] = {
-    CLAUDE: ("Stop", "Notification", "TaskCompleted"),
-    CODEX: ("Stop", "PermissionRequest"),
+# (event, matcher) per agent; matcher None = a matcher-less group (all occurrences).
+# Order is the order they are added in.
+ASK_USER_QUESTION = "AskUserQuestion"
+AGENT_EVENTS: dict[str, tuple[tuple[str, str | None], ...]] = {
+    CLAUDE: (("Stop", None), ("Notification", None), ("TaskCompleted", None),
+             ("PreToolUse", ASK_USER_QUESTION)),
+    CODEX: (("Stop", None), ("PermissionRequest", None)),
 }
 
 # Handler options. async: the voice line must never delay the agent, and an
@@ -285,9 +294,13 @@ def write_doc_atomic(path: Path, doc: dict, now: _dt.datetime | None = None) -> 
 # --------------------------------------------------------------------------- #
 
 
-def event_has_voice_hook(doc: dict, event: str) -> bool:
+def event_has_voice_hook(doc: dict, event: str, matcher: str | None = None) -> bool:
+    """A notify-tts handler under `event`; with a matcher, only in a group whose
+    matcher is exactly that one (a voice hook under PreToolUse/Bash is not ours)."""
     groups = (doc.get("hooks") or {}).get(event)
     for group in groups if isinstance(groups, list) else []:
+        if matcher is not None and (not isinstance(group, dict) or group.get("matcher") != matcher):
+            continue
         entries = group.get("hooks") if isinstance(group, dict) else None
         if any(is_voice_handler(e) for e in (entries if isinstance(entries, list) else [])):
             return True
@@ -296,19 +309,20 @@ def event_has_voice_hook(doc: dict, event: str) -> bool:
 
 def is_connected(doc: dict, agent: str) -> bool:
     """Checked state: every event of the agent has a notify-tts handler."""
-    return all(event_has_voice_hook(doc, ev) for ev in AGENT_EVENTS[agent])
+    return all(event_has_voice_hook(doc, ev, m) for ev, m in AGENT_EVENTS[agent])
 
 
 def add_voice_hooks(doc: dict, agent: str, command: str) -> tuple[dict, bool]:
-    """Append one matcher-less group per missing event. Never touches others."""
+    """Append one group per missing (event, matcher). Never touches others."""
     out = json.loads(json.dumps(doc))  # deep copy, JSON-safe
     hooks = out.setdefault("hooks", {})
     changed = False
-    for event in AGENT_EVENTS[agent]:
-        if event_has_voice_hook(out, event):
+    for event, matcher in AGENT_EVENTS[agent]:
+        if event_has_voice_hook(out, event, matcher):
             continue
         handler = {"type": "command", "command": command, **_HANDLER_OPTS[agent]}
-        hooks.setdefault(event, []).append({"hooks": [handler]})
+        group = {"matcher": matcher, "hooks": [handler]} if matcher else {"hooks": [handler]}
+        hooks.setdefault(event, []).append(group)
         changed = True
     return out, changed
 

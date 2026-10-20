@@ -67,7 +67,8 @@ def test_claude_connect_preserves_everything_else(env):
     assert res.ok and res.changed
     doc = _read(_claude(env))
     assert doc["model"] == "opus" and doc["permissions"] == OTHER_SETTINGS["permissions"]
-    assert doc["hooks"]["PreToolUse"] == OTHER_SETTINGS["hooks"]["PreToolUse"]
+    assert doc["hooks"]["PreToolUse"][0] == OTHER_SETTINGS["hooks"]["PreToolUse"][0]  # untouched
+    assert doc["hooks"]["PreToolUse"][1]["matcher"] == "AskUserQuestion"  # ours appended
     assert doc["hooks"]["Stop"][0] == OTHER_SETTINGS["hooks"]["Stop"][0]  # untouched, ours appended
     for ev in ("Stop", "Notification", "TaskCompleted"):
         handlers = [h for g in doc["hooks"][ev] for h in g["hooks"] if vh.is_voice_handler(h)]

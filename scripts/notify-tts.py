@@ -15,8 +15,10 @@ Input (decision tree in read_event):
   2. JSON on stdin + `--source codex`         -> Codex hooks engine (Stop,
      PermissionRequest), translated to the Claude-shaped event below
   3. JSON on stdin                            -> Claude Code hook (Stop,
-     Notification, TaskCompleted)
-Nothing is ever written to stdout: a Codex Stop hook must print JSON or nothing.
+     Notification, TaskCompleted, PreToolUse with matcher AskUserQuestion)
+Nothing is ever written to stdout: a Codex Stop hook must print JSON or nothing,
+and a PreToolUse hook's stdout JSON could be read as a permission decision.
+The process always exits 0 (never blocks a tool).
 """
 
 import asyncio
@@ -60,6 +62,17 @@ BURST_WAIT_MS = 300
 # subagents finishing within a couple of seconds collapses to a single
 # voice line instead of overlapping into cacophony.
 SUBAGENT_BURST_WAIT_MS = 1500
+
+# "Ho bisogno di una tua scelta" (PreToolUse/AskUserQuestion) vs the Notification
+# Claude Code may send for the same pending prompt about six seconds later (its
+# "needs your input" gate): the burst file above is last-wins over 300 ms and
+# cannot span that gap, so the question leaves a marker {session_id, ts} and a
+# Notification of the SAME session within QUESTION_DEDUP_S stays silent.
+# auth_success is never suppressed (it is not about the question).
+QUESTION_MARK_FILE = CACHE_DIR / "notify_question.json"
+QUESTION_DEDUP_S = 20
+ASK_USER_QUESTION = "AskUserQuestion"
+QUESTION_PHRASE = "Progetto {repo}. Ho bisogno di una tua scelta."
 SUBAGENT_PHRASE = "Subagente terminato."
 
 # Cache cleanup settings
@@ -1010,6 +1023,33 @@ def burst_check_should_play(wait_ms: int = BURST_WAIT_MS) -> bool:
     return latest == my_id
 
 
+def mark_question(session_id: str | None, now: float | None = None) -> None:
+    if not session_id:
+        return
+    try:
+        QUESTION_MARK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        QUESTION_MARK_FILE.write_text(
+            json.dumps({"session_id": session_id, "ts": time.time() if now is None else now}),
+            encoding="utf-8")
+    except OSError:
+        pass
+
+
+def question_just_announced(session_id: str | None, now: float | None = None) -> bool:
+    """True when this session's question was announced < QUESTION_DEDUP_S ago."""
+    if not session_id:
+        return False
+    try:
+        mark = json.loads(QUESTION_MARK_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(mark, dict) or mark.get("session_id") != session_id:
+        return False
+    ts = mark.get("ts")
+    now = time.time() if now is None else now
+    return isinstance(ts, (int, float)) and 0 <= now - ts < QUESTION_DEDUP_S
+
+
 # ══════════════════════════════════════════════════
 # INPUT: Claude Code hooks, Codex hooks, legacy Codex notify
 # ══════════════════════════════════════════════════
@@ -1121,6 +1161,18 @@ def main(argv: list[str] | None = None, read_stdin=None) -> None:
 
     event_name = data.get("hook_event_name", "")
 
+    # PreToolUse: only AskUserQuestion speaks (a wider matcher stays silent).
+    # The marker is written before the burst check, so the dedup below works
+    # even if this line itself is swallowed by a burst.
+    if event_name == "PreToolUse":
+        if data.get("tool_name") != ASK_USER_QUESTION:
+            return
+        mark_question(data.get("session_id"))
+    elif (event_name == "Notification" and source == SOURCE_CLAUDE
+          and data.get("notification_type") != "auth_success"
+          and question_just_announced(data.get("session_id"))):
+        return
+
     # Per-event burst window: subagents (TaskCompleted) get the longer
     # window so clusters collapse to one voice line; Stop and
     # Notification stay reactive on the default 300 ms window.
@@ -1154,6 +1206,10 @@ def main(argv: list[str] | None = None, read_stdin=None) -> None:
         message = build_stop_message(stop_type, repo, plan_info, detail)
         chime_key = "stop"
         progress = 1.0  # Stop = end of session = max intensity
+
+    elif event_name == "PreToolUse":  # AskUserQuestion (filtered above)
+        message = QUESTION_PHRASE.format(repo=repo)
+        chime_key = "question"
 
     elif event_name == "Notification":
         detail = extract_notification_detail(data)

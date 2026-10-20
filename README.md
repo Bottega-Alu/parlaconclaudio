@@ -136,7 +136,7 @@ Claude Code*, to remove them. The ticks are read from the real files:
 
 | Agent | File | Events wired |
 |---|---|---|
-| Claude Code | `%CLAUDE_CONFIG_DIR%` or `~/.claude/settings.json` | `Stop`, `TaskCompleted` (done), `Notification` (needs you) |
+| Claude Code | `%CLAUDE_CONFIG_DIR%` or `~/.claude/settings.json` | `Stop`, `TaskCompleted` (done), `Notification` (needs you), `PreToolUse` matcher `AskUserQuestion` (needs your choice) |
 | Codex | `%CODEX_HOME%` or `~/.codex/hooks.json` | `Stop` (done), `PermissionRequest` (needs you) |
 
 Connecting only adds the missing entries; disconnecting removes only the entries
@@ -148,6 +148,13 @@ interpreter + script of an existing notify-tts hook, else the app's
 after you trust it: open `/hooks` in Codex and approve the two entries. Codex's
 `notify` key in `config.toml` is left alone (it holds a single program and is often
 already used).
+
+The `AskUserQuestion` hook is async, prints nothing and exits 0, so it never
+blocks, approves or answers the question. If Claude Code also sends a
+`Notification` for the same pending question, a Notification from the same
+session within 20 s of the question is not spoken (marker
+`~/.claude/cache/tts/notify_question.json`). A 1.0.7 connection (three events)
+shows as unticked: tick it again to add the question hook.
 
 Manual alternative for Claude Code, add to `~/.claude/settings.json`:
 
