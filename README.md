@@ -172,6 +172,9 @@ Manual alternative for Claude Code, add to `~/.claude/settings.json`:
 
 - **Single instance:** a second launch exits by itself while a bridge is running
   (named mutex); it never kills the running one. The log is `voicebridge.log`.
+- **Crash relaunch:** the launched process is a supervisor that runs the bridge as a
+  child and relaunches it if it exits with an error (max 3 relaunches in 5 minutes,
+  then it stops and logs `supervisor_gave_up`). *Exit* from the tray is not relaunched.
 - **Start at sign-in:** tray menu > *Avvio automatico all'accesso* (or the installer's
   "Start when I sign in" option) registers a per-user Task Scheduler task
   `parlaconclaudio-voice-bridge`: at logon, no admin, no time limit, restart on

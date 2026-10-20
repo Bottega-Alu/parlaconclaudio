@@ -27,7 +27,9 @@ from .gesture_listener import GestureListener
 
 from pathlib import Path as _Path
 _log_path = _Path(__file__).resolve().parent.parent.parent / "voicebridge.log"
-_fh = logging.FileHandler(_log_path, mode="w", encoding="utf-8")
+# "w": a fresh log per session. A child relaunched by the supervisor after a
+# crash gets --append-log so the traceback of the crash is kept.
+_fh = logging.FileHandler(_log_path, mode="a" if "--append-log" in sys.argv else "w", encoding="utf-8")
 _fh.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S"))
 logging.basicConfig(
     level=logging.INFO,

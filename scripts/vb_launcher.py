@@ -8,7 +8,8 @@ and exits immediately, leaving zero residual processes.
 
 Single-instance handling is NOT done here on purpose: `python -m src.voice_bridge`
 checks a named mutex (src/voice_bridge/single_instance.py) and a second launch
-exits on its own, leaving the running bridge untouched.
+exits on its own, leaving the running bridge untouched. Crash relaunch is not
+done here either: that process is the supervisor (src/voice_bridge/supervisor.py).
 """
 
 from __future__ import annotations
