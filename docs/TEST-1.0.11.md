@@ -1,8 +1,27 @@
-# Versione di prova 1.0.11-test.1
+# Versione di prova 1.0.11-test.2
 
 Integra `fix/idle-cpu` (05e66f4) sopra `test/tray-installer-1.0.10`
 (0c60e10), sul branch `test/tray-installer-1.0.11` in un worktree separato.
 Nessun merge in main, push, tag o rilascio pubblico.
+
+## Hotfix test.2: console delle notifiche Codex
+
+Il worker audio ora preferisce il Python GUI di base, mantenendo il virtualenv,
+e viene avviato con `CREATE_NO_WINDOW` senza `DETACHED_PROCESS`. Rimangono il
+passaggio JSON su stdin e il tentativo di uscire dal job del processo chiamante,
+così la voce può terminare dopo il completamento dell'hook.
+
+La regressione Windows avvia un worker reale e verifica console assente,
+virtualenv corretto e payload UTF-8 integro. La suite completa conta 400 test.
+La prova non genera audio e non sostituisce l'osservazione del successivo evento
+Codex reale.
+
+Sul PC interessato è stato aggiornato con backup soltanto lo script
+`VoiceBridge103/scripts/notify-tts.py` effettivamente richiamato dagli hook.
+Il file `hooks.json` e i comandi approvati sono rimasti invariati: non serve
+una nuova approvazione per questa correzione dello script. Il nuovo installer
+include la correzione per gli hook che usano la propria copia installata;
+mantiene la politica TEST di non sovrascrivere altre copie esterne preesistenti.
 
 ## Cosa contiene
 
@@ -30,7 +49,7 @@ elimina collegamenti già presenti. L'avvio automatico TEST parte disattivato.
 Il setup TEST non aggiorna copie esterne di script o interpreti degli hook.
 Per nuovi hook Codex resta necessaria la tua verifica/autorizzazione in `/hooks`.
 
-1. Controlla versione `1.0.11-test.1`, pannello e opzioni del setup.
+1. Controlla versione `1.0.11-test.2`, pannello e opzioni del setup.
 2. Prova dettatura e incolla in un editor, due registrazioni ravvicinate e
    trascrizione di file. I comportamenti della 1.0.10 devono restare disponibili.
 3. A riposo controlla che l'icona sia statica; durante registrazione e

@@ -1126,22 +1126,45 @@ def read_event(argv: list[str], read_stdin) -> tuple[str, dict] | None:
 # turn is not held for synthesis + playback and `codex exec` shutting down
 # cannot kill the voice line.
 WORKER_FLAG = "--worker"
-_DETACHED_PROCESS = 0x00000008
+_CREATE_NO_WINDOW = 0x08000000
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
 
+def _worker_python() -> tuple[str, dict[str, str]]:
+    """Keep this script standalone: installed hooks may live outside the app.
+
+    uv's venv pythonw.exe can itself be a console launcher. Prefer the base
+    GUI interpreter and tell it which venv to use, as the app launcher does.
+    CREATE_NO_WINDOW also protects the fallback console interpreter.
+    """
+    env = dict(os.environ)
+    env.pop("__PYVENV_LAUNCHER__", None)
+    env["PYTHONIOENCODING"] = "utf-8"
+    pythonw = Path(sys.base_prefix) / "pythonw.exe"
+    if pythonw.is_file():
+        launcher = Path(sys.prefix) / "Scripts" / "pythonw.exe"
+        if sys.prefix != sys.base_prefix and launcher.is_file():
+            env["__PYVENV_LAUNCHER__"] = str(launcher)
+        return str(pythonw), env
+    return sys.executable, env
+
+
 def spawn_detached_worker(argv: list[str], raw: str | None) -> bool:
-    """Re-run this script detached with `--worker`, payload on its stdin.
+    """Re-run this script without a console, payload on its stdin.
     Breakaway from the caller's job first (Codex's job allows it); if refused,
-    plain detached (Codex preserves descendants of a hook that completed).
+    plain no-window (Codex preserves descendants of a hook that completed).
+    Never combine DETACHED_PROCESS with CREATE_NO_WINDOW: Windows ignores the
+    no-window flag in that combination, and a uv child can create a console.
     False = could not spawn: the caller handles the event inline."""
-    cmd = [sys.executable, os.path.abspath(__file__), *argv, WORKER_FLAG]
-    base = _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP
+    python, env = _worker_python()
+    cmd = [python, os.path.abspath(__file__), *argv, WORKER_FLAG]
+    base = _CREATE_NO_WINDOW | _CREATE_NEW_PROCESS_GROUP
     for flags in (base | _CREATE_BREAKAWAY_FROM_JOB, base):
         try:
             proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.DEVNULL, creationflags=flags)
+                                    stderr=subprocess.DEVNULL, creationflags=flags,
+                                    env=env, close_fds=True)
         except (OSError, ValueError):
             continue
         try:
