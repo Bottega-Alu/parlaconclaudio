@@ -11,6 +11,7 @@ Right-click menu:
 - Whisper Language selector
 - Sound Pack + Volume
 - Preview sounds on click
+- Start at sign-in (Task Scheduler logon task, checked = registered)
 - Exit
 """
 
@@ -671,6 +672,9 @@ class TrayIcon:
         vol_display = "MUTE" if is_muted else f"{current_vol}%"
         vol_icon = "🔇" if is_muted or current_vol == 0 else "🔊"
 
+        from . import autostart
+        autostart_on = autostart.is_enabled()
+
         return pystray.Menu(
             pystray.MenuItem("✨ parlaconclaudio v1.0.6.1020 ✨", None, enabled=False),
             pystray.Menu.SEPARATOR,
@@ -692,6 +696,11 @@ class TrayIcon:
             pystray.Menu.SEPARATOR,
             # --- Settings & Info ---
             pystray.MenuItem("⚙️ Settings & Info", settings_menu),
+            pystray.MenuItem(
+                "🚀 Avvio automatico all'accesso",
+                self._toggle_autostart_clicked,
+                checked=lambda item, on=autostart_on: on,
+            ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("🚪 Exit", self._exit_clicked),
         )
@@ -1027,6 +1036,25 @@ class TrayIcon:
         def handler(icon, item):
             _play_sound(filepath)
         return handler
+
+    def _notify(self, message: str) -> None:
+        """Balloon notification; logged too, so a failure is never silent."""
+        if self._icon:
+            try:
+                self._icon.notify(message, "parlaconclaudio")
+            except Exception as e:
+                logger.debug(f"tray notify failed: {e}")
+
+    def _toggle_autostart_clicked(self, icon, item):
+        def _run():
+            from . import autostart
+            result = autostart.disable() if autostart.is_enabled() else autostart.enable()
+            log = logger.info if result.ok else logger.error
+            log(f"Autostart {result.action}: ok={result.ok} "
+                f"kind={result.error_kind.value if result.error_kind else '-'} {result.message}")
+            self._notify(result.summary())
+            self._rebuild_menu()
+        threading.Thread(target=_run, daemon=True).start()
 
     def _rebuild_menu(self):
         if self._icon:

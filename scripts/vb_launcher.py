@@ -6,8 +6,9 @@ make the CUDA runtime path fragile. Instead it resolves the project root, then
 starts the existing venv interpreter (pythonw.exe -> no console window) detached
 and exits immediately, leaving zero residual processes.
 
-Single-instance handling is NOT done here on purpose: bridge.py already owns a
-PID lockfile guard that kills a stale previous run.
+Single-instance handling is NOT done here on purpose: `python -m src.voice_bridge`
+checks a named mutex (src/voice_bridge/single_instance.py) and a second launch
+exits on its own, leaving the running bridge untouched.
 """
 
 from __future__ import annotations

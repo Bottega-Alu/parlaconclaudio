@@ -33,9 +33,26 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     datefmt="%H:%M:%S",
-    handlers=[logging.StreamHandler(), _fh],
+    # No console under pythonw: the stream handler only when a stream exists.
+    handlers=[_fh, *([logging.StreamHandler()] if sys.stderr is not None else [])],
 )
 logger = logging.getLogger("voice_bridge")
+
+
+def _log_uncaught(exc_type, exc, tb) -> None:
+    """Without a console an uncaught traceback would vanish: log it."""
+    if issubclass(exc_type, KeyboardInterrupt):
+        return
+    logger.critical("Uncaught exception", exc_info=(exc_type, exc, tb))
+
+
+def _log_uncaught_thread(args) -> None:
+    if args.exc_type is SystemExit:
+        return
+    logger.critical(
+        f"Uncaught exception in thread {getattr(args.thread, 'name', '?')}",
+        exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+    )
 
 
 class BridgeState(Enum):
@@ -444,83 +461,29 @@ class VoiceBridge:
             self.stop()
 
 
-def _kill_orphan_instances() -> None:
-    """Find and kill stale VoiceBridge processes from previous runs.
+def _write_pid_file() -> None:
+    """Diagnostic PID file at ~/.claude/cache/tts/voicebridge.pid (removed by stop()).
 
-    Uses a PID lockfile at ~/.claude/cache/tts/voicebridge.pid.
-    Also scans for any python process running voice_bridge module.
+    Single instance is NOT decided here any more: __main__ checks the named
+    mutex (single_instance.py) before this module is even imported, and a
+    second launch exits instead of killing the running bridge.
     """
     import os
-    import subprocess
     from pathlib import Path
 
     pid_file = Path.home() / ".claude" / "cache" / "tts" / "voicebridge.pid"
-    my_pid = os.getpid()
-    # Also get parent PID to avoid killing the shell that launched us
-    my_ppid = os.getppid()
-    safe_pids = {my_pid, my_ppid}
-
-    logger.debug(f"Orphan scan: my PID={my_pid}, parent PID={my_ppid}")
-
-    # 1. Check lockfile from previous run
-    if pid_file.is_file():
-        try:
-            old_pid = int(pid_file.read_text().strip())
-            if old_pid not in safe_pids and old_pid > 0:
-                _try_kill_pid(old_pid, "lockfile")
-        except (ValueError, OSError):
-            pass
-
-    # 2. Scan for any python processes running voice_bridge
     try:
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" "
-             "| Where-Object { $_.CommandLine -like '*voice_bridge*' } "
-             "| Select-Object -ExpandProperty ProcessId"],
-            capture_output=True, text=True, timeout=5,
-        )
-        for line in result.stdout.strip().splitlines():
-            try:
-                pid = int(line.strip())
-                if pid in safe_pids:
-                    logger.debug(f"Skipping own process PID {pid}")
-                    continue
-                _try_kill_pid(pid, "process scan")
-            except ValueError:
-                continue
-    except Exception as e:
-        logger.debug(f"Orphan scan via powershell failed: {e}")
-
-    # 3. Write our PID
-    pid_file.parent.mkdir(parents=True, exist_ok=True)
-    pid_file.write_text(str(my_pid))
-    logger.info(f"PID lockfile written: {my_pid}")
-
-
-def _try_kill_pid(pid: int, source: str) -> None:
-    """Attempt to terminate a process by PID using taskkill (Windows).
-
-    No pre-check: os.kill(pid, 0) on Windows maps to TerminateProcess and
-    is destructive (can crash with WinError 87 / SystemError). taskkill
-    /F is idempotent — exit code 128 if PID not found, no-op otherwise.
-    """
-    import subprocess
-    try:
-        result = subprocess.run(
-            ["taskkill", "/F", "/PID", str(pid)],
-            capture_output=True, timeout=5,
-        )
-        if result.returncode == 0:
-            logger.warning(f"Killed orphan VoiceBridge (PID {pid}, found via {source})")
-            time.sleep(0.3)
-        # else: PID not found or access denied — silent no-op
-    except Exception as e:
-        logger.warning(f"Failed to kill PID {pid}: {e}")
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+        pid_file.write_text(str(os.getpid()))
+        logger.info(f"PID file written: {os.getpid()}")
+    except OSError as e:
+        logger.warning(f"PID file not written: {e}")
 
 
 def main():
-    _kill_orphan_instances()
+    sys.excepthook = _log_uncaught
+    threading.excepthook = _log_uncaught_thread
+    _write_pid_file()
     config = VoiceBridgeConfig()
     bridge = VoiceBridge(config)
 

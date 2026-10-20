@@ -144,12 +144,21 @@ Add to `~/.claude/settings.json`:
 ## Launch
 
 ```bash
-# Option 1: Batch file
+# Option 1: Batch file (no console window: runs venv\Scripts\pythonw.exe)
 .\VoiceBridge.bat
 
-# Option 2: Direct
+# Option 2: Direct, with a console showing the live log
 .\venv\Scripts\python.exe -m src.voice_bridge
 ```
+
+- **Single instance:** a second launch exits by itself while a bridge is running
+  (named mutex); it never kills the running one. The log is `voicebridge.log`.
+- **Start at sign-in:** tray menu > *Avvio automatico all'accesso* (or the installer's
+  "Start when I sign in" option) registers a per-user Task Scheduler task
+  `parlaconclaudio-voice-bridge`: at logon, no admin, no time limit, restart on
+  failure. Not a Windows Service on purpose: services run in session 0, where there
+  is no hotkey, clipboard, tray or per-user microphone. Manage it by hand with
+  `.\venv\Scripts\python.exe -m src.voice_bridge.autostart enable|disable|status`.
 
 ## How to Use
 

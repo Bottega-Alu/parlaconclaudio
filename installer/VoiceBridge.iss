@@ -13,6 +13,9 @@
 #define AppPublisher   "Frisco"
 #define AppExeName     "VoiceBridge.exe"
 #define BootstrapExe   "vb_bootstrap.exe"
+; Scheduled task that starts the bridge at sign-in. Same name as TASK_NAME in
+; src/voice_bridge/autostart.py, which creates it (installer, tray toggle).
+#define AutostartTask  "parlaconclaudio-voice-bridge"
 
 [Setup]
 AppId={{7B3C1E42-9D5A-4F18-A6C7-2E8B4D1F9A03}
@@ -67,7 +70,9 @@ Source: "bin\uv.exe";        DestDir: "{app}\bin"; Flags: ignoreversion skipifso
 Name: "{group}\{#AppName}";           Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\assets\voicebridge.ico"
 Name: "{group}\Repair runtime";       Filename: "{app}\{#BootstrapExe}"; Parameters: "--root ""{app}"""; IconFilename: "{app}\assets\voicebridge.ico"
 Name: "{autodesktop}\{#AppName}";     Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\assets\voicebridge.ico"; Tasks: desktopicon
-Name: "{userstartup}\{#AppName}";     Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\assets\voicebridge.ico"; Tasks: autostart
+; No Startup-folder shortcut any more: the "autostart" task registers a per-user
+; Task Scheduler logon task instead (restart on failure, no time limit), from
+; [Code] ApplyAutostart once the venv exists. Toggle later from the tray menu.
 
 [Run]
 ; The runtime bootstrap is NOT here: [Run] ignores exit codes, so a failed
@@ -81,8 +86,16 @@ Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; \
 ; v1.0.3 shipped as AppName "VoiceBridge": same AppId, so upgrading leaves its shortcuts behind
 ; (double autostart). Remove them; the new ones are created under the renamed AppName.
 Type: files;          Name: "{userstartup}\VoiceBridge.lnk"
+; v1.0.4-1.0.6 autostart was this Startup shortcut; v1.0.7 uses the logon task.
+Type: files;          Name: "{userstartup}\{#AppName}.lnk"
 Type: files;          Name: "{autodesktop}\VoiceBridge.lnk"
 Type: filesandordirs; Name: "{userprograms}\VoiceBridge"
+
+[UninstallRun]
+; Remove the logon task. schtasks directly, not the venv: it may already be gone.
+; Exit code 1 (task absent, e.g. autostart was off) is harmless here.
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""{#AutostartTask}"" /F"; \
+  Flags: runhidden waituntilterminated; RunOnceId: "DeleteAutostartTask"
 
 [UninstallDelete]
 ; Created after install, so Inno does not track them. src/ and scripts/ are wiped
@@ -114,6 +127,8 @@ en.BootstrapNoLog=The runtime builder exited (code %1) without writing its log, 
 it.BootstrapNoLog=Il configuratore del runtime e' terminato (codice %1) senza scrivere il log, quindi con ogni probabilita' non e' riuscito nemmeno a partire: di solito e' Smart App Control o un antivirus che blocca vb_bootstrap.exe, privo di firma digitale.%n%nSe Smart App Control risulta attivo, disattivalo in Sicurezza di Windows > Controllo app e browser, poi esegui:%nStart > {#AppName} > Repair runtime
 en.BootstrapNotStarted=Setup could not start the runtime builder:%n%1%n%nWindows error %2: %3%n%nThis usually means Smart App Control (or another application-control policy / antivirus) blocked it: vb_bootstrap.exe is not digitally signed. Turn Smart App Control off in Windows Security > App & browser control, then run:%nStart > {#AppName} > Repair runtime
 it.BootstrapNotStarted=Il setup non ha potuto avviare il configuratore del runtime:%n%1%n%nErrore Windows %2: %3%n%nDi solito significa che Smart App Control (o un'altra policy di controllo applicazioni / antivirus) l'ha bloccato: vb_bootstrap.exe non ha firma digitale. Disattiva Smart App Control in Sicurezza di Windows > Controllo app e browser, poi esegui:%nStart > {#AppName} > Repair runtime
+en.AutostartFailed=Could not register the sign-in task (code %1). The app works; enable "Start at sign-in" later from its tray menu.
+it.AutostartFailed=Impossibile registrare l'avvio all'accesso (codice %1). L'app funziona; attiva "Avvio automatico all'accesso" in seguito dal menu nel tray.
 
 [Code]
 const
@@ -314,10 +329,42 @@ begin
   SuppressibleMsgBox(Msg(Text), mbError, MB_OK, IDOK);
 end;
 
+{ Autostart = per-user logon task, created/removed by src.voice_bridge.autostart
+  (the same code as the tray toggle). Needs the venv, so it runs only after a
+  successful bootstrap. Unchecked task -> disable, so an upgrade honours it.
+  Best effort: a failure is logged and shown, never fails the install. }
+procedure ApplyAutostart;
+var
+  PyW, Action, Params: String;
+  ResultCode: Integer;
+begin
+  PyW := ExpandConstant('{app}\venv\Scripts\pythonw.exe');
+  if WizardIsTaskSelected('autostart') then
+    Action := 'enable'
+  else
+    Action := 'disable';
+  Params := '-m src.voice_bridge.autostart ' + Action + ' --root "' + ExpandConstant('{app}') + '"';
+  Log('Autostart: ' + PyW + ' ' + Params);
+  if not Exec(PyW, Params, ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Log('Autostart could not start, Win32 error ' + IntToStr(ResultCode));
+    ResultCode := -1;
+  end
+  else
+    Log('Autostart exit code ' + IntToStr(ResultCode));
+  if (ResultCode <> 0) and (Action = 'enable') then
+    SuppressibleMsgBox(FmtMessage(CustomMessage('AutostartFailed'), [IntToStr(ResultCode)]),
+      mbError, MB_OK, IDOK);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
+  begin
     RunBootstrap;
+    if BootstrapOk then
+      ApplyAutostart;
+  end;
 end;
 
 { Check: of the "Launch" postinstall entry. }
