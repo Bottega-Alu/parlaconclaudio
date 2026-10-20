@@ -1,5 +1,5 @@
 """
-Claude Code Hook Handler - Smart TTS Notifications v2.0
+Claude Code + Codex Hook Handler - Smart TTS Notifications v2.1
 
 Features:
 - Data-driven sound packs with manifest.json (auto-discovery)
@@ -8,6 +8,15 @@ Features:
 - Automatic TTS cache cleanup (TTL + size cap)
 
 Voice and settings read from ~/.claude/cache/tts/tts_config.json
+
+Input (decision tree in read_event):
+  1. a JSON object as a command-line argument -> legacy Codex `notify` program
+     ({"type": "agent-turn-complete", "cwd": ..., ...})
+  2. JSON on stdin + `--source codex`         -> Codex hooks engine (Stop,
+     PermissionRequest), translated to the Claude-shaped event below
+  3. JSON on stdin                            -> Claude Code hook (Stop,
+     Notification, TaskCompleted)
+Nothing is ever written to stdout: a Codex Stop hook must print JSON or nothing.
 """
 
 import asyncio
@@ -467,10 +476,44 @@ def resolve_audio(text: str, profile: dict) -> str | None:
 # EXTRACTORS
 # ══════════════════════════════════════════════════
 
+GIT_EXE = "git"
+GIT_TIMEOUT_S = 1.5
+
+
+def _git(cwd: str, *args: str) -> str | None:
+    """stdout of `git -C <cwd> <args>`, or None on any failure (no git, not a
+    repo, timeout, dubious ownership...). Never raises: the hook must not fail."""
+    try:
+        out = subprocess.run(
+            [GIT_EXE, "-C", cwd, *args],
+            capture_output=True, text=True, timeout=GIT_TIMEOUT_S,
+            stdin=subprocess.DEVNULL, creationflags=0x08000000,  # CREATE_NO_WINDOW
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    value = out.stdout.strip() if out.returncode == 0 else ""
+    return value or None
+
+
+def git_main_repo_root(cwd: str) -> Path | None:
+    """Root of the MAIN repository, also from a subfolder or a linked worktree.
+
+    --git-common-dir is the main repo's .git even inside a worktree, so its
+    parent is the main checkout. When the common dir is not a ".git" folder
+    (bare repo, submodule under .git/modules/) fall back to --show-toplevel.
+    """
+    common = _git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common and Path(common).name.lower() == ".git":
+        return Path(common).parent
+    top = _git(cwd, "rev-parse", "--show-toplevel")
+    return Path(top) if top else None
+
+
 def extract_repo_name(data: dict) -> str:
     cwd = data.get("cwd") or data.get("working_directory") or os.environ.get("CLAUDE_CWD") or os.getcwd()
     if cwd:
-        name = Path(cwd).name
+        root = git_main_repo_root(cwd) if os.path.isdir(cwd) else None
+        name = (root or Path(cwd)).name
         if name and name.lower() not in ("", "users", "fra", "home", "c:\\"):
             return name
     return "sconosciuto"
