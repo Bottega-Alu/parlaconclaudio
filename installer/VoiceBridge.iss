@@ -9,7 +9,7 @@
 ; Output: installer\Output\parlaconclaudio-voice-bridge-Setup-<version>.exe
 
 #define AppName        "parlaconclaudio - voice-bridge"
-#define AppVersion     "1.0.7"
+#define AppVersion     "1.0.8"
 #define AppPublisher   "Frisco"
 #define AppExeName     "VoiceBridge.exe"
 #define BootstrapExe   "vb_bootstrap.exe"
