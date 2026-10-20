@@ -278,18 +278,25 @@ def _generate_marble_sphere(
     saturation: float = 0.75,
     brightness: float = 0.95,
     time_val: float = 0.0,
+    design_size: int | None = None,
 ) -> "Image.Image":
     """Generate a single frame of the animated marble sphere.
 
     Rich liquid-ink effect with deep shimmer and smooth color flow.
+
+    The look is defined in the pixel space of ``design_size`` (vein frequency,
+    3px margin, 2px glow). Rendering at a smaller ``size`` samples that same
+    design scaled down; ``design_size=None`` means size == design (the original
+    behaviour, kept pixel-identical).
     """
     # Vectorized (numpy) port of the original per-pixel loop: same formulas,
     # same float64 math, same int() truncation. The pure-Python loop took
     # ~90 ms per 192px frame holding the GIL and, since the idle animation
     # never stops, kept the bridge at ~50% of a core at rest.
-    center = size / 2.0
-    radius = (size - 6) / 2.0
-    coords = np.arange(size, dtype=np.float64)
+    scale = (design_size or size) / size  # design px per output px
+    center = size * scale / 2.0
+    radius = (size * scale - 6) / 2.0
+    coords = np.arange(size, dtype=np.float64) * scale  # design-space sample points
     x = coords[np.newaxis, :]
     y = coords[:, np.newaxis]
     dx = x - center
@@ -346,7 +353,7 @@ def _generate_marble_sphere(
         rgba[..., i] = np.where(inside, np.trunc(channel), 0).astype(np.uint8)
     img = Image.fromarray(rgba, "RGBA")
 
-    glow = img.filter(ImageFilter.GaussianBlur(radius=2.0))
+    glow = img.filter(ImageFilter.GaussianBlur(radius=2.0 / scale))
     img = Image.blend(img, glow, alpha=0.15)
 
     return img
@@ -399,7 +406,21 @@ _ANIM_PRESETS = {
     },
 }
 
-ICON_SIZE = 192  # Crisp + fast enough for on-the-fly generation (~90ms/frame)
+# The look is designed at 192px (MARBLE_DESIGN_SIZE) but the tray never shows
+# more than SM_CXICON (32px at 100%, 64px at 200% DPI): pystray hands Windows an
+# ICO with every Pillow size <= the image, and LoadImage(LR_DEFAULTSIZE) picks
+# the SM_CXICON one. A 192px frame meant a 31 KB ICO temp file per frame
+# (~250 KB/s at rest); 64px covers 200% DPI at a fraction of the bytes.
+# Each frame is rendered at 2x (RENDER_SIZE) and downsampled for antialiasing.
+MARBLE_DESIGN_SIZE = 192
+ICON_SIZE = 64
+RENDER_SIZE = ICON_SIZE * 2
+
+
+def _render_icon_frame(hue: float, **kwargs) -> "Image.Image":
+    """One tray frame: 2x supersampled render of the 192px design, ICON_SIZE out."""
+    img = _generate_marble_sphere(RENDER_SIZE, hue, design_size=MARBLE_DESIGN_SIZE, **kwargs)
+    return img.resize((ICON_SIZE, ICON_SIZE), Image.LANCZOS)
 
 
 class _IconAnimator:
@@ -455,8 +476,8 @@ class _IconAnimator:
                     pulse = 0.5 + 0.5 * math.sin(self._time_val * 3.0)
                     brightness = 0.60 + pulse * 0.40
 
-                frame = _generate_marble_sphere(
-                    ICON_SIZE, hue,
+                frame = _render_icon_frame(
+                    hue,
                     hue_range=preset["hue_range"],
                     saturation=preset["saturation"],
                     brightness=brightness,
@@ -1159,7 +1180,7 @@ class TrayIcon:
         # Create initial static icon (animator will replace it immediately)
         initial_img = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
         draw = ImageDraw.Draw(initial_img)
-        draw.ellipse([4, 4, ICON_SIZE - 4, ICON_SIZE - 4], fill=(0, 200, 100, 255))
+        draw.ellipse([1, 1, ICON_SIZE - 1, ICON_SIZE - 1], fill=(0, 200, 100, 255))
 
         self._icon = pystray.Icon(
             "voice_bridge",

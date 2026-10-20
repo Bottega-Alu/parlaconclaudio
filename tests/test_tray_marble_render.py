@@ -5,6 +5,7 @@ verbatim: the vectorized one must produce the same image (it ran ~90 ms per
 192px frame in the GIL and was ~50% of a core at rest).
 """
 import colorsys
+import io
 import math
 import time
 
@@ -94,12 +95,12 @@ CASES = [
 ]
 
 
-@pytest.mark.parametrize("size", [32, 192])
+@pytest.mark.parametrize("size,design", [(32, None), (64, None), (192, None), (192, 192)])
 @pytest.mark.parametrize("hue,hue_range,sat,bri,t", CASES)
-def test_vectorized_sphere_matches_reference(size, hue, hue_range, sat, bri, t):
+def test_vectorized_sphere_matches_reference(size, design, hue, hue_range, sat, bri, t):
     ref = np.asarray(_reference_sphere(size, hue, hue_range, sat, bri, t), dtype=np.int16)
     new_img = ti._generate_marble_sphere(size, hue, hue_range=hue_range, saturation=sat,
-                                         brightness=bri, time_val=t)
+                                         brightness=bri, time_val=t, design_size=design)
     assert new_img.mode == "RGBA" and new_img.size == (size, size)
     new = np.asarray(new_img, dtype=np.int16)
     diff = np.abs(ref - new)
@@ -108,14 +109,42 @@ def test_vectorized_sphere_matches_reference(size, hue, hue_range, sat, bri, t):
     assert (diff > 0).mean() < 0.001
 
 
-def test_vectorized_sphere_is_cheap():
-    ti._generate_marble_sphere(ti.ICON_SIZE, 0.3)  # warm-up
-    n = 10
+def _ico_bytes(img):
+    # what pystray does per frame: image.save(tempfile, format="ICO")
+    buf = io.BytesIO()
+    img.save(buf, format="ICO")
+    return len(buf.getvalue())
+
+
+@pytest.mark.parametrize("hue,hue_range,sat,bri,t", CASES)
+def test_tray_frame_looks_like_the_192px_design(hue, hue_range, sat, bri, t):
+    """64px tray frame vs the original 192px render downsampled to the same size."""
+    from PIL import Image
+    frame = ti._render_icon_frame(hue, hue_range=hue_range, saturation=sat,
+                                  brightness=bri, time_val=t)
+    assert frame.mode == "RGBA" and frame.size == (ti.ICON_SIZE, ti.ICON_SIZE)
+    ref = _reference_sphere(ti.MARBLE_DESIGN_SIZE, hue, hue_range, sat, bri, t)
+    ref = np.asarray(ref.resize(frame.size, Image.LANCZOS), dtype=np.int16)
+    diff = np.abs(ref - np.asarray(frame, dtype=np.int16))
+    assert diff.mean() < 2.0, f"mean |diff| {diff.mean():.2f}"
+    assert np.percentile(diff, 99) <= 32
+
+
+def test_tray_frame_ico_is_less_than_half_the_192px_one():
+    old = _ico_bytes(_reference_sphere(192, 0.3, 0.08, 0.9, 0.95, 3.0))
+    new = _ico_bytes(ti._render_icon_frame(0.3, hue_range=0.08, saturation=0.9,
+                                           brightness=0.95, time_val=3.0))
+    assert new < old / 2, f"ICO per frame: {old} B -> {new} B"
+
+
+def test_tray_frame_is_cheap():
+    ti._render_icon_frame(0.3)  # warm-up
+    n = 20
     start = time.perf_counter()
     for i in range(n):
-        ti._generate_marble_sphere(ti.ICON_SIZE, 0.3, time_val=i * 0.4)
+        _ico_bytes(ti._render_icon_frame(0.3, time_val=i * 0.4))
     per_frame = (time.perf_counter() - start) / n
-    assert per_frame < 0.030, f"{per_frame * 1000:.1f} ms/frame"
+    assert per_frame < 0.015, f"{per_frame * 1000:.1f} ms/frame (render + ICO)"
 
 
 def test_idle_frame_rate_is_capped():
