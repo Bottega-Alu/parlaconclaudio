@@ -5,7 +5,7 @@ from src.voice_bridge import tray_icon
 def test_idle_animation_has_no_periodic_render(monkeypatch):
     animator = tray_icon._IconAnimator()
     rendered = []
-    monkeypatch.setattr(tray_icon, '_generate_marble_sphere', lambda *a, **kw: rendered.append(1) or object())
+    monkeypatch.setattr(tray_icon, '_render_icon_frame', lambda *a, **kw: rendered.append(1) or object())
     animator._icon_ref = SimpleNamespace(icon=None)
     animator._running = True
     waits = []
@@ -21,7 +21,7 @@ def test_idle_animation_has_no_periodic_render(monkeypatch):
 def test_active_animation_cache_is_bounded(monkeypatch):
     animator = tray_icon._IconAnimator()
     calls = []
-    monkeypatch.setattr(tray_icon, '_generate_marble_sphere', lambda *a, **kw: calls.append(1) or object())
+    monkeypatch.setattr(tray_icon, '_render_icon_frame', lambda *a, **kw: calls.append(1) or object())
     frames = [animator._frame('recording', idx) for idx in range(48)]
     assert len(calls) == 12
     assert frames[0] is frames[12]

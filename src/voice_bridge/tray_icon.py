@@ -30,6 +30,7 @@ from typing import Callable
 logger = logging.getLogger(__name__)
 
 try:
+    import numpy as np
     from PIL import Image, ImageDraw, ImageFilter
     import pystray
     TRAY_AVAILABLE = True
@@ -248,6 +249,28 @@ def _marble_noise(x: float, y: float, t: float) -> float:
     return v
 
 
+def _marble_noise_np(x, y, t: float):
+    """numpy twin of _marble_noise (same formula, array-wise)."""
+    v = np.sin(x * 0.12 + y * 0.08 + t * 0.6)
+    v = v + 0.5 * np.cos(x * 0.09 - y * 0.15 + t * 0.45)
+    v = v + 0.3 * np.sin((x + y) * 0.14 + t * 0.8)
+    return v
+
+
+def _hsv_to_rgb_np(h, s, v):
+    """Array-wise colorsys.hsv_to_rgb (same branches, same float math)."""
+    i = (h * 6.0).astype(np.int64)  # int() of a value >= 0
+    f = (h * 6.0) - i
+    p = v * (1.0 - s)
+    q = v * (1.0 - s * f)
+    t = v * (1.0 - s * (1.0 - f))
+    i = i % 6
+    r = np.choose(i, [v, q, p, p, t, v])
+    g = np.choose(i, [t, v, v, q, p, p])
+    b = np.choose(i, [p, p, t, v, v, q])
+    return r, g, b
+
+
 def _generate_marble_sphere(
     size: int,
     hue_offset: float,
@@ -255,73 +278,82 @@ def _generate_marble_sphere(
     saturation: float = 0.75,
     brightness: float = 0.95,
     time_val: float = 0.0,
+    design_size: int | None = None,
 ) -> "Image.Image":
     """Generate a single frame of the animated marble sphere.
 
     Rich liquid-ink effect with deep shimmer and smooth color flow.
+
+    The look is defined in the pixel space of ``design_size`` (vein frequency,
+    3px margin, 2px glow). Rendering at a smaller ``size`` samples that same
+    design scaled down; ``design_size=None`` means size == design (the original
+    behaviour, kept pixel-identical).
     """
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    pixels = img.load()
-    center = size / 2.0
-    radius = (size - 6) / 2.0
+    # Vectorized (numpy) port of the original per-pixel loop: same formulas,
+    # same float64 math, same int() truncation. The pure-Python loop took
+    # ~90 ms per 192px frame holding the GIL and, since the idle animation
+    # never stops, kept the bridge at ~50% of a core at rest.
+    scale = (design_size or size) / size  # design px per output px
+    center = size * scale / 2.0
+    radius = (size * scale - 6) / 2.0
+    coords = np.arange(size, dtype=np.float64) * scale  # design-space sample points
+    x = coords[np.newaxis, :]
+    y = coords[:, np.newaxis]
+    dx = x - center
+    dy = y - center
+    dist = np.sqrt(dx * dx + dy * dy)
+    inside = dist <= radius
 
-    for y in range(size):
-        for x in range(size):
-            dx = x - center
-            dy = y - center
-            dist = math.sqrt(dx * dx + dy * dy)
+    norm_dist = dist / radius
+    nx = np.broadcast_to(dx / radius, dist.shape)
+    ny = np.broadcast_to(dy / radius, dist.shape)
+    nz = np.sqrt(np.maximum(0, 1 - nx * nx - ny * ny))
 
-            if dist > radius:
-                continue
+    # 3D sphere lighting
+    light_dot = nx * (-0.3) + ny * (-0.4) + nz * 0.8
+    light_factor = np.maximum(0.15, np.minimum(1.0, 0.5 + light_dot * 0.6))
 
-            norm_dist = dist / radius
-            nx = dx / radius
-            ny = dy / radius
-            nz = math.sqrt(max(0, 1 - nx * nx - ny * ny))
+    # Marble veins - rotate sampling point around Y axis (like Earth)
+    rot_offset = time_val * 12.0  # horizontal scroll speed in pixels
+    marble = _marble_noise_np(x + rot_offset, y, 0.0)
 
-            # 3D sphere lighting
-            light_dot = nx * (-0.3) + ny * (-0.4) + nz * 0.8
-            light_factor = max(0.15, min(1.0, 0.5 + light_dot * 0.6))
+    # Hue: uniform base + very subtle vein variation
+    h = (hue_offset + marble * hue_range * 0.08) % 1.0
+    # Saturation: smooth, uniform
+    s = saturation * (1.0 - norm_dist * 0.10)
+    # Brightness: base + lighting (no pulse/shimmer in idle)
+    v = brightness * light_factor
 
-            # Marble veins — rotate sampling point around Y axis (like Earth)
-            rot_offset = time_val * 12.0  # horizontal scroll speed in pixels
-            marble = _marble_noise(x + rot_offset, y, 0.0)
+    # Main specular highlight (glass)
+    spec_dist = np.sqrt((nx + 0.35) ** 2 + (ny + 0.35) ** 2)
+    hit = spec_dist < 0.38
+    spec = np.where(hit, np.clip(1.0 - spec_dist / 0.38, 0.0, None) ** 2.5 * 0.65, 0.0)
+    v = np.where(hit, np.minimum(1.0, v + spec), v)
+    s = np.where(hit, np.maximum(0.0, s - spec * 0.8), s)
 
-            # Hue: uniform base + very subtle vein variation
-            h = (hue_offset + marble * hue_range * 0.08) % 1.0
-            # Saturation: smooth, uniform
-            s = saturation * (1.0 - norm_dist * 0.10)
-            # Brightness: base + lighting (no pulse/shimmer in idle)
-            v = brightness * light_factor
+    # Pinpoint specular
+    spec2_dist = np.sqrt((nx + 0.25) ** 2 + (ny + 0.50) ** 2)
+    hit = spec2_dist < 0.12
+    spec2 = np.where(hit, np.clip(1.0 - spec2_dist / 0.12, 0.0, None) ** 4 * 0.35, 0.0)
+    v = np.where(hit, np.minimum(1.0, v + spec2), v)
+    s = np.where(hit, np.maximum(0.0, s - spec2), s)
 
-            # Main specular highlight (glass)
-            spec_dist = math.sqrt((nx + 0.35) ** 2 + (ny + 0.35) ** 2)
-            if spec_dist < 0.38:
-                spec = (1.0 - spec_dist / 0.38) ** 2.5 * 0.65
-                v = min(1.0, v + spec)
-                s = max(0.0, s - spec * 0.8)
+    # Rim lighting
+    rim_hit = norm_dist > 0.65
+    rim = np.where(rim_hit, (norm_dist - 0.65) / 0.35, 0.0)
+    v = np.where(rim_hit, np.minimum(1.0, v + rim ** 1.5 * 0.25), v)
 
-            # Pinpoint specular
-            spec2_dist = math.sqrt((nx + 0.25) ** 2 + (ny + 0.50) ** 2)
-            if spec2_dist < 0.12:
-                spec2 = (1.0 - spec2_dist / 0.12) ** 4 * 0.35
-                v = min(1.0, v + spec2)
-                s = max(0.0, s - spec2)
+    r, g, b = _hsv_to_rgb_np(h % 1.0, np.clip(s, 0, 1), np.clip(v, 0, 1))
 
-            # Rim lighting
-            if norm_dist > 0.65:
-                rim = (norm_dist - 0.65) / 0.35
-                v = min(1.0, v + rim ** 1.5 * 0.25)
+    alpha = np.where(norm_dist > 0.85, 255 * (1.0 - (norm_dist - 0.85) / 0.15), 255.0)
 
-            r, g, b = colorsys.hsv_to_rgb(h % 1.0, max(0, min(1, s)), max(0, min(1, v)))
+    rgba = np.zeros((size, size, 4), dtype=np.uint8)
+    for i, channel in enumerate((r * 255, g * 255, b * 255, alpha)):
+        # int() truncates toward zero; every value here is >= 0 inside the disc
+        rgba[..., i] = np.where(inside, np.trunc(channel), 0).astype(np.uint8)
+    img = Image.fromarray(rgba, "RGBA")
 
-            alpha = 255
-            if norm_dist > 0.85:
-                alpha = int(255 * (1.0 - (norm_dist - 0.85) / 0.15))
-
-            pixels[x, y] = (int(r * 255), int(g * 255), int(b * 255), alpha)
-
-    glow = img.filter(ImageFilter.GaussianBlur(radius=2.0))
+    glow = img.filter(ImageFilter.GaussianBlur(radius=2.0 / scale))
     img = Image.blend(img, glow, alpha=0.15)
 
     return img
@@ -345,7 +377,9 @@ _ANIM_PRESETS = {
         "saturation": 0.90,
         "brightness": 0.95,
         "time_speed": 0.4,        # Marble flow = rotation illusion
-        "interval": 0.05,
+        # Conservative cadence if idle animation is ever enabled. The test
+        # application keeps idle static and waits for a state change instead.
+        "interval": 0.12,
         "hue_min": 0.08,          # Skip red zone
         "hue_max": 0.92,
     },
@@ -370,7 +404,21 @@ _ANIM_PRESETS = {
     },
 }
 
-ICON_SIZE = 64  # Native tray sizes scale cleanly, with bounded rendering cost.
+# The look is designed at 192px (MARBLE_DESIGN_SIZE) but the tray never shows
+# more than SM_CXICON (32px at 100%, 64px at 200% DPI): pystray hands Windows an
+# ICO with every Pillow size <= the image, and LoadImage(LR_DEFAULTSIZE) picks
+# the SM_CXICON one. A 192px frame meant a 31 KB ICO temp file per frame
+# (~250 KB/s at rest); 64px covers 200% DPI at a fraction of the bytes.
+# Each frame is rendered at 2x (RENDER_SIZE) and downsampled for antialiasing.
+MARBLE_DESIGN_SIZE = 192
+ICON_SIZE = 64
+RENDER_SIZE = ICON_SIZE * 2
+
+
+def _render_icon_frame(hue: float, **kwargs) -> "Image.Image":
+    """One tray frame: 2x supersampled render of the 192px design, ICON_SIZE out."""
+    img = _generate_marble_sphere(RENDER_SIZE, hue, design_size=MARBLE_DESIGN_SIZE, **kwargs)
+    return img.resize((ICON_SIZE, ICON_SIZE), Image.LANCZOS)
 
 
 class _IconAnimator:
@@ -410,8 +458,8 @@ class _IconAnimator:
             phase = index * math.tau / 12
             hue = preset.get("base_hue", 0.45)
             brightness = 0.8 + 0.15 * math.sin(phase) if preset.get("pulse") else preset["brightness"]
-            self._frames[key] = _generate_marble_sphere(
-                ICON_SIZE, hue, hue_range=preset["hue_range"],
+            self._frames[key] = _render_icon_frame(
+                hue, hue_range=preset["hue_range"],
                 saturation=preset["saturation"], brightness=brightness,
                 time_val=phase,
             )
@@ -1147,7 +1195,7 @@ class TrayIcon:
         # Create initial static icon (animator will replace it immediately)
         initial_img = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
         draw = ImageDraw.Draw(initial_img)
-        draw.ellipse([4, 4, ICON_SIZE - 4, ICON_SIZE - 4], fill=(0, 200, 100, 255))
+        draw.ellipse([1, 1, ICON_SIZE - 1, ICON_SIZE - 1], fill=(0, 200, 100, 255))
 
         self._icon = pystray.Icon(
             "voice_bridge",

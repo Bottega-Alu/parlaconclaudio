@@ -11,14 +11,17 @@
 #
 #   .\scripts\build_exe.ps1              # both exes
 #   .\scripts\build_exe.ps1 -Installer   # also compile the .iss (needs Inno Setup 6)
+#   .\scripts\build_exe.ps1 -Installer -Python C:\path\to\venv\Scripts\python.exe
+#                                        # e.g. from a git worktree, which has no venv\
 
 param(
-    [switch]$Installer
+    [switch]$Installer,
+    [string]$Python
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
-$Py   = Join-Path $Root "venv\Scripts\python.exe"
+$Py   = if ($Python) { $Python } else { Join-Path $Root "venv\Scripts\python.exe" }
 $Ico  = Join-Path $Root "assets\voicebridge.ico"
 $Work = Join-Path $Root ".work\pyinstaller"
 
