@@ -730,7 +730,7 @@ class TrayIcon:
         hooks_item = self._build_voice_hooks_menu()
 
         return pystray.Menu(
-            pystray.MenuItem("✨ parlaconclaudio v1.0.9.1020 ✨", None, enabled=False),
+            pystray.MenuItem("✨ parlaconclaudio v1.0.11.1021 ✨", None, enabled=False),
             pystray.Menu.SEPARATOR,
             # --- Status dashboard (always visible, read-only) ---
             pystray.MenuItem(f"  🧠 {engine_display}  │  {lang_display}  │  🎤 {mic_display}", None, enabled=False),
