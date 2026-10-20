@@ -3,8 +3,14 @@
 Built with PyInstaller (--noconsole) into VoiceBridge.exe. It does NOT bundle the
 application: torch/CUDA + faster-whisper would blow the exe up to several GB and
 make the CUDA runtime path fragile. Instead it resolves the project root, then
-starts the existing venv interpreter (pythonw.exe -> no console window) detached
-and exits immediately, leaving zero residual processes.
+starts the venv's console-less interpreter and exits immediately, leaving zero
+residual processes.
+
+Interpreter: src/voice_bridge/gui_python.py - the base pythonw.exe pointed at the
+venv via __PYVENV_LAUNCHER__ (venv/Scripts/pythonw.exe of a uv venv is a
+console-subsystem trampoline). Flags: CREATE_NO_WINDOW, never DETACHED_PROCESS:
+DETACHED_PROCESS overrides CREATE_NO_WINDOW, and a console trampoline started
+detached hands its console-subsystem child a brand-new console WINDOW.
 
 Single-instance handling is NOT done here on purpose: `python -m src.voice_bridge`
 checks a named mutex (src/voice_bridge/single_instance.py) and a second launch
@@ -20,6 +26,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Stdlib-only module, compiled in (build_exe.ps1: --paths <root> --hidden-import);
+# run as a script (VoiceBridge.bat) it is found through the repo root.
+if not getattr(sys, "frozen", False):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.voice_bridge import gui_python  # noqa: E402
+
 APP_TITLE = "Voice Bridge"
 BOOTSTRAP_LOG = "bootstrap.log"  # written by installer/vb_bootstrap.py into the install root
 
@@ -27,7 +39,6 @@ BOOTSTRAP_LOG = "bootstrap.log"  # written by installer/vb_bootstrap.py into the
 FALLBACK_ROOT = Path(r"C:\PROJECTS\parlaconclaudio")
 
 # Win32 process creation flags (avoid importing the whole subprocess constant set).
-DETACHED_PROCESS = 0x00000008
 CREATE_NO_WINDOW = 0x08000000
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 
@@ -96,30 +107,36 @@ def _not_found_message(roots: list[Path]) -> str:
     return "\n".join(lines)
 
 
+def launch_kwargs(root: Path, gui: "gui_python.GuiPython", base_env) -> dict:
+    """Pure: the Popen arguments for the supervisor (asserted by the tests)."""
+    env = dict(base_env)
+    env.pop(gui_python.PYVENV_LAUNCHER_ENV, None)
+    env.update(gui.env)
+    env["PYTHONIOENCODING"] = "utf-8"        # logs contain non-ASCII (IT/PT transcripts)
+    return dict(
+        args=[str(gui.exe), "-m", "src.voice_bridge"],
+        cwd=str(root),
+        env=env,
+        creationflags=CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+    )
+
+
 def main() -> int:
     root = _resolve_root()
     if root is None:
         _error(_not_found_message(_candidate_roots()))
         return 2
 
-    pythonw = root / "venv" / "Scripts" / "pythonw.exe"
-
-    env = os.environ.copy()
-    env["PYTHONIOENCODING"] = "utf-8"        # logs contain non-ASCII (IT/PT transcripts)
+    gui = gui_python.resolve(root / "venv")
 
     try:
-        subprocess.Popen(
-            [str(pythonw), "-m", "src.voice_bridge"],
-            cwd=str(root),
-            env=env,
-            creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            close_fds=True,
-        )
+        subprocess.Popen(**launch_kwargs(root, gui, os.environ))
     except OSError as exc:
-        _error(f"Failed to start:\n  {pythonw} -m src.voice_bridge\n\n{exc}")
+        _error(f"Failed to start:\n  {gui.exe} -m src.voice_bridge\n\n{exc}")
         return 1
 
     return 0

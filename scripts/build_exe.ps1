@@ -4,7 +4,8 @@
 #   vb_bootstrap.exe       post-install runtime builder (installer/)
 #   parlaconclaudio-voice-bridge-Setup-<ver>.exe Inno Setup package        (installer/Output/) - optional
 #
-# Neither exe bundles the app: VoiceBridge.exe starts venv\Scripts\pythonw.exe,
+# Neither exe bundles the app: VoiceBridge.exe starts the venv's base pythonw.exe
+# (src/voice_bridge/gui_python.py, compiled in),
 # and vb_bootstrap.exe builds that venv on the target host. App code changes need
 # no rebuild here - only launcher/bootstrapper/icon changes do.
 #
@@ -47,6 +48,8 @@ Write-Host "`n=== 1/2  VoiceBridge.exe (launcher, no console)" -ForegroundColor 
     --distpath $Root `
     --workpath (Join-Path $Work "build") `
     --specpath $Work `
+    --paths $Root `
+    --hidden-import src.voice_bridge.gui_python `
     @CommonExcludes `
     --exclude-module ctranslate2 `
     --exclude-module pystray `
