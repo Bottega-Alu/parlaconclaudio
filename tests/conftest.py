@@ -23,3 +23,37 @@ def _never_truncate_live_log(monkeypatch):
 
     monkeypatch.setattr(logging, "FileHandler", lambda *a, **k: _NullHandler())
     yield
+
+
+class FakeRunKey:
+    """In-memory HKCU Run value (see src/voice_bridge/autostart.RunKey)."""
+
+    def __init__(self, value=None, fail=None):
+        self.value, self.fail = value, fail
+
+    def get(self):
+        if self.fail == "get":
+            raise PermissionError("denied")
+        return self.value
+
+    def set(self, command):
+        if self.fail == "set":
+            raise PermissionError("[WinError 5] Accesso negato")
+        self.value = command
+
+    def delete(self):
+        if self.fail == "delete":
+            raise PermissionError("[WinError 5] Accesso negato")
+        had, self.value = self.value is not None, None
+        return had
+
+
+@pytest.fixture(autouse=True)
+def _never_touch_real_run_key(monkeypatch):
+    """No test can read or write the real HKCU Run value: the default RunKey
+    used by autostart when none is injected is an in-memory fake."""
+    from src.voice_bridge import autostart
+
+    fake = FakeRunKey()
+    monkeypatch.setattr(autostart, "_default_run_key", lambda: fake)
+    yield fake

@@ -14,6 +14,9 @@ Decision tree (mode → engine):
 import json
 import logging
 import time
+import threading
+from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +25,14 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 TTS_CONFIG = Path.home() / ".claude" / "cache" / "tts" / "tts_config.json"
+
+
+def _serialized(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self.operation():
+            return method(self, *args, **kwargs)
+    return wrapped
 
 
 class Transcriber:
@@ -41,6 +52,28 @@ class Transcriber:
         self._engine = None
         self._gpu_available: bool | None = None  # cached after first check
         self._gpu_info = None  # GpuInfo, populated by _detect_gpu()
+        self._engine_lock = threading.RLock()
+        self._operation_depth = 0
+        self.last_error: str | None = None
+
+    @property
+    def busy(self) -> bool:
+        """Whether inference or engine maintenance is currently in progress."""
+        return self._operation_depth > 0
+
+    @contextmanager
+    def operation(self):
+        """Own the engine for an operation, including a complete file batch.
+
+        Reentrant so batch callers can safely invoke transcribe_file/cleanup.
+        All lifecycle mutations share this lock with inference.
+        """
+        with self._engine_lock:
+            self._operation_depth += 1
+            try:
+                yield
+            finally:
+                self._operation_depth -= 1
 
     # ------------------------------------------------------------------
     # GPU detection
@@ -111,7 +144,7 @@ class Transcriber:
             return None  # auto-detect
         import locale
         try:
-            loc = locale.getdefaultlocale()[0]  # e.g. "it_IT", "en_US"
+            loc = locale.getlocale()[0]  # e.g. "it_IT", "en_US"
             if loc:
                 return loc.split("_")[0]  # "it", "en"
         except Exception:
@@ -202,6 +235,7 @@ class Transcriber:
     # Engine lifecycle
     # ------------------------------------------------------------------
 
+    @_serialized
     def _ensure_engine(self) -> None:
         """Lazily resolve and load the STT engine."""
         if self._engine is not None:
@@ -211,8 +245,10 @@ class Transcriber:
 
     def active_engine_name(self) -> str:
         """Return the name of the currently loaded engine (or 'not_loaded')."""
-        return self._engine.name if self._engine else "not_loaded"
+        engine = self._engine
+        return engine.name if engine else "not_loaded"
 
+    @_serialized
     def switch_engine(self, mode: str) -> None:
         """Switch STT mode at runtime. Cleans up current engine first."""
         logger.info(f"Switching STT mode to: {mode}")
@@ -228,31 +264,24 @@ class Transcriber:
     # Transcription
     # ------------------------------------------------------------------
 
+    @_serialized
     def transcribe(self, audio: np.ndarray) -> str:
         """Transcribe audio array to text. Returns empty string on failure or no speech."""
+        self.last_error = None
         if audio.size == 0:
             return ""
 
-        self._ensure_engine()
-
         language = self._get_active_language()
-
         try:
-            if self._engine.is_local:
-                result = self._engine.transcribe(
-                    audio,
-                    language=language,
-                    beam_size=5,
-                    vad_filter=True,
-                    word_timestamps=False,
-                )
-            else:
-                result = self._engine.transcribe(audio, language=language)
+            self._ensure_engine()
+            result = self._transcribe_with(self._engine, audio, language)
 
             text = result.text.strip()
 
             if result.error:
                 logger.warning(f"STT [{result.provider}] error: {result.error}")
+                self.last_error = str(result.error)
+                return self._runtime_fallback(audio, language)
             else:
                 latency = f", {result.latency_ms}ms" if result.latency_ms else ""
                 logger.info(
@@ -263,9 +292,51 @@ class Transcriber:
             return text
 
         except Exception as e:
-            logger.error(f"Transcription failed [{self._engine.name}]: {e}")
-            return ""
+            self.last_error = str(e)
+            logger.error("Transcription failed: %s", e)
+            return self._runtime_fallback(audio, language)
 
+    @staticmethod
+    def _transcribe_with(engine, audio, language):
+        kwargs = {"language": language}
+        if engine.is_local:
+            kwargs.update(beam_size=5, vad_filter=True, word_timestamps=False)
+        return engine.transcribe(audio, **kwargs)
+
+    def _runtime_fallback(self, audio, language) -> str:
+        """Try each configured alternate once; never retry a valid silence result."""
+        if not self._get_auto_fallback():
+            return ""
+        from ..core.stt_engine.key_manager import KeyManager
+        current = self.active_engine_name()
+        for provider, factory in (("groq", self._make_groq_engine),
+                                  ("deepgram", self._make_deepgram_engine)):
+            if provider == current:
+                continue
+            key = KeyManager.get_key(provider)
+            if not key:
+                continue
+            fallback = None
+            try:
+                fallback = factory(key)
+                result = self._transcribe_with(fallback, audio, language)
+                if not result.error:
+                    self.last_error = None
+                    logger.info("Runtime STT fallback succeeded: %s", provider)
+                    return (result.text or "").strip()
+                self.last_error = str(result.error)
+            except Exception as exc:
+                self.last_error = str(exc)
+                logger.warning("Runtime STT fallback [%s] failed: %s", provider, exc)
+            finally:
+                if fallback is not None:
+                    try:
+                        fallback.cleanup()
+                    except Exception:
+                        logger.warning("Fallback cleanup failed", exc_info=True)
+        return ""
+
+    @_serialized
     def transcribe_file(
         self,
         path: Path,
@@ -299,6 +370,8 @@ class Transcriber:
             vad_filter=True,
             word_timestamps=False,
         )
+        if result.error:
+            raise RuntimeError(f"STT file transcription failed: {result.error}")
         text = (result.text or "").strip()
         detected = result.language or "unknown"
         logger.info(
@@ -311,6 +384,7 @@ class Transcriber:
     # VRAM management
     # ------------------------------------------------------------------
 
+    @_serialized
     def purge_vram(self) -> None:
         """Purge VRAM — only meaningful for local GPU engine."""
         if self._engine is None:
@@ -322,9 +396,15 @@ class Transcriber:
         self._engine.purge_vram()
         logger.info("VRAM purge complete — model reloaded")
 
+    @_serialized
+    def unload_vram(self) -> None:
+        """Release the local model until next use, without reloading it."""
+        if self._engine is not None and self._engine.is_local:
+            self.cleanup()
+
+    @_serialized
     def cleanup(self) -> None:
         """Release engine resources."""
         if self._engine:
             self._engine.cleanup()
-            del self._engine
             self._engine = None

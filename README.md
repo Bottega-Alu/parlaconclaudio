@@ -128,9 +128,35 @@ pip install -e .[gpu]
 pip install keyring
 ```
 
-## Configure Claude Code Hooks
+## Configure the voice hooks (Claude Code and Codex)
 
-Add to `~/.claude/settings.json`:
+Easiest: tray menu > **🗣️ Hook voci** > tick *Claude Code* and/or *Codex* (or
+*Collega hook per voci interattive (tutti)*); untick, or *Scollega hook Codex e
+Claude Code*, to remove them. The ticks are read from the real files:
+
+| Agent | File | Events wired |
+|---|---|---|
+| Claude Code | `%CLAUDE_CONFIG_DIR%` or `~/.claude/settings.json` | `Stop`, `TaskCompleted` (done), `Notification` (needs you), `PreToolUse` matcher `AskUserQuestion` (needs your choice) |
+| Codex | `%CODEX_HOME%` or `~/.codex/hooks.json` | `Stop` (done), `PermissionRequest` (needs you) |
+
+Connecting only adds the missing entries; disconnecting removes only the entries
+that run `notify-tts.py`, everything else is preserved. Every write is parsed first
+(a malformed file is reported, never overwritten), backed up as
+`<file>.bak-<timestamp>`, and written atomically. The command reuses the
+interpreter + script of an existing notify-tts hook, else the app's
+`venv\Scripts\python.exe`; Codex gets `--source codex`. Codex runs a new hook only
+after you trust it: open `/hooks` in Codex and approve the two entries. Codex's
+`notify` key in `config.toml` is left alone (it holds a single program and is often
+already used).
+
+The `AskUserQuestion` hook is async, prints nothing and exits 0, so it never
+blocks, approves or answers the question. If Claude Code also sends a
+`Notification` for the same pending question, a Notification from the same
+session within 20 s of the question is not spoken (marker
+`~/.claude/cache/tts/notify_question.json`). A 1.0.7 connection (three events)
+shows as unticked: tick it again to add the question hook.
+
+Manual alternative for Claude Code, add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -144,12 +170,30 @@ Add to `~/.claude/settings.json`:
 ## Launch
 
 ```bash
-# Option 1: Batch file
+# Option 1: Batch file (no console window: runs venv\Scripts\pythonw.exe)
 .\VoiceBridge.bat
 
-# Option 2: Direct
+# Option 2: Direct, with a console showing the live log
 .\venv\Scripts\python.exe -m src.voice_bridge
 ```
+
+- **Single instance:** a second launch exits by itself while a bridge is running
+  (named mutex); it never kills the running one. The log is `voicebridge.log`.
+- **Crash relaunch:** the launched process is a supervisor that runs the bridge as a
+  child and relaunches it if it exits with an error (max 3 relaunches in 5 minutes,
+  then it stops and logs `supervisor_gave_up`). *Exit* from the tray is not relaunched.
+- **Start at sign-in:** tray menu > *Avvio automatico all'accesso* (or the installer's
+  "Start when I sign in" option) registers a per-user Task Scheduler task
+  `parlaconclaudio-voice-bridge`: at logon, no admin, no time limit, restart on
+  failure. Not a Windows Service on purpose: services run in session 0, where there
+  is no hotkey, clipboard, tray or per-user microphone. Manage it by hand with
+  `.\venv\Scripts\python.exe -m src.voice_bridge.autostart enable|disable|status`.
+  If the task cannot be registered (access denied, schtasks/Task Scheduler error)
+  the same start is written as the per-user value `parlaconclaudio-voice-bridge`
+  under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (it runs
+  `scripts\start_voice_bridge.py`, which starts the same supervisor). The tray tick
+  is on when either is present, turning it off removes both, and so does the
+  uninstaller; the mechanism used is shown in the tray notification and logged.
 
 ## How to Use
 
@@ -262,7 +306,7 @@ src/core/audio_capture/    # Audio Capture
   drivers/portaudio_driver.py
 
 scripts/
-  notify-tts.py            # Claude Code TTS hook
+  notify-tts.py            # Claude Code + Codex TTS hook
   download_packs.py        # Sound pack downloader
   generate_manifests.py    # Manifest generator
 ```

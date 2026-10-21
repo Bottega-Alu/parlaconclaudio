@@ -30,13 +30,33 @@ class KEYBDINPUT(ctypes.Structure):
         ("wScan", ctypes.wintypes.WORD),
         ("dwFlags", ctypes.wintypes.DWORD),
         ("time", ctypes.wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
+
+
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", ctypes.wintypes.LONG),
+        ("dy", ctypes.wintypes.LONG),
+        ("mouseData", ctypes.wintypes.DWORD),
+        ("dwFlags", ctypes.wintypes.DWORD),
+        ("time", ctypes.wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
+
+
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", ctypes.wintypes.DWORD),
+        ("wParamL", ctypes.wintypes.WORD),
+        ("wParamH", ctypes.wintypes.WORD),
     ]
 
 
 class INPUT(ctypes.Structure):
     class _INPUT(ctypes.Union):
-        _fields_ = [("ki", KEYBDINPUT)]
+        # The mouse member determines the native union size even for keys.
+        _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT), ("hi", HARDWAREINPUT)]
 
     _fields_ = [
         ("type", ctypes.wintypes.DWORD),
@@ -51,17 +71,26 @@ def _send_key(vk: int, up: bool = False) -> None:
     inp._input.ki.wVk = vk
     inp._input.ki.dwFlags = KEYEVENTF_KEYUP if up else 0
     inp._input.ki.time = 0
-    inp._input.ki.dwExtraInfo = ctypes.pointer(ctypes.c_ulong(0))
-    ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+    inp._input.ki.dwExtraInfo = 0
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    send_input = user32.SendInput
+    send_input.argtypes = [ctypes.wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+    send_input.restype = ctypes.wintypes.UINT
+    if send_input(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
+        raise OSError(ctypes.get_last_error(), "Windows non ha accettato il tasto simulato")
 
 
 def _send_ctrl_v() -> None:
     """Simulate Ctrl+V key press."""
     _send_key(VK_CONTROL)
-    _send_key(VK_V)
-    time.sleep(0.02)
-    _send_key(VK_V, up=True)
-    _send_key(VK_CONTROL, up=True)
+    try:
+        _send_key(VK_V)
+        try:
+            time.sleep(0.02)
+        finally:
+            _send_key(VK_V, up=True)
+    finally:
+        _send_key(VK_CONTROL, up=True)
 
 
 def _send_enter() -> None:

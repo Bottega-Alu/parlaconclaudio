@@ -1,5 +1,5 @@
 """
-Claude Code Hook Handler - Smart TTS Notifications v2.0
+Claude Code + Codex Hook Handler - Smart TTS Notifications v2.1
 
 Features:
 - Data-driven sound packs with manifest.json (auto-discovery)
@@ -8,6 +8,17 @@ Features:
 - Automatic TTS cache cleanup (TTL + size cap)
 
 Voice and settings read from ~/.claude/cache/tts/tts_config.json
+
+Input (decision tree in read_event):
+  1. a JSON object as a command-line argument -> legacy Codex `notify` program
+     ({"type": "agent-turn-complete", "cwd": ..., ...})
+  2. JSON on stdin + `--source codex`         -> Codex hooks engine (Stop,
+     PermissionRequest), translated to the Claude-shaped event below
+  3. JSON on stdin                            -> Claude Code hook (Stop,
+     Notification, TaskCompleted, PreToolUse with matcher AskUserQuestion)
+Nothing is ever written to stdout: a Codex Stop hook must print JSON or nothing,
+and a PreToolUse hook's stdout JSON could be read as a permission decision.
+The process always exits 0 (never blocks a tool).
 """
 
 import asyncio
@@ -51,6 +62,17 @@ BURST_WAIT_MS = 300
 # subagents finishing within a couple of seconds collapses to a single
 # voice line instead of overlapping into cacophony.
 SUBAGENT_BURST_WAIT_MS = 1500
+
+# "Claudio ha bisogno di una tua scelta" (PreToolUse/AskUserQuestion) vs the Notification
+# Claude Code may send for the same pending prompt about six seconds later (its
+# "needs your input" gate): the burst file above is last-wins over 300 ms and
+# cannot span that gap, so the question leaves a marker {session_id, ts} and a
+# Notification of the SAME session within QUESTION_DEDUP_S stays silent.
+# auth_success is never suppressed (it is not about the question).
+QUESTION_MARK_FILE = CACHE_DIR / "notify_question.json"
+QUESTION_DEDUP_S = 20
+ASK_USER_QUESTION = "AskUserQuestion"
+QUESTION_PHRASE = "ha bisogno di una tua scelta."
 SUBAGENT_PHRASE = "Subagente terminato."
 
 # Cache cleanup settings
@@ -467,13 +489,50 @@ def resolve_audio(text: str, profile: dict) -> str | None:
 # EXTRACTORS
 # ══════════════════════════════════════════════════
 
+GIT_EXE = "git"
+GIT_TIMEOUT_S = 1.5
+
+
+def _git(cwd: str, *args: str) -> str | None:
+    """stdout of `git -C <cwd> <args>`, or None on any failure (no git, not a
+    repo, timeout, dubious ownership...). Never raises: the hook must not fail."""
+    try:
+        out = subprocess.run(
+            [GIT_EXE, "-C", cwd, *args],
+            capture_output=True, text=True, timeout=GIT_TIMEOUT_S,
+            stdin=subprocess.DEVNULL, creationflags=0x08000000,  # CREATE_NO_WINDOW
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    value = out.stdout.strip() if out.returncode == 0 else ""
+    return value or None
+
+
+def git_main_repo_root(cwd: str) -> Path | None:
+    """Root of the MAIN repository, also from a subfolder or a linked worktree.
+
+    --git-common-dir is the main repo's .git even inside a worktree, so its
+    parent is the main checkout. When the common dir is not a ".git" folder
+    (bare repo, submodule under .git/modules/) fall back to --show-toplevel.
+    """
+    common = _git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common and Path(common).name.lower() == ".git":
+        return Path(common).parent
+    top = _git(cwd, "rev-parse", "--show-toplevel")
+    return Path(top) if top else None
+
+
+UNKNOWN_REPO = "sconosciuto"
+
+
 def extract_repo_name(data: dict) -> str:
     cwd = data.get("cwd") or data.get("working_directory") or os.environ.get("CLAUDE_CWD") or os.getcwd()
     if cwd:
-        name = Path(cwd).name
+        root = git_main_repo_root(cwd) if os.path.isdir(cwd) else None
+        name = (root or Path(cwd)).name
         if name and name.lower() not in ("", "users", "fra", "home", "c:\\"):
             return name
-    return "sconosciuto"
+    return UNKNOWN_REPO
 
 
 def extract_task_detail(data: dict) -> str:
@@ -573,48 +632,45 @@ _TASK_DEFAULT = {
     "simple": "Task completata.",
 }
 
-# Stop: richer context-aware messages
-_STOP_TEMPLATES = {
-    "testing": {
-        "detail": "Progetto {repo}. Test completati. {detail}{plan_info}",
-        "no_detail": "Progetto {repo}. Sessione di test terminata.{plan_info}",
-    },
-    "fixing": {
-        "detail": "Progetto {repo}. Bug risolto. {detail}{plan_info}",
-        "no_detail": "Progetto {repo}. Fix completato.{plan_info}",
-    },
-    "deploying": {
-        "detail": "Progetto {repo}. Deploy eseguito. {detail}{plan_info}",
-        "no_detail": "Progetto {repo}. Rilascio completato.{plan_info}",
-    },
-    "refactoring": {
-        "detail": "Progetto {repo}. Refactoring concluso. {detail}{plan_info}",
-        "no_detail": "Progetto {repo}. Codice rifattorizzato.{plan_info}",
-    },
-    "creating": {
-        "detail": "Progetto {repo}. Implementazione completata. {detail}{plan_info}",
-        "no_detail": "Progetto {repo}. Nuova funzionalita' pronta.{plan_info}",
-    },
-    "researching": {
-        "detail": "Progetto {repo}. Analisi completata. {detail}{plan_info}",
-        "no_detail": "Progetto {repo}. Ricerca conclusa.{plan_info}",
-    },
-}
+# Who is speaking. One sentence shape for every announcement, both agents:
+#   "Progetto <repo>, <who> <phrase>[ <extra>]"   e.g. "Progetto alpha, Claudio ha finito."
+# Unknown project (or one named like an agent) -> just "<who> <phrase>".
+SPEAKER_CLAUDE = "Claudio"   # Claude Code (name chosen by Frisco)
+SPEAKER_CODEX = "Codex"
+_NOT_A_PROJECT = {UNKNOWN_REPO, "claudio", "claude", "codex"}
 
-_STOP_DEFAULT = {
-    "detail": "Progetto {repo}. {detail}{plan_info}",
-    "hook_detail": "Progetto {repo}. Ciclo completato. {detail}{plan_info}",
-    "no_detail": "Progetto {repo}. Attivita' completata.{plan_info}",
-    "hook_no_detail": "Progetto {repo}. Ciclo completato.{plan_info}",
-}
 
-# Notification: context-aware
+def _is_project_name(repo: str) -> bool:
+    name = (repo or "").strip().lower().lstrip(".")
+    return bool(name) and name not in _NOT_A_PROJECT
+
+
+def announce(repo: str, who: str, phrase: str, extra: str = "") -> str:
+    lead = f"Progetto {repo}, {who}" if _is_project_name(repo) else who
+    text = f"{lead} {phrase}"
+    extra = (extra or "").strip()
+    return f"{text} {extra}" if extra else text
+
+
+# Stop: "<who> ha finito." + (activity label + task detail, when the payload has one)
+_STOP_ACTIVITY_LABEL = {
+    "testing": "Test completati.",
+    "fixing": "Bug risolto.",
+    "deploying": "Deploy eseguito.",
+    "refactoring": "Refactoring concluso.",
+    "creating": "Implementazione completata.",
+    "researching": "Analisi completata.",
+}
+STOP_PHRASE = "ha finito."
+STOP_HOOK_PHRASE = "ha finito un ciclo."
+
+# Notification: (phrase, keeps the detail?)
 _NOTIF_PHRASES = {
-    "permission_prompt": "Progetto {repo}. Ho bisogno del tuo permesso. {detail}",
-    "idle_prompt": "Progetto {repo}. In attesa del tuo input.",
-    "auth_success": "Progetto {repo}. Autenticazione completata.",
-    "elicitation_dialog": "Progetto {repo}. Ho una domanda. {detail}",
-    None: "Progetto {repo}. Notifica. {detail}",
+    "permission_prompt": ("ha bisogno del tuo permesso.", True),
+    "idle_prompt": ("ha bisogno del tuo aiuto.", False),
+    "elicitation_dialog": ("ha bisogno di una tua scelta.", True),
+    "auth_success": ("ha completato l'autenticazione.", False),
+    None: ("ti manda una notifica.", True),
 }
 
 
@@ -635,33 +691,19 @@ def build_task_message(completed: int, total: int, detail: str) -> str:
 
 
 def build_stop_message(sub_type: str | None, repo: str, plan_info: str,
-                       detail: str) -> str:
-    activity = _detect_activity_type(detail)
-    templates = _STOP_TEMPLATES.get(activity, {})
-
-    is_hook = sub_type == "hook_active"
-
+                       detail: str, who: str = SPEAKER_CLAUDE) -> str:
+    phrase = STOP_HOOK_PHRASE if sub_type == "hook_active" else STOP_PHRASE
+    extra = ""
     if detail:
-        if templates:
-            tmpl = templates.get("detail", _STOP_DEFAULT["detail"])
-        elif is_hook:
-            tmpl = _STOP_DEFAULT["hook_detail"]
-        else:
-            tmpl = _STOP_DEFAULT["detail"]
-        return tmpl.format(repo=repo, plan_info=plan_info, detail=detail)
-    else:
-        if templates:
-            tmpl = templates.get("no_detail", _STOP_DEFAULT["no_detail"])
-        elif is_hook:
-            tmpl = _STOP_DEFAULT["hook_no_detail"]
-        else:
-            tmpl = _STOP_DEFAULT["no_detail"]
-        return tmpl.format(repo=repo, plan_info=plan_info)
+        label = _STOP_ACTIVITY_LABEL.get(_detect_activity_type(detail), "")
+        extra = f"{label} {detail}".strip()
+    return announce(repo, who, phrase, extra) + (plan_info or "")
 
 
-def build_notif_message(sub_type: str | None, repo: str, detail: str) -> str:
-    template = _NOTIF_PHRASES.get(sub_type, _NOTIF_PHRASES[None])
-    return template.format(repo=repo, detail=detail)
+def build_notif_message(sub_type: str | None, repo: str, detail: str,
+                        who: str = SPEAKER_CLAUDE) -> str:
+    phrase, keeps_detail = _NOTIF_PHRASES.get(sub_type, _NOTIF_PHRASES[None])
+    return announce(repo, who, phrase, detail if keeps_detail else "")
 
 
 # ══════════════════════════════════════════════════
@@ -967,16 +1009,206 @@ def burst_check_should_play(wait_ms: int = BURST_WAIT_MS) -> bool:
     return latest == my_id
 
 
-def main() -> None:
+def mark_question(session_id: str | None, now: float | None = None) -> None:
+    if not session_id:
+        return
     try:
-        raw = sys.stdin.read()
-        if not raw.strip():
-            return
+        QUESTION_MARK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        QUESTION_MARK_FILE.write_text(
+            json.dumps({"session_id": session_id, "ts": time.time() if now is None else now}),
+            encoding="utf-8")
+    except OSError:
+        pass
+
+
+def question_just_announced(session_id: str | None, now: float | None = None) -> bool:
+    """True when this session's question was announced < QUESTION_DEDUP_S ago."""
+    if not session_id:
+        return False
+    try:
+        mark = json.loads(QUESTION_MARK_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(mark, dict) or mark.get("session_id") != session_id:
+        return False
+    ts = mark.get("ts")
+    now = time.time() if now is None else now
+    return isinstance(ts, (int, float)) and 0 <= now - ts < QUESTION_DEDUP_S
+
+
+# ══════════════════════════════════════════════════
+# INPUT: Claude Code hooks, Codex hooks, legacy Codex notify
+# ══════════════════════════════════════════════════
+
+SOURCE_CLAUDE = "claude"
+SOURCE_CODEX = "codex"
+
+def _source_from_argv(argv: list[str]) -> str:
+    """`--source codex` (as written by the tray / voice_hooks); default claude."""
+    for i, arg in enumerate(argv):
+        if arg == "--source" and i + 1 < len(argv):
+            return argv[i + 1].strip().lower()
+        if arg.startswith("--source="):
+            return arg.split("=", 1)[1].strip().lower()
+    return SOURCE_CLAUDE
+
+
+def _json_arg(argv: list[str]) -> dict | None:
+    """Legacy Codex `notify`: the event is a JSON object in the last argument."""
+    for arg in reversed(argv):
+        s = arg.strip()
+        if s.startswith("{"):
+            try:
+                obj = json.loads(s)
+            except json.JSONDecodeError:
+                return None
+            return obj if isinstance(obj, dict) else None
+    return None
+
+
+def _short(text: object, limit: int = 80) -> str:
+    if not isinstance(text, str):
+        return ""
+    t = " ".join(text.split()).rstrip(".")
+    return t[: limit - 3] + "..." if len(t) > limit else t
+
+
+def codex_to_event(data: dict) -> dict | None:
+    """Codex payload -> Claude-shaped event (hook_event_name Stop/Notification),
+    tagged agent=codex. Unknown/irrelevant events -> None (stay silent).
+
+      hooks  Stop               -> Stop        ("Codex ha finito")
+      hooks  PermissionRequest  -> Notification permission_prompt
+      notify agent-turn-complete-> Stop        (legacy `notify` program)
+    """
+    event = data.get("hook_event_name") or data.get("type") or ""
+    base = {"agent": SOURCE_CODEX, "cwd": data.get("cwd"), "session_id": data.get("session_id")}
+    if event in ("Stop", "agent-turn-complete"):
+        return {**base, "hook_event_name": "Stop", "stop_hook_active": bool(data.get("stop_hook_active"))}
+    if event == "PermissionRequest":
+        tool_input = data.get("tool_input") if isinstance(data.get("tool_input"), dict) else {}
+        detail = _short(tool_input.get("description")) or _short(data.get("tool_name"), 40)
+        return {**base, "hook_event_name": "Notification",
+                "notification_type": "permission_prompt", "message": detail}
+    return None
+
+
+def read_event(argv: list[str], read_stdin) -> tuple[str, dict] | None:
+    """(source, Claude-shaped event) or None. Decision tree:
+      1. JSON object in argv          -> legacy Codex notify
+      2. stdin JSON, --source codex   -> Codex hooks engine
+      3. stdin JSON                   -> Claude Code
+    """
+    legacy = _json_arg(argv)
+    if legacy is not None:
+        ev = codex_to_event(legacy)
+        return (SOURCE_CODEX, ev) if ev else None
+    try:
+        raw = read_stdin()
+    except Exception:
+        return None
+    if not raw or not raw.strip():
+        return None
+    try:
         data = json.loads(raw)
-    except (json.JSONDecodeError, Exception):
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if _source_from_argv(argv) == SOURCE_CODEX:
+        ev = codex_to_event(data)
+        return (SOURCE_CODEX, ev) if ev else None
+    return SOURCE_CLAUDE, data
+
+
+# Codex runs its hooks synchronously (see voice_hooks._HANDLER_OPTS): the hook
+# process hands the payload to a detached worker and exits at once, so the
+# turn is not held for synthesis + playback and `codex exec` shutting down
+# cannot kill the voice line.
+WORKER_FLAG = "--worker"
+_CREATE_NO_WINDOW = 0x08000000
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
+_CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+
+def _worker_python() -> tuple[str, dict[str, str]]:
+    """Keep this script standalone: installed hooks may live outside the app.
+
+    uv's venv pythonw.exe can itself be a console launcher. Prefer the base
+    GUI interpreter and tell it which venv to use, as the app launcher does.
+    CREATE_NO_WINDOW also protects the fallback console interpreter.
+    """
+    env = dict(os.environ)
+    env.pop("__PYVENV_LAUNCHER__", None)
+    env["PYTHONIOENCODING"] = "utf-8"
+    pythonw = Path(sys.base_prefix) / "pythonw.exe"
+    if pythonw.is_file():
+        launcher = Path(sys.prefix) / "Scripts" / "pythonw.exe"
+        if sys.prefix != sys.base_prefix and launcher.is_file():
+            env["__PYVENV_LAUNCHER__"] = str(launcher)
+        return str(pythonw), env
+    return sys.executable, env
+
+
+def spawn_detached_worker(argv: list[str], raw: str | None) -> bool:
+    """Re-run this script without a console, payload on its stdin.
+    Breakaway from the caller's job first (Codex's job allows it); if refused,
+    plain no-window (Codex preserves descendants of a hook that completed).
+    Never combine DETACHED_PROCESS with CREATE_NO_WINDOW: Windows ignores the
+    no-window flag in that combination, and a uv child can create a console.
+    False = could not spawn: the caller handles the event inline."""
+    python, env = _worker_python()
+    cmd = [python, os.path.abspath(__file__), *argv, WORKER_FLAG]
+    base = _CREATE_NO_WINDOW | _CREATE_NEW_PROCESS_GROUP
+    for flags in (base | _CREATE_BREAKAWAY_FROM_JOB, base):
+        try:
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, creationflags=flags,
+                                    env=env, close_fds=True)
+        except (OSError, ValueError):
+            continue
+        try:
+            proc.stdin.write((raw or "").encode("utf-8"))
+            proc.stdin.close()
+        except OSError:
+            pass
+        return True
+    return False
+
+
+def main(argv: list[str] | None = None, read_stdin=None, detach=None) -> None:
+    """detach: callable(argv, raw) -> bool, used for Codex events only (the
+    __main__ entry passes spawn_detached_worker; tests leave it None)."""
+    argv = sys.argv[1:] if argv is None else argv
+    if read_stdin is None:
+        read_stdin = (lambda: sys.stdin.read()) if sys.stdin is not None else (lambda: "")
+    captured: dict[str, str] = {}
+
+    def _read() -> str:
+        captured["raw"] = read_stdin()
+        return captured["raw"]
+
+    got = read_event(argv, _read)
+    if got is None:
+        return
+    source, data = got
+    if (source == SOURCE_CODEX and detach is not None and WORKER_FLAG not in argv
+            and detach(argv, captured.get("raw"))):
         return
 
     event_name = data.get("hook_event_name", "")
+
+    # PreToolUse: only AskUserQuestion speaks (a wider matcher stays silent).
+    # The marker is written before the burst check, so the dedup below works
+    # even if this line itself is swallowed by a burst.
+    if event_name == "PreToolUse":
+        if data.get("tool_name") != ASK_USER_QUESTION:
+            return
+        mark_question(data.get("session_id"))
+    elif (event_name == "Notification" and source == SOURCE_CLAUDE
+          and data.get("notification_type") != "auth_success"
+          and question_just_announced(data.get("session_id"))):
+        return
 
     # Per-event burst window: subagents (TaskCompleted) get the longer
     # window so clusters collapse to one voice line; Stop and
@@ -1001,6 +1233,7 @@ def main() -> None:
 
     sub_type = data.get("notification_type") or data.get("type") or data.get("sub_type")
     repo = extract_repo_name(data)
+    who = SPEAKER_CODEX if source == SOURCE_CODEX else SPEAKER_CLAUDE
     voice = get_voice()
     progress = 0.0
 
@@ -1008,13 +1241,17 @@ def main() -> None:
         plan_info = extract_plan_info(data)
         detail = extract_task_detail(data)
         stop_type = "hook_active" if data.get("stop_hook_active") else None
-        message = build_stop_message(stop_type, repo, plan_info, detail)
+        message = build_stop_message(stop_type, repo, plan_info, detail, who)
         chime_key = "stop"
         progress = 1.0  # Stop = end of session = max intensity
 
+    elif event_name == "PreToolUse":  # AskUserQuestion (filtered above)
+        message = announce(repo, who, QUESTION_PHRASE)
+        chime_key = "question"
+
     elif event_name == "Notification":
         detail = extract_notification_detail(data)
-        message = build_notif_message(sub_type, repo, detail)
+        message = build_notif_message(sub_type, repo, detail, who)
         chime_map = {
             "permission_prompt": "permission",
             "elicitation_dialog": "question",
@@ -1050,7 +1287,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     try:
-        main()
+        main(detach=spawn_detached_worker)
     except Exception:
         pass
     sys.exit(0)

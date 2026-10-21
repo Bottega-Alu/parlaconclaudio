@@ -4,20 +4,24 @@
 #   vb_bootstrap.exe       post-install runtime builder (installer/)
 #   parlaconclaudio-voice-bridge-Setup-<ver>.exe Inno Setup package        (installer/Output/) - optional
 #
-# Neither exe bundles the app: VoiceBridge.exe starts venv\Scripts\pythonw.exe,
+# Neither exe bundles the app: VoiceBridge.exe starts the venv's base pythonw.exe
+# (src/voice_bridge/gui_python.py, compiled in),
 # and vb_bootstrap.exe builds that venv on the target host. App code changes need
 # no rebuild here - only launcher/bootstrapper/icon changes do.
 #
 #   .\scripts\build_exe.ps1              # both exes
 #   .\scripts\build_exe.ps1 -Installer   # also compile the .iss (needs Inno Setup 6)
+#   .\scripts\build_exe.ps1 -Installer -Python C:\path\to\venv\Scripts\python.exe
+#                                        # e.g. from a git worktree, which has no venv\
 
 param(
-    [switch]$Installer
+    [switch]$Installer,
+    [string]$Python
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
-$Py   = Join-Path $Root "venv\Scripts\python.exe"
+$Py   = if ($Python) { $Python } else { Join-Path $Root "venv\Scripts\python.exe" }
 $Ico  = Join-Path $Root "assets\voicebridge.ico"
 $Work = Join-Path $Root ".work\pyinstaller"
 
@@ -47,6 +51,8 @@ Write-Host "`n=== 1/2  VoiceBridge.exe (launcher, no console)" -ForegroundColor 
     --distpath $Root `
     --workpath (Join-Path $Work "build") `
     --specpath $Work `
+    --paths $Root `
+    --hidden-import src.voice_bridge.gui_python `
     @CommonExcludes `
     --exclude-module ctranslate2 `
     --exclude-module pystray `
@@ -56,7 +62,8 @@ if ($LASTEXITCODE -ne 0) { throw "launcher build failed (exit $LASTEXITCODE)" }
 Write-Host "`n=== 2/2  vb_bootstrap.exe (installer helper, console visible)" -ForegroundColor Cyan
 # Console is intentional: pip output is the user's only diagnostic if a wheel fails.
 # gpu_probe is compiled IN so --probe-json works during the wizard, before the
-# payload is extracted to disk.
+# payload is extracted to disk. voice_hooks is imported at module load (shared
+# hook parsing with the app), so it must be compiled in for the same reason.
 & $Py -m PyInstaller `
     --onefile --noconfirm `
     --name vb_bootstrap `
@@ -66,6 +73,7 @@ Write-Host "`n=== 2/2  vb_bootstrap.exe (installer helper, console visible)" -Fo
     --specpath $Work `
     --paths $Root `
     --hidden-import src.core.gpu_probe `
+    --hidden-import src.core.voice_hooks `
     @CommonExcludes `
     --exclude-module ctranslate2 `
     (Join-Path $Root "installer\vb_bootstrap.py")
