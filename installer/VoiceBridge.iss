@@ -8,36 +8,36 @@
 ; Build:  ISCC.exe installer\VoiceBridge.iss
 ; Output: installer\Output\parlaconclaudio-voice-bridge-Setup-<version>.exe
 
-#define AppName        "parlaconclaudio - voice-bridge"
-#define AppVersion     "1.0.12"
+#define AppName        "parlaconclaudio - voice-bridge TEST"
+#define AppVersion     "1.0.13-test.1"
 #define AppPublisher   "Frisco"
 #define AppExeName     "VoiceBridge.exe"
 #define BootstrapExe   "vb_bootstrap.exe"
 ; Scheduled task that starts the bridge at sign-in. Same name as TASK_NAME in
 ; src/voice_bridge/autostart.py, which creates it (installer, tray toggle).
-#define AutostartTask  "parlaconclaudio-voice-bridge"
+#define AutostartTask  "parlaconclaudio-voice-bridge-test"
 
 [Setup]
-AppId={{7B3C1E42-9D5A-4F18-A6C7-2E8B4D1F9A03}
+AppId={{983D2492-73BD-4E41-92D3-A33EE16EA41D}
 AppName={#AppName}
 UninstallDisplayName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-VersionInfoVersion=1.0.12.0
+VersionInfoVersion=1.0.13.1
 
 ; Per-user install: no UAC prompt, and - crucially - the venv created after the
 ; install stays writable, so repair and upgrade never need elevation.
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ; Keep the stable application identity and reuse its previous install directory.
-DefaultDirName={localappdata}\Programs\VoiceBridge
+DefaultDirName={localappdata}\Programs\VoiceBridge-Test
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
 DisableWelcomePage=no
 
 OutputDir=Output
-OutputBaseFilename=parlaconclaudio-voice-bridge-Setup-{#AppVersion}
+OutputBaseFilename=parlaconclaudio-voice-bridge-TEST-Setup-{#AppVersion}
 SetupIconFile=..\assets\voicebridge.ico
 UninstallDisplayIcon={app}\assets\voicebridge.ico
 Compression=lzma2/max
@@ -66,7 +66,7 @@ Source: "..\sounds\*";       DestDir: "{app}\sounds";  Flags: ignoreversion recu
 Source: "..\assets\*";       DestDir: "{app}\assets";  Flags: ignoreversion
 Source: "..\README.md";      DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE";        DestDir: "{app}"; Flags: ignoreversion
-Source: "..\docs\releases\1.0.12.md"; DestDir: "{app}\docs\releases"; Flags: ignoreversion
+Source: "..\docs\TEST-1.0.13.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 ; Optional: drop uv.exe in installer\bin\ to make setup work fully offline-capable
 ; (minus the wheels themselves). Without it the bootstrapper fetches uv itself.
 Source: "bin\uv.exe";        DestDir: "{app}\bin"; Flags: ignoreversion skipifsourcedoesntexist
@@ -110,8 +110,8 @@ Type: files;          Name: "{app}\voicebridge.log"
 Type: files;          Name: "{app}\voicebridge_debug.log"
 
 [Messages]
-en.WelcomeLabel2=Dictate into the active application: press Ctrl+Alt+Space to start, then press it again to transcribe and paste.%n%nOpen the control panel from the tray icon to check status, microphone and engine. Use a supported NVIDIA GPU for local dictation or configure a cloud provider.%n%nOptional voice hooks announce when Claude Code or Codex finishes or needs your attention. Choose each integration separately on the next pages.%n%nClose any running version before upgrading. This installer updates the normal application; the previous TEST installation stays separate.
-it.WelcomeLabel2=Detta nell'applicazione attiva: premi Ctrl+Alt+Spazio per iniziare, poi di nuovo per trascrivere e incollare.%n%nApri il pannello dall'icona nella tray per controllare stato, microfono e motore. Usa una GPU NVIDIA compatibile per dettare in locale oppure configura un provider cloud.%n%nGli hook vocali opzionali avvisano quando Claude Code o Codex termina o richiede attenzione. Puoi scegliere separatamente i due collegamenti nelle prossime pagine.%n%nChiudi ogni versione in esecuzione prima di aggiornare. Il setup aggiorna l'app normale; l'installazione TEST precedente resta separata.
+en.WelcomeLabel2=Dictate into the active application: press Ctrl+Alt+Space to start, then press it again to transcribe and paste.%n%nOpen the control panel from the tray icon to check status, microphone and engine. Use a supported NVIDIA GPU for local dictation or configure a cloud provider.%n%nOptional voice hooks announce when Claude Code or Codex finishes or needs your attention. Choose each integration separately on the next pages.%n%nTEST preview: Windows 11-style tray quick controls. Close the stable app before starting TEST. This installs separately from stable 1.0.12.
+it.WelcomeLabel2=Detta nell'applicazione attiva: premi Ctrl+Alt+Spazio per iniziare, poi di nuovo per trascrivere e incollare.%n%nApri il pannello dall'icona nella tray per controllare stato, microfono e motore. Usa una GPU NVIDIA compatibile per dettare in locale oppure configura un provider cloud.%n%nGli hook vocali opzionali avvisano quando Claude Code o Codex termina o richiede attenzione. Puoi scegliere separatamente i due collegamenti nelle prossime pagine.%n%nAnteprima TEST: comandi rapidi della tray in stile Windows 11. Chiudi la versione stabile prima di avviare TEST. Installazione separata dalla stabile 1.0.12.
 
 [CustomMessages]
 en.StartupGroup=Windows sign-in
