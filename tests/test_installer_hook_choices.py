@@ -120,7 +120,8 @@ def test_installer_defaults_and_explicit_yes_no_forwarding():
         assert f"WizardIsTaskSelected('{task}')" in script
         assert f" --{arg}-hooks yes" in script
         assert f" --{arg}-hooks no" in script
-    assert "DefaultDirName={localappdata}\\Programs\\VoiceBridge-Test" in script
+    suffix = "-Test" if boot.IS_TEST_BUILD else ""
+    assert f"DefaultDirName={{localappdata}}\\Programs\\VoiceBridge{suffix}" in script
     assert "[InstallDelete]" not in script
 
 

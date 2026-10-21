@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "parlaconclaudio"
-version = "1.0.11a2"
+version = "1.0.12"
 description = "Voice bridge for Claude Code: push-to-talk STT + TTS notifications"
 authors = ["Fra"]
 license = "MIT"
