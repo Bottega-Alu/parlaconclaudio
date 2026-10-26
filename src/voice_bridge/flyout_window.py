@@ -41,8 +41,39 @@ def work_area():
     info = MonitorInfo(cbSize=ctypes.sizeof(MonitorInfo))
     monitor = user.MonitorFromPoint(point, 2)
     if user.GetMonitorInfoW(monitor, ctypes.byref(info)):
-        return info.work.left, info.work.top, info.work.right, info.work.bottom
+        area = [info.work.left, info.work.top, info.work.right, info.work.bottom]
+        return tuple(_without_autohide_taskbar(area, info.monitor))
     return 0, 0, user.GetSystemMetrics(0), user.GetSystemMetrics(1)
+
+
+def _without_autohide_taskbar(area, monitor):
+    """An auto-hide taskbar is not excluded from the work area, yet it pops
+    up over the flyout: keep its edge free, as Windows Quick Settings does."""
+    class AppBarData(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("hWnd", wintypes.HWND),
+                    ("uCallbackMessage", wintypes.UINT), ("uEdge", wintypes.UINT),
+                    ("rc", wintypes.RECT), ("lParam", wintypes.LPARAM)]
+
+    try:
+        shell = ctypes.WinDLL("shell32")
+        shell.SHAppBarMessage.argtypes = [wintypes.DWORD, ctypes.POINTER(AppBarData)]
+        shell.SHAppBarMessage.restype = ctypes.c_size_t
+        data = AppBarData(cbSize=ctypes.sizeof(AppBarData))
+        if not shell.SHAppBarMessage(4, ctypes.byref(data)) & 1:  # ABM_GETSTATE, ABS_AUTOHIDE
+            return area
+        if not shell.SHAppBarMessage(5, ctypes.byref(data)):  # ABM_GETTASKBARPOS
+            return area
+    except (AttributeError, OSError):
+        return area
+    rc = data.rc
+    if rc.right <= monitor.left or rc.left >= monitor.right or rc.bottom <= monitor.top or rc.top >= monitor.bottom:
+        return area  # taskbar lives on another monitor
+    size = (rc.right - rc.left) if data.uEdge in (0, 2) else (rc.bottom - rc.top)
+    index = {0: 0, 1: 1, 2: 2, 3: 3}.get(data.uEdge)  # left, top, right, bottom
+    if index is None:
+        return area
+    area[index] += size if index < 2 else -size
+    return area
 
 
 def finish_window(root, dark):

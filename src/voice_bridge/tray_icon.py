@@ -194,6 +194,27 @@ def _play_sound(filepath: str) -> None:
         pass
 
 
+def list_sound_packs() -> list[tuple[str, int]]:
+    """Installed sound packs as (name, mp3 count); "_"-prefixed dirs are private."""
+    if not SOUNDS_DIR.is_dir():
+        return []
+    return [(d.name, len(list(d.glob("*.mp3")))) for d in sorted(SOUNDS_DIR.iterdir())
+            if d.is_dir() and not d.name.startswith("_")]
+
+
+def preview_sound_pack(pack_name: str) -> bool:
+    """Play one random sound of a pack ("random" picks any pack); False if empty."""
+    import random
+    packs = [name for name, count in list_sound_packs() if count]
+    if pack_name == "random":
+        pack_name = random.choice(packs) if packs else ""
+    sounds = sorted((SOUNDS_DIR / pack_name).glob("*.mp3")) if pack_name else []
+    if not sounds:
+        return False
+    _play_sound(str(random.choice(sounds)))
+    return True
+
+
 # ══════════════════════════════════════════════════
 # ANIMATED MARBLE SPHERE ICON (original)
 # ══════════════════════════════════════════════════
@@ -554,18 +575,14 @@ class TrayIcon:
             checked=lambda item, selected=random_checked: selected,
             radio=True,
         ))
-        if SOUNDS_DIR.is_dir():
-            for pack_dir in sorted(SOUNDS_DIR.iterdir()):
-                if pack_dir.is_dir() and not pack_dir.name.startswith("_"):
-                    pack_name = pack_dir.name
-                    count = len(list(pack_dir.glob("*.mp3")))
-                    checked = (pack_name == current_pack)
-                    pack_items.append(pystray.MenuItem(
-                        f"{pack_name} ({count})",
-                        self._make_set_sound_pack(pack_name),
-                        checked=lambda item, selected=checked: selected,
-                        radio=True,
-                    ))
+        for pack_name, count in list_sound_packs():
+            checked = (pack_name == current_pack)
+            pack_items.append(pystray.MenuItem(
+                f"{pack_name} ({count})",
+                self._make_set_sound_pack(pack_name),
+                checked=lambda item, selected=checked: selected,
+                radio=True,
+            ))
 
         # --- TTS Mode submenu ---
         current_mode = config.get("tts_mode", "full")

@@ -1,7 +1,9 @@
-"""Lightweight quick controls, using the Windows 11 flyout visual language.
+"""Lightweight quick controls, using the Windows 11 Quick Settings visual language.
 
-The native menu remains available for all advanced features. Tk and all its
-variables belong to one dedicated thread; application actions run in workers.
+A grid of tiles opens list pages (sound packs, announcements, microphone,
+recognition) shaped like the Windows Wi-Fi list. The native menu remains
+available for all advanced features. Tk and all its variables belong to one
+dedicated thread; application actions run in workers.
 """
 import logging
 import queue
@@ -9,18 +11,36 @@ import threading
 
 from .menu_dpi import native_menu_dpi
 from . import flyout_window
+from . import fluent
+from .fluent import ICON
 
 logger = logging.getLogger(__name__)
 
+WIDTH = 380
+PAD = 16
+
+TTS_MODE_DETAILS = {
+    "full": "Suono e voce a ogni avviso",
+    "semi-silent": "Voce solo quando l'agente termina",
+    "silent": "Solo suoni, nessuna voce",
+}
+STT_MODE_DETAILS = {
+    "auto": "GPU locale se disponibile, altrimenti cloud",
+    "local": "Richiede una GPU NVIDIA compatibile",
+    "cloud_groq": "Richiede una chiave API Groq",
+    "cloud_deepgram": "Richiede una chiave API Deepgram",
+}
+STATE_LABELS = {"idle": "Pronto per dettare", "recording": "Registrazione in corso",
+                "transcribing": "Trascrizione in corso", "loading": "Caricamento del motore…",
+                "output": "Invio del testo…"}
+
 
 def _dark_mode():
-    try:
-        import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
-            return winreg.QueryValueEx(key, "AppsUseLightTheme")[0] == 0
-    except OSError:
-        return False
+    return fluent.dark_mode()
+
+
+def _short(text, limit=17):
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
 class TrayFlyout:
@@ -31,6 +51,14 @@ class TrayFlyout:
         self._thread = None
         self._working = False
         self._pending_actions = []
+        self._page = "main"
+        self._expanded = None
+        self._config = {}
+        self._muted = False
+        self.volume = 200
+        self._focus_key = None
+        self.mics = {}
+        self.packs = []
 
     def show(self):
         with self._lock:
@@ -56,6 +84,8 @@ class TrayFlyout:
     def _p(self, value):
         return round(value * self.scale)
 
+    # ── construction ────────────────────────────────────────────────
+
     def _build(self):
         import tkinter as tk
         self.root = tk.Tk()
@@ -63,205 +93,466 @@ class TrayFlyout:
         self.root.title("parlaconclaudio - Comandi rapidi")
         self.root.overrideredirect(True)
         self.root.protocol("WM_DELETE_WINDOW", self._hide)
-        self.root.bind("<Escape>", lambda event: self._hide())
+        self.root.bind("<Escape>", lambda event: self._escape())
         self.root.bind("<FocusOut>", lambda event: self.root.after(180, self._dismiss_if_outside))
+        self.root.bind("<MouseWheel>", self._wheel)
         self._dpi = flyout_window.window_dpi(self.root)
         self.scale = self._dpi / 96
         self._build_surface()
         self.root.after(150, self._tick)
 
     def _build_surface(self):
-        import tkinter as tk
-        from tkinter import ttk
-        from .tray_icon import STT_MODES
-        for child in self.root.winfo_children():
-            child.destroy()
         self.root.tk.call("tk", "scaling", self._dpi / 72)
         self.dark = _dark_mode()
-        self.colors = ({"surface": "#242424", "raised": "#303030", "text": "#ffffff",
-                        "muted": "#c5c5c5", "line": "#474747", "accent": "#60cdff", "on": "#003449"}
-                       if self.dark else
-                       {"surface": "#f7f7f7", "raised": "#ffffff", "text": "#1a1a1a",
-                        "muted": "#5c5c5c", "line": "#d6d6d6", "accent": "#0067c0", "on": "#ffffff"})
+        self.colors = fluent.colors(self.dark)
+        self.font = fluent.text_font(self.root)
+        self.icons = fluent.icon_font(self.root)
+        self.root.configure(bg=self.colors["surface"])
+        self._render()
+
+    def _render(self):
+        import tkinter as tk
+        for child in self.root.winfo_children():
+            child.destroy()
+        self._images = []
+        self.list_canvas = self.slider = None
+        self.record_tile = self.audio_tile = None
+        self.page = tk.Frame(self.root, bg=self.colors["surface"])
+        self.page.pack(fill="both", expand=True)
+        if self._page == "main":
+            self._main_page()
+        else:
+            self._list_page()
+
+    def _glyph(self, parent, name, size=12, fg=None, bg=None):
+        import tkinter as tk
         c = self.colors
-        self.root.configure(bg=c["surface"])
-        self.font = "Segoe UI"
-        body = tk.Frame(self.root, bg=c["surface"], padx=self._p(24), pady=self._p(20))
+        if not self.icons:
+            return tk.Frame(parent, bg=bg or c["surface"], width=1)
+        return tk.Label(parent, text=ICON[name], font=(self.icons, size), fg=fg or c["text"],
+                        bg=bg or c["surface"])
+
+    def _icon_button(self, parent, name, hint, command, bg=None):
+        import tkinter as tk
+        c = self.colors
+        bg = bg or c["surface"]
+        button = tk.Button(parent, text=ICON[name] if self.icons else hint,
+                           font=(self.icons, 12) if self.icons else (self.font, 9),
+                           command=command, bg=bg, fg=c["text"], activebackground=c["hover"],
+                           activeforeground=c["text"], relief="flat", bd=0, cursor="hand2",
+                           padx=self._p(9), pady=self._p(5), highlightthickness=self._p(1),
+                           highlightbackground=bg, highlightcolor=c["accent"])
+        button.bind("<Enter>", lambda event: (button.configure(bg=c["hover"]), self._hint(hint)))
+        button.bind("<Leave>", lambda event: (button.configure(bg=bg), self._hint(None)))
+        return button
+
+    def _text_button(self, parent, text, command, primary=False, enabled=True):
+        import tkinter as tk
+        c = self.colors
+        bg, fg = (c["accent"], c["on"]) if primary else (c["hover"], c["text"])
+        return tk.Button(parent, text=text, command=command, font=(self.font, 9),
+                         bg=bg, fg=fg, activebackground=c["line"] if not primary else bg,
+                         activeforeground=fg, disabledforeground=c["subtle"],
+                         state="normal" if enabled else "disabled", relief="flat", bd=0,
+                         padx=self._p(14), pady=self._p(5), cursor="hand2",
+                         highlightthickness=self._p(1), highlightbackground=c["line"],
+                         highlightcolor=c["text"])
+
+    # ── main page: tiles, volume, footer ────────────────────────────
+
+    def _main_page(self):
+        import tkinter as tk
+        c = self.colors
+        body = tk.Frame(self.page, bg=c["surface"], padx=self._p(PAD), pady=self._p(PAD))
         body.pack(fill="both", expand=True)
         header = tk.Frame(body, bg=c["surface"])
         header.pack(fill="x")
-        tk.Label(header, text="parlaconclaudio", font=(self.font, 15, "bold"),
+        tk.Label(header, text="parlaconclaudio", font=(self.font, 12, "bold"),
                  fg=c["text"], bg=c["surface"]).pack(side="left")
-        self._flat_button(header, "Chiudi", self._hide, small=True).pack(side="right")
-        self.state = tk.StringVar(value="Pronto per dettare")
-        tk.Label(body, textvariable=self.state, font=(self.font, 10), fg=c["muted"],
-                 bg=c["surface"], anchor="w").pack(fill="x", pady=(self._p(3), self._p(18)))
-        tiles = tk.Frame(body, bg=c["surface"])
-        tiles.pack(fill="x")
-        tiles.columnconfigure((0, 1), weight=1, uniform="tiles")
-        self.record_tile = self._tile(tiles, "Dettatura\nAvvia", "wave", self._record)
-        self.record_tile[0].grid(row=0, column=0, sticky="ew", padx=(0, self._p(6)))
-        self.audio_tile = self._tile(tiles, "Audio\nAttivo", "speaker", self._mute)
-        self.audio_tile[0].grid(row=0, column=1, sticky="ew", padx=(self._p(6), 0))
-        volume_header = tk.Frame(body, bg=c["surface"])
-        volume_header.pack(fill="x", pady=(self._p(20), 0))
-        self.volume_text = tk.StringVar(value="125%")
-        tk.Label(volume_header, text="Volume notifiche", font=(self.font, 10), bg=c["surface"], fg=c["text"]).pack(side="left")
-        tk.Label(volume_header, textvariable=self.volume_text, font=(self.font, 10), bg=c["surface"], fg=c["muted"]).pack(side="right")
-        self.volume = 125
-        self.slider = tk.Canvas(body, bg=c["surface"], height=self._p(34), highlightthickness=0,
-                                takefocus=1, cursor="hand2")
-        self.slider.pack(fill="x", pady=(self._p(3), self._p(16)))
-        self.slider.bind("<Configure>", lambda event: self._draw_slider())
-        self.slider.bind("<Button-1>", self._slider_move)
-        self.slider.bind("<B1-Motion>", self._slider_move)
-        self.slider.bind("<ButtonRelease-1>", lambda event: self._save_volume())
-        self.slider.bind("<Left>", lambda event: self._slider_key(-5))
-        self.slider.bind("<Right>", lambda event: self._slider_key(5))
-        self.slider.bind("<FocusIn>", lambda event: self._draw_slider())
-        self.slider.bind("<FocusOut>", lambda event: self._draw_slider())
-        style = ttk.Style(self.root)
-        style.theme_use("clam")
-        style.configure("Flyout.TCombobox", foreground=c["text"], background=c["raised"],
-                        fieldbackground=c["raised"], arrowcolor=c["text"], bordercolor=c["line"],
-                        lightcolor=c["line"], darkcolor=c["line"], padding=self._p(8))
-        style.map("Flyout.TCombobox", fieldbackground=[("readonly", c["raised"])],
-                  foreground=[("readonly", c["text"])], selectbackground=[("readonly", c["raised"])],
-                  selectforeground=[("readonly", c["text"])])
-        self.root.option_add("*TCombobox*Listbox.font", (self.font, 10))
-        self.root.option_add("*TCombobox*Listbox.background", c["raised"])
-        self.root.option_add("*TCombobox*Listbox.foreground", c["text"])
-        self.root.option_add("*TCombobox*Listbox.selectBackground", c["accent"])
-        self.root.option_add("*TCombobox*Listbox.selectForeground", c["on"])
-        self.mic = tk.StringVar()
-        self.mode = tk.StringVar()
-        self.mic_box = self._selector(body, "Microfono", self.mic, self._mic_changed)
-        self.mode_box = self._selector(body, "Riconoscimento", self.mode, self._mode_changed)
-        self.mode_box.configure(values=list(STT_MODES.values()))
+        status = tk.Frame(body, bg=c["surface"])
+        status.pack(fill="x", pady=(self._p(4), self._p(14)))
+        self.status_dot = tk.Canvas(status, width=self._p(10), height=self._p(10),
+                                    bg=c["surface"], highlightthickness=0)
+        self.status_dot.pack(side="left", padx=(0, self._p(7)))
+        self.state = tk.StringVar(value=STATE_LABELS["idle"])
+        tk.Label(status, textvariable=self.state, font=(self.font, 9), fg=c["muted"],
+                 bg=c["surface"], anchor="w").pack(side="left")
+
+        grid = tk.Frame(body, bg=c["surface"])
+        grid.pack(fill="x")
+        grid.columnconfigure((0, 1, 2), weight=1, uniform="tiles")
+        config = self._config
+        pack = config.get("sound_pack", "r2d2")
+        mode = config.get("tts_mode", "full")
+        from .tray_icon import TTS_MODES, STT_MODES
+        mode_label = next((label for label, value in TTS_MODES.items() if value == mode), mode)
+        mic_label = next((name for name, value in self.mics.items()
+                          if value == config.get("mic_device_id")), "Predefinito")
+        specs = [
+            ("record", "mic", "Dettatura", "Avvia", self._record, None),
+            ("audio", "speaker", "Audio", "Attivo", self._mute, None),
+            ("packs", "music", "Suoni", "Casuale" if pack == "random" else fluent.pretty_pack(pack), None, "packs"),
+            ("voice", "chat", "Avvisi vocali", mode_label, None, "voice"),
+            ("mic", "mic", "Microfono", mic_label.split(" [")[0], None, "mic"),
+            ("engine", "chip", "Riconoscimento",
+             STT_MODES.get(config.get("stt_mode", "auto"), "").split(" (")[0], None, "engine"),
+        ]
+        self.tiles = {}
+        for index, (key, icon, title, value, action, page) in enumerate(specs):
+            cell = tk.Frame(grid, bg=c["surface"])
+            cell.grid(row=index // 3, column=index % 3, sticky="ew",
+                      padx=(0 if index % 3 == 0 else self._p(4), 0 if index % 3 == 2 else self._p(4)),
+                      pady=(0, self._p(10)))
+            self.tiles[key] = self._tile(cell, key, icon, title, value, action, page)
+        self.record_tile, self.audio_tile = self.tiles["record"], self.tiles["audio"]
+
+        volume = tk.Frame(body, bg=c["surface"])
+        volume.pack(fill="x", pady=(self._p(4), 0))
+        self.volume_icon = self._icon_button(volume, "mute" if self._muted else "speaker",
+                                             "Attiva o disattiva l'audio", self._mute)
+        self.volume_icon.pack(side="left")
+        self.volume_text = tk.StringVar(value=f"{self.volume}%")
+        tk.Label(volume, textvariable=self.volume_text, width=5, font=(self.font, 9),
+                 bg=c["surface"], fg=c["muted"], anchor="e").pack(side="right")
+        self.slider = fluent.Slider(volume, c, self.scale, self.volume, self._save_volume)
+        self.slider.listeners.append(lambda value: self.volume_text.set(f"{value}%"))
+        self.slider.canvas.pack(side="left", fill="x", expand=True, padx=(self._p(4), 0))
         self.engine = tk.StringVar()
-        tk.Label(body, textvariable=self.engine, font=(self.font, 9), fg=c["muted"], bg=c["surface"],
-                 anchor="w").pack(fill="x", pady=(self._p(8), self._p(18)))
-        actions = tk.Frame(body, bg=c["surface"])
-        actions.pack(fill="x")
-        self.files = self._flat_button(actions, "Trascrivi file", self._files)
-        self.files.pack(side="left")
-        self._flat_button(actions, "Impostazioni", self._settings).pack(side="right")
-        tk.Frame(body, bg=c["line"], height=self._p(1)).pack(fill="x", pady=self._p(17))
-        footer = tk.Frame(body, bg=c["surface"])
-        footer.pack(fill="x")
-        tk.Label(footer, text="Ctrl + Alt + Spazio", font=(self.font, 9), fg=c["muted"], bg=c["surface"]).pack(side="left")
-        self._flat_button(footer, "Menu completo", self._full_menu, small=True).pack(side="right")
-        self._refresh()
+        tk.Label(body, textvariable=self.engine, font=(self.font, 8), fg=c["subtle"],
+                 bg=c["surface"], anchor="w").pack(fill="x", pady=(self._p(6), 0))
 
-    def _flat_button(self, parent, text, command, small=False):
+        footer = tk.Frame(self.page, bg=c["footer"], padx=self._p(PAD - 4), pady=self._p(8))
+        footer.pack(fill="x", side="bottom")
+        tk.Frame(self.page, bg=c["line"], height=1).pack(fill="x", side="bottom")
+        self.hint = tk.StringVar()
+        self.keys = tk.Frame(footer, bg=c["footer"])
+        self.keys.pack(side="left", padx=(self._p(4), 0))
+        self.hint_label = tk.Label(footer, textvariable=self.hint, font=(self.font, 9),
+                                   fg=c["muted"], bg=c["footer"])
+        for index, key in enumerate(("Ctrl", "Alt", "Spazio")):
+            if index:
+                tk.Label(self.keys, text="+", font=(self.font, 8), fg=c["subtle"],
+                         bg=c["footer"]).pack(side="left", padx=self._p(2))
+            tk.Label(self.keys, text=key, font=(self.font, 8), fg=c["text"], bg=c["raised"],
+                     padx=self._p(6), pady=self._p(1), highlightthickness=1,
+                     highlightbackground=c["line"]).pack(side="left")
+        self._icon_button(footer, "list", "Menu completo", self._full_menu, c["footer"]).pack(side="right")
+        self._icon_button(footer, "settings", "Impostazioni", self._settings, c["footer"]).pack(side="right")
+        self.files = self._icon_button(footer, "file", "Trascrivi file audio", self._files, c["footer"])
+        self.files.pack(side="right")
+        self._paint_status()
+
+    def _hint(self, text):
+        if self._page != "main":
+            return
+        if text:
+            self.keys.pack_forget()
+            self.hint.set(text)
+            self.hint_label.pack(side="left", padx=(self._p(4), 0))
+        else:
+            self.hint_label.pack_forget()
+            self.keys.pack(side="left", padx=(self._p(4), 0))
+
+    def _tile(self, cell, key, icon, title, value, action, page):
+        """Quick Settings tile: rounded button above a two-line caption."""
         import tkinter as tk
         c = self.colors
-        return tk.Button(parent, text=text, command=command, font=(self.font, 9 if small else 10),
-                         bg=c["surface"] if small else c["raised"], fg=c["muted"] if small else c["text"],
-                         activebackground=c["raised"], activeforeground=c["text"], relief="flat", bd=0,
-                         padx=self._p(6 if small else 14), pady=self._p(5 if small else 9),
-                         highlightthickness=self._p(1), highlightbackground=c["surface"] if small else c["line"],
-                         highlightcolor=c["accent"], cursor="hand2")
+        canvas = tk.Canvas(cell, height=self._p(48), bg=c["surface"], highlightthickness=0,
+                           takefocus=1, cursor="hand2")
+        canvas.pack(fill="x")
+        tile = {"key": key, "canvas": canvas, "icon": icon, "active": False, "hover": False,
+                "page": page, "action": action, "enabled": True}
+        tile["title"] = tk.Label(cell, text=title, font=(self.font, 9), fg=c["text"], bg=c["surface"])
+        tile["title"].pack(pady=(self._p(5), 0))
+        tile["value"] = tk.Label(cell, text=_short(value), font=(self.font, 8), fg=c["subtle"], bg=c["surface"])
+        tile["value"].pack()
+        def activate(event=None):
+            if not tile["enabled"]:
+                return
+            if tile["page"]:
+                self._open_page(tile["page"])
+            else:
+                tile["action"]()
+        canvas.bind("<Button-1>", activate)
+        canvas.bind("<Return>", activate)
+        canvas.bind("<space>", activate)
+        canvas.bind("<Configure>", lambda event: self._paint_tile(tile, tile["active"]))
+        canvas.bind("<FocusIn>", lambda event: self._paint_tile(tile, tile["active"]))
+        canvas.bind("<FocusOut>", lambda event: self._paint_tile(tile, tile["active"]))
+        canvas.bind("<Enter>", lambda event: (tile.update(hover=True), self._paint_tile(tile, tile["active"])))
+        canvas.bind("<Leave>", lambda event: (tile.update(hover=False), self._paint_tile(tile, tile["active"])))
+        return tile
 
-    def _tile(self, parent, text, icon, command):
-        import tkinter as tk
-        canvas = tk.Canvas(parent, height=self._p(96), bg=self.colors["surface"], highlightthickness=0)
-        button = tk.Button(canvas, text=text, command=command, font=(self.font, 10),
-                           relief="flat", bd=0, highlightthickness=0, cursor="hand2", compound="top")
-        button.place(x=self._p(10), y=self._p(9), relwidth=1, width=-self._p(20), height=self._p(78))
-        record = [canvas, button, icon, False, None, None]
-        canvas.bind("<Configure>", lambda event: self._paint_tile(record, record[3]))
-        button.bind("<FocusIn>", lambda event: self._paint_tile(record, record[3], True))
-        button.bind("<FocusOut>", lambda event: self._paint_tile(record, record[3]))
-        return record
-
-    def _paint_tile(self, tile, selected, focused=False):
-        from PIL import Image, ImageDraw, ImageTk
-        canvas, button, icon = tile[:3]
-        tile[3] = selected
+    def _paint_tile(self, tile, selected, focused=None):
         c = self.colors
-        bg, fg = (c["accent"], c["on"]) if selected else (c["raised"], c["text"])
-        w, h = max(canvas.winfo_width(), self._p(145)), self._p(96)
-        image = Image.new("RGB", (w * 2, h * 2), c["surface"])
-        draw = ImageDraw.Draw(image)
-        draw.rounded_rectangle((1, 1, w * 2 - 2, h * 2 - 2), radius=self._p(10) * 2,
-                               fill=bg, outline=c["accent"] if focused else (bg if selected else c["line"]),
-                               width=2 if focused else 1)
-        tile[4] = ImageTk.PhotoImage(image.resize((w, h), Image.Resampling.LANCZOS), master=self.root)
+        canvas = tile["canvas"]
+        if not canvas.winfo_exists():
+            return
+        tile["active"] = selected
+        if focused is None:
+            focused = self.root.focus_get() is canvas
+        w, h = max(canvas.winfo_width(), self._p(100)), self._p(48)
+        if selected:
+            fill, fg, outline = c["accent"], c["on"], c["accent"]
+        else:
+            fill, fg, outline = (c["hover"] if tile["hover"] else c["raised"]), c["text"], c["line"]
+        if not tile["enabled"]:
+            fg = c["subtle"]
+        image = fluent.rounded(self.root, w, h, self._p(6), fill, c["text"] if focused else outline)
+        tile["image"] = image
         canvas.delete("all")
-        canvas.create_image(0, 0, image=tile[4], anchor="nw")
-        icon_size = self._p(22)
-        icon_image = Image.new("RGB", (icon_size * 3, icon_size * 3), bg)
-        draw = ImageDraw.Draw(icon_image)
-        factor = icon_size * 3 / 24
-        points = ([(3, 12), (6, 12), (8, 5), (11, 19), (14, 3), (17, 16), (19, 12), (22, 12)]
-                  if icon == "wave" else [(3, 9), (7, 9), (12, 5), (12, 19), (7, 15), (3, 15), (3, 9)])
-        draw.line([(round(x * factor), round(y * factor)) for x, y in points], fill=fg,
-                  width=max(2, round(1.5 * factor)), joint="curve")
-        if icon == "speaker":
-            draw.arc((13 * factor, 5 * factor, 23 * factor, 19 * factor), -65, 65, fill=fg, width=max(2, round(1.5 * factor)))
-        tile[5] = ImageTk.PhotoImage(icon_image.resize((icon_size, icon_size), Image.Resampling.LANCZOS), master=self.root)
-        button.configure(bg=bg, fg=fg, activebackground=bg, activeforeground=fg, image=tile[5])
+        canvas.create_image(0, 0, image=image, anchor="nw")
+        glyph = tile["icon"]
+        if tile["key"] == "audio" and not selected:
+            glyph = "mute"
+        if tile["key"] == "record" and selected:
+            glyph = "mic_on"
+        if self.icons:
+            if tile["page"]:
+                canvas.create_text(w * 0.38, h / 2, text=ICON[glyph], font=(self.icons, 13), fill=fg)
+                canvas.create_line(w * 0.68, h * 0.3, w * 0.68, h * 0.7, fill=c["line"] if not selected else fg)
+                canvas.create_text(w * 0.84, h / 2, text=ICON["next"], font=(self.icons, 8), fill=fg)
+            else:
+                canvas.create_text(w / 2, h / 2, text=ICON[glyph], font=(self.icons, 13), fill=fg)
+        else:
+            canvas.create_text(w / 2, h / 2, text=tile["title"]["text"], font=(self.font, 9), fill=fg)
 
-    def _selector(self, body, label, variable, action):
-        import tkinter as tk
-        from tkinter import ttk
-        c = self.colors
-        tk.Label(body, text=label, font=(self.font, 10), fg=c["text"], bg=c["surface"],
-                 anchor="w").pack(fill="x", pady=(self._p(8), self._p(5)))
-        box = ttk.Combobox(body, textvariable=variable, state="readonly", font=(self.font, 10),
-                           style="Flyout.TCombobox", width=1)
-        box.pack(fill="x")
-        box.bind("<<ComboboxSelected>>", action)
-        return box
-
-    def _refresh(self):
-        from .tray_icon import _load_config, STT_MODES
-        config = _load_config()
-        self._muted = bool(config.get("muted", False))
-        self.volume = max(0, min(300, int(config.get("volume", 200))))
-        self.volume_text.set(f"{self.volume}%")
-        self._paint_tile(self.audio_tile, not self._muted)
-        self.audio_tile[1].configure(text="Audio\n" + ("Disattivato" if self._muted else "Attivo"))
-        self.mics = {"Predefinito di Windows": None}
-        self.mics.update({f"{d.name} [{d.device_id}]": d.device_id for d in self.tray._list_mics()})
-        self.mic_box.configure(values=list(self.mics))
-        self.mic.set(next((name for name, value in self.mics.items() if value == config.get("mic_device_id")), "Predefinito di Windows"))
-        self.mode.set(STT_MODES.get(config.get("stt_mode", "auto"), STT_MODES["auto"]))
-        self._draw_slider()
-        self._update_state()
-
-    def _draw_slider(self):
-        if not self.slider.winfo_exists():
+    def _paint_status(self):
+        if not getattr(self, "status_dot", None) or not self.status_dot.winfo_exists():
             return
         c = self.colors
-        self.slider.delete("all")
-        width = max(self.slider.winfo_width(), self._p(300))
-        x0, x1, y = self._p(10), width - self._p(10), self._p(17)
-        x = x0 + (x1 - x0) * self.volume / 300
-        self.slider.create_line(x0, y, x1, y, fill=c["line"], width=self._p(4), capstyle="round")
-        self.slider.create_line(x0, y, x, y, fill=c["accent"], width=self._p(4), capstyle="round")
-        radius = self._p(7)
-        self.slider.create_oval(x - radius, y - radius, x + radius, y + radius,
-                                fill=c["accent"], outline=c["raised"], width=self._p(3))
-        if self.root.focus_get() is self.slider:
-            self.slider.create_rectangle(1, 1, width - 1, self._p(33), outline=c["accent"], dash=(2, 3))
+        state = self.tray._state
+        color = {"recording": c["rec"], "transcribing": c["busy"], "loading": c["busy"],
+                 "output": c["busy"]}.get(state, c["ok"])
+        if getattr(self.tray, "batch_busy", False):
+            color = c["busy"]
+        size = self._p(8)
+        self.status_dot.delete("all")
+        self.status_dot.create_oval(1, 1, size, size, fill=color, outline="")
 
-    def _slider_move(self, event):
-        self.slider.focus_set()
-        start, end = self._p(10), self.slider.winfo_width() - self._p(10)
-        self.volume = max(0, min(300, round((event.x - start) / max(1, end - start) * 300)))
-        self.volume_text.set(f"{self.volume}%")
-        self._draw_slider()
+    # ── list pages, shaped like the Windows Wi-Fi list ──────────────
 
-    def _slider_key(self, step):
-        self.volume = max(0, min(300, self.volume + step))
-        self.volume_text.set(f"{self.volume}%")
-        self._draw_slider()
-        self._save_volume()
+    def _page_spec(self, page):
+        from .tray_icon import TTS_MODES, STT_MODES
+        config = self._config
+        if page == "packs":
+            items = [("random", "Casuale", "Un pacchetto diverso a ogni avviso", "shuffle")]
+            items += [(name, fluent.pretty_pack(name), f"{count} suoni", "music")
+                      for name, count in self.packs]
+            return ("Pacchetti suoni", items, config.get("sound_pack", "r2d2"), True,
+                    "Ogni avviso di Claude Code e Codex usa un suono del pacchetto scelto.")
+        if page == "voice":
+            items = [(value, label, TTS_MODE_DETAILS.get(value, ""), "chat")
+                     for label, value in TTS_MODES.items()]
+            return ("Avvisi vocali", items, config.get("tts_mode", "full"), False,
+                    "Come vengono annunciati la fine di un'attività e le richieste di permesso.")
+        if page == "mic":
+            items = [(value, name.split(" [")[0], "Segue l'impostazione di Windows" if value is None
+                      else f"Dispositivo {value}", "mic") for name, value in self.mics.items()]
+            return ("Microfono", items, config.get("mic_device_id"), False,
+                    "Il dispositivo usato per la dettatura.")
+        items = [(key, label.split(" (")[0], STT_MODE_DETAILS.get(key, ""), "cloud" if key.startswith("cloud") else "chip")
+                 for key, label in STT_MODES.items()]
+        return ("Riconoscimento", items, config.get("stt_mode", "auto"), False,
+                "Dove viene trascritta la voce.")
 
-    def _save_volume(self):
-        value = self.volume
+    def _list_page(self):
+        import tkinter as tk
+        c = self.colors
+        title, items, current, expandable, note = self._page_spec(self._page)
+        header = tk.Frame(self.page, bg=c["surface"], padx=self._p(PAD - 6), pady=self._p(12))
+        header.pack(fill="x")
+        back = self._icon_button(header, "back", "Indietro", self._back)
+        back.pack(side="left")
+        tk.Label(header, text=title, font=(self.font, 12, "bold"), fg=c["text"],
+                 bg=c["surface"]).pack(side="left", padx=(self._p(6), 0))
+        tk.Label(self.page, text=note, font=(self.font, 8), fg=c["subtle"], bg=c["surface"],
+                 anchor="w", justify="left", wraplength=self._p(WIDTH - 3 * PAD)).pack(
+                     fill="x", padx=self._p(PAD), pady=(0, self._p(8)))
+        holder = tk.Frame(self.page, bg=c["surface"], padx=self._p(PAD - 8))
+        holder.pack(fill="both", expand=True)
+        row_h = 52
+        visible = min(len(items) + (1 if expandable and self._expanded is not None else 0), 7)
+        self.list_canvas = tk.Canvas(holder, bg=c["surface"], highlightthickness=0,
+                                     height=self._p(visible * row_h + 8))
+        self.list_canvas.pack(fill="both", expand=True)
+        rows = tk.Frame(self.list_canvas, bg=c["surface"])
+        window = self.list_canvas.create_window(0, 0, window=rows, anchor="nw")
+        rows.bind("<Configure>", lambda event: self.list_canvas.configure(
+            scrollregion=self.list_canvas.bbox("all")))
+        self.list_canvas.bind("<Configure>", lambda event: self.list_canvas.itemconfigure(
+            window, width=event.width))
+        self.rows = []
+        for key, label, detail, icon in items:
+            self.rows.append(self._row(rows, key, label, detail, icon, key == current, expandable))
+        footer = tk.Frame(self.page, bg=c["footer"], padx=self._p(PAD - 4), pady=self._p(8))
+        footer.pack(fill="x", side="bottom")
+        tk.Frame(self.page, bg=c["line"], height=1).pack(fill="x", side="bottom")
+        link = tk.Label(footer, text="Altre impostazioni", font=(self.font, 9, "underline"),
+                        fg=c["accent"], bg=c["footer"], cursor="hand2", takefocus=1)
+        link.pack(side="left", padx=(self._p(4), 0), pady=self._p(5))
+        link.bind("<Button-1>", lambda event: self._settings())
+        link.bind("<Return>", lambda event: self._settings())
+
+    def _row(self, parent, key, label, detail, icon, current, expandable):
+        import tkinter as tk
+        c = self.colors
+        expanded = expandable and self._expanded == key
+        base = c["raised"] if (current or expanded) else c["surface"]
+        frame = tk.Frame(parent, bg=base, cursor="hand2", takefocus=1,
+                         highlightthickness=1, highlightbackground=base, highlightcolor=c["text"])
+        frame.pack(fill="x", pady=(0, self._p(2)))
+        bar = tk.Frame(frame, bg=c["accent"] if current else base, width=self._p(3))
+        bar.pack(side="left", fill="y", pady=self._p(12))
+        content = tk.Frame(frame, bg=base, padx=self._p(10), pady=self._p(8))
+        content.pack(side="left", fill="x", expand=True)
+        top = tk.Frame(content, bg=base)
+        top.pack(fill="x")
+        glyph = self._glyph(top, icon, 13, c["accent"] if current else c["text"], base)
+        glyph.pack(side="left", padx=(0, self._p(12)))
+        texts = tk.Frame(top, bg=base)
+        texts.pack(side="left", fill="x", expand=True)
+        tk.Label(texts, text=label, font=(self.font, 10, "bold" if current else "normal"),
+                 fg=c["text"], bg=base, anchor="w").pack(fill="x")
+        tk.Label(texts, text=("In uso · " + detail) if current and expandable else detail,
+                 font=(self.font, 8), fg=c["muted"], bg=base, anchor="w").pack(fill="x")
+        if current and not expandable:
+            self._glyph(top, "check", 11, c["accent"], base).pack(side="right")
+        widgets = [frame, bar, content, top, glyph, texts] + list(texts.winfo_children())
+        if expanded:
+            actions = tk.Frame(content, bg=base)
+            actions.pack(fill="x", pady=(self._p(10), self._p(2)))
+            use = self._text_button(actions, "In uso" if current else "Usa",
+                                    lambda: self._select(key), primary=True, enabled=not current)
+            use.pack(side="right")
+            listen = self._text_button(actions, "Ascolta", lambda: self._preview(key))
+            listen.pack(side="right", padx=(0, self._p(8)))
+        def click(event=None):
+            if expandable:
+                self._toggle_row(key)
+            else:
+                self._select(key)
+        def hover(on):
+            if current or expanded:
+                return
+            for widget in widgets:
+                if widget is not bar and widget.winfo_exists():
+                    widget.configure(bg=c["hover"] if on else base)
+        for widget in widgets:
+            if widget is not bar:
+                widget.bind("<Button-1>", click)
+                widget.bind("<Enter>", lambda event: hover(True))
+                widget.bind("<Leave>", lambda event: hover(False))
+        frame.bind("<Return>", click)
+        frame.bind("<space>", click)
+        frame.bind("<FocusIn>", lambda event: self._scroll_to(frame))
+        frame._row_key = key
+        return frame
+
+    def _toggle_row(self, key):
+        """Expand a row in place, like a network in the Windows Wi-Fi list."""
+        self._expanded = None if self._expanded == key else key
+        self._focus_key = key
+        self._render()
+        self._place()
+        self._focus_row(key)
+
+    def _focus_row(self, key):
+        row = next((row for row in self.rows if row._row_key == key), None)
+        if row is not None:
+            self.root.update_idletasks()
+            row.focus_set()
+            self._scroll_to(row)
+
+    def _scroll_to(self, frame):
+        canvas = self.list_canvas
+        if not canvas:
+            return
+        total = max(1, frame.master.winfo_height())
+        top, bottom = frame.winfo_y(), frame.winfo_y() + frame.winfo_height()
+        view_top, view_bottom = (fraction * total for fraction in canvas.yview())
+        if top < view_top:
+            canvas.yview_moveto(top / total)
+        elif bottom > view_bottom:
+            canvas.yview_moveto((bottom - canvas.winfo_height()) / total)
+
+    def _wheel(self, event):
+        if self.list_canvas and self.list_canvas.winfo_exists():
+            self.list_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+
+    def _open_page(self, page):
+        self._page = page
+        self._expanded = None
+        self._focus_key = None
+        self._render()
+        self._place()
+        if self.rows:
+            current = self._page_spec(page)[2]
+            target = next((row for row in self.rows if row._row_key == current), self.rows[0])
+            self._focus_row(target._row_key)
+
+    def _back(self):
+        previous = self._page
+        self._page = "main"
+        self._expanded = None
+        self._render()
+        self._place()
+        tile = {"packs": "packs", "voice": "voice", "mic": "mic", "engine": "engine"}.get(previous)
+        if tile in self.tiles:
+            self.tiles[tile]["canvas"].focus_set()
+
+    def _escape(self):
+        if self._page != "main":
+            self._back()
+        else:
+            self._hide()
+
+    def _select(self, key):
+        page = self._page
+        self._focus_key = key
+        if page == "packs":
+            self._work(lambda: self.tray._make_set_sound_pack(key)(None, None))
+        elif page == "voice":
+            self._work(lambda: self.tray._make_set_tts_mode(key)(None, None))
+        elif page == "mic":
+            self._work(lambda: self.tray._make_set_mic(key)(None, None))
+        else:
+            self._work(lambda: self.tray._make_set_stt_mode(key)(None, None))
+
+    def _preview(self, key):
+        from .tray_icon import preview_sound_pack
+        self._work(lambda: preview_sound_pack(key) or self._commands.put("silent"))
+
+    # ── state and actions ───────────────────────────────────────────
+
+    def _load(self):
+        from .tray_icon import _load_config, list_sound_packs
+        config = _load_config()
+        self._config = config
+        self._muted = bool(config.get("muted", False))
+        self.volume = max(0, min(300, int(config.get("volume", 200))))
+        self.mics = {"Predefinito di Windows": None}
+        self.mics.update({f"{d.name} [{d.device_id}]": d.device_id for d in self.tray._list_mics()})
+        self.packs = list_sound_packs()
+
+    def _refresh(self):
+        self._load()
+        focus = getattr(self, "_focus_key", None)
+        self._render()
+        if self._page == "main":
+            self._paint_tile(self.audio_tile, not self._muted)
+            self.audio_tile["value"].configure(text="Disattivato" if self._muted else f"Volume {self.volume}%")
+            self._draw_slider()
+            self._update_state()
+        elif focus is not None:
+            self._focus_row(focus)
+
+    def _draw_slider(self):
+        if getattr(self, "slider", None):
+            self.slider.set(self.volume, disabled=self._muted)
+
+    def _save_volume(self, value):
+        self.volume = value
         self._work(lambda: self.tray._make_set_volume(value)(None, None))
 
     def _work(self, callback):
@@ -285,16 +576,8 @@ class TrayFlyout:
         self.root.after(180, lambda: self._work(self.tray._on_toggle_recording))
 
     def _mute(self):
+        self._focus_key = None
         self._work(lambda: self.tray._make_toggle_mute()(None, None))
-
-    def _mic_changed(self, event):
-        value = self.mics[self.mic.get()]
-        self._work(lambda: self.tray._make_set_mic(value)(None, None))
-
-    def _mode_changed(self, event):
-        from .tray_icon import STT_MODES
-        value = next(key for key, label in STT_MODES.items() if label == self.mode.get())
-        self._work(lambda: self.tray._make_set_stt_mode(value)(None, None))
 
     def _files(self):
         self._hide()
@@ -310,20 +593,28 @@ class TrayFlyout:
 
     def _hide(self):
         self.root.withdraw()
+        if self._page != "main":
+            # Next opening starts from the tiles, like Windows Quick Settings.
+            self._page, self._expanded = "main", None
+            self._render()
 
     def _dismiss_if_outside(self):
         if self.root.state() != "withdrawn" and self.root.focus_displayof() is None:
             self._hide()
 
-    def _show(self):
-        self._refresh()
+    def _place(self):
         left, top, right, bottom = flyout_window.work_area()
-        width = self._p(384)
+        width = self._p(WIDTH)
         self.root.update_idletasks()
         height = self.root.winfo_reqheight()
         gap = self._p(12)
         x, y = max(left + gap, right - width - gap), max(top + gap, bottom - height - gap)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _show(self):
+        self._refresh()
+        self._update_state()  # final captions first: they set the height
+        self._place()
         actual_dpi = flyout_window.window_dpi(self.root)
         if actual_dpi != self._dpi:
             self._dpi, self.scale = actual_dpi, actual_dpi / 96
@@ -332,21 +623,26 @@ class TrayFlyout:
             return
         self.root.deiconify()
         flyout_window.finish_window(self.root, self.dark)
+        self._place()  # the native shadow frame changed the client height
         self.root.lift()
         self.root.focus_force()
-        self.record_tile[1].focus_set()
+        if self.record_tile:
+            self.record_tile["canvas"].focus_set()
 
     def _update_state(self):
+        if self._page != "main" or not self.record_tile:
+            return
         state = self.tray._state
         batch = self.tray.batch_busy
-        labels = {"idle": "Pronto per dettare", "recording": "Registrazione in corso",
-                  "transcribing": "Trascrizione in corso", "loading": "Caricamento del motore…", "output": "Invio del testo…"}
-        self.state.set("Trascrizione file in corso" if batch else labels.get(state, state))
+        self.state.set("Trascrizione file in corso" if batch else STATE_LABELS.get(state, state))
+        self._paint_status()
         recording = state == "recording"
-        self.record_tile[1].configure(text="Dettatura\n" + ("Ferma" if recording else "Avvia"),
-                                      state="normal" if self.tray._on_toggle_recording and state in ("idle", "recording") and not batch else "disabled")
-        if self.record_tile[3] != recording:
-            self._paint_tile(self.record_tile, recording)
+        tile = self.record_tile
+        tile["value"].configure(text="In ascolto" if recording else "Avvia")
+        enabled = bool(self.tray._on_toggle_recording) and state in ("idle", "recording") and not batch
+        if tile["active"] != recording or tile["enabled"] != enabled:
+            tile["enabled"] = enabled
+            self._paint_tile(tile, recording)
         self.files.configure(state="normal" if state == "idle" and not batch else "disabled")
         self.engine.set("Motore attivo: " + self.tray._get_stt_status({})["active_label"])
 
@@ -364,8 +660,10 @@ class TrayFlyout:
                     self._refresh()
                     if self._pending_actions:
                         self._work(self._pending_actions.pop(0))
-                if command == "error":
+                if command == "error" and self._page == "main":
                     self.state.set("Operazione non riuscita. Riprova.")
+                if command == "silent":
+                    logger.info("Sound pack preview: no sounds available")
         except queue.Empty:
             pass
         if self.root.state() != "withdrawn":
