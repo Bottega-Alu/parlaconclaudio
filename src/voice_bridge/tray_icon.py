@@ -27,6 +27,8 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from .menu_dpi import native_menu_dpi
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -141,53 +143,8 @@ WHISPER_LANGUAGES = {
 }
 
 # === MENU EMOJI ===
-E_VOICE = "🎙️"
-E_PRESETS = "⚡"
-E_BROWSE = "📂"
-E_LANG = "🌐"
-E_TTS = "🔔"
-E_VOLUME = "🔊"
-E_PACK = "🎵"
-E_PREVIEW = "🎧"
-E_EXIT = "🚪"
-E_SELECTED = "🔘"
-E_UNSELECTED = "⚫"
-E_FEMALE = "👩"
-E_MALE = "👨"
 
-LANG_FLAGS = {
-    "Italiano": "🇮🇹",
-    "English US": "🇺🇸",
-    "English GB": "🇬🇧",
-    "Portugues BR": "🇧🇷",
-    "Espanol": "🇪🇸",
-    "Francais": "🇫🇷",
-    "Deutsch": "🇩🇪",
-    "Japanese": "🇯🇵",
-    "Rilevamento automatico": "🌍",
-    "English": "🇺🇸",
-    "Portugues": "🇧🇷",
-}
 
-PACK_EMOJI = {
-    "r2d2": "🤖",
-    "south-park": "🎭",
-    "south-park-ita": "🎭",
-    "star-wars": "⚔️",
-    "dune": "🏜️",
-    "american-dad": "🇺🇸",
-    "horror-zombie": "🧟",
-    "maccio-capatonda": "🤡",
-}
-
-MODE_EMOJI = {"full": "📢", "semi-silent": "🔉", "silent": "🔇"}
-
-E_PURGE = "🧹"
-E_REPO = "🔗"
-E_ENGINE = "🧠"
-E_KEY = "🔑"
-E_STATUS = "📊"
-E_TEST = "🔗"
 REPO_URL = "https://github.com/fra-itc/parlaconclaudio"
 
 # STT mode labels for menu display
@@ -514,6 +471,8 @@ class TrayIcon:
         self._icon: "pystray.Icon | None" = None
         self._thread: threading.Thread | None = None
         self._animator = _IconAnimator()
+        self._flyout = None
+        self._flyout_timer = None
 
     @property
     def batch_busy(self):
@@ -535,19 +494,18 @@ class TrayIcon:
         """Build voice selection submenu organized by language."""
         lang_submenus = []
         for lang_name, voices in EDGE_VOICES.items():
-            flag = LANG_FLAGS.get(lang_name, "")
             voice_items = []
             for v in voices:
                 is_current = (v["id"] == current_voice_id)
-                gender = E_FEMALE if v["gender"] == "F" else E_MALE
-                sel = E_SELECTED if is_current else E_UNSELECTED
-                label = f"{sel} {gender} {v['name']}"
+                label = f"{v['name']} ({'femminile' if v['gender'] == 'F' else 'maschile'})"
                 voice_items.append(pystray.MenuItem(
                     label,
                     self._make_set_voice(v["id"]),
+                    checked=lambda item, selected=is_current: selected,
+                    radio=True,
                 ))
             lang_submenus.append(pystray.MenuItem(
-                f"{flag} {lang_name}",
+                f"{lang_name}",
                 pystray.Menu(*voice_items),
             ))
         return pystray.Menu(*lang_submenus)
@@ -564,10 +522,11 @@ class TrayIcon:
         preset_items = []
         for preset_name, preset_data in VOICE_PRESETS.items():
             is_current = (preset_data["voice"] == current_voice_id)
-            sel = E_SELECTED if is_current else E_UNSELECTED
             preset_items.append(pystray.MenuItem(
-                f"{sel} {preset_name}",
+                f"{preset_name}",
                 self._make_set_voice_preset(preset_name),
+                checked=lambda item, selected=is_current: selected,
+                radio=True,
             ))
 
         # --- Full voice browser by language ---
@@ -578,21 +537,22 @@ class TrayIcon:
         lang_items = []
         for label, code in WHISPER_LANGUAGES.items():
             checked = (current_lang == code)
-            sel = E_SELECTED if checked else E_UNSELECTED
-            flag = LANG_FLAGS.get(label, "")
             lang_items.append(pystray.MenuItem(
-                f"{sel} {flag} {label}",
+                f"{label}",
                 self._make_set_language(code),
+                checked=lambda item, selected=checked: selected,
+                radio=True,
             ))
 
         # --- Sound Pack submenu ---
         pack_items = []
         # Random meta-entry first
         random_checked = (current_pack == "random")
-        random_sel = E_SELECTED if random_checked else E_UNSELECTED
         pack_items.append(pystray.MenuItem(
-            f"{random_sel} 🎲 Casuale (tutti i pacchetti)",
+            f"Casuale (tutti i pacchetti)",
             self._make_set_sound_pack("random"),
+            checked=lambda item, selected=random_checked: selected,
+            radio=True,
         ))
         if SOUNDS_DIR.is_dir():
             for pack_dir in sorted(SOUNDS_DIR.iterdir()):
@@ -600,11 +560,11 @@ class TrayIcon:
                     pack_name = pack_dir.name
                     count = len(list(pack_dir.glob("*.mp3")))
                     checked = (pack_name == current_pack)
-                    sel = E_SELECTED if checked else E_UNSELECTED
-                    pe = PACK_EMOJI.get(pack_name, "📦")
                     pack_items.append(pystray.MenuItem(
-                        f"{sel} {pe} {pack_name} ({count})",
+                        f"{pack_name} ({count})",
                         self._make_set_sound_pack(pack_name),
+                        checked=lambda item, selected=checked: selected,
+                        radio=True,
                     ))
 
         # --- TTS Mode submenu ---
@@ -613,11 +573,11 @@ class TrayIcon:
         mode_items = []
         for mode_label, mode_value in TTS_MODES.items():
             checked = (current_mode == mode_value)
-            sel = E_SELECTED if checked else E_UNSELECTED
-            me = MODE_EMOJI.get(mode_value, "")
             mode_items.append(pystray.MenuItem(
-                f"{sel} {me} {mode_label}",
+                f"{mode_label}",
                 self._make_set_tts_mode(mode_value),
+                checked=lambda item, selected=checked: selected,
+                radio=True,
             ))
 
         # --- Volume submenu ---
@@ -625,20 +585,20 @@ class TrayIcon:
         vol_items = []
 
         # Mute toggle
-        mute_sel = E_SELECTED if is_muted else E_UNSELECTED
         vol_items.append(pystray.MenuItem(
-            f"{mute_sel} MUTE",
+            f"Disattivato",
             self._make_toggle_mute(),
+            checked=lambda item, selected=is_muted: selected,
         ))
         vol_items.append(pystray.Menu.SEPARATOR)
 
         for level in VOLUME_LEVELS:
             checked = (level == current_vol)
-            sel = E_SELECTED if checked else E_UNSELECTED
-            bar = "█" * (level // 50)
             vol_items.append(pystray.MenuItem(
-                f"{sel} {level}% {bar}",
+                f"{level}%",
                 self._make_set_volume(level),
+                checked=lambda item, selected=checked: selected,
+                radio=True,
             ))
 
         # --- Preview Sounds submenu ---
@@ -656,7 +616,7 @@ class TrayIcon:
         if pack_dir.is_dir():
             for mp3 in sorted(pack_dir.glob("*.mp3"))[:15]:
                 preview_items.append(pystray.MenuItem(
-                    f"  ▶️ {mp3.stem}",
+                    f"{mp3.stem}",
                     self._make_preview_sound(str(mp3)),
                 ))
 
@@ -671,13 +631,12 @@ class TrayIcon:
         if current_lang:
             for label, code in WHISPER_LANGUAGES.items():
                 if code == current_lang:
-                    flag = LANG_FLAGS.get(label, "")
-                    lang_display = f"{flag} {label}"
+                    lang_display = f"{label}"
                     break
 
         # Mic display
         mic_device = config.get("mic_device_id")
-        mic_display = "Default"
+        mic_display = "Predefinito di Windows"
         if self._recorder and mic_device is not None:
             try:
                 for dev in devices:
@@ -688,7 +647,7 @@ class TrayIcon:
                 mic_display = f"Device {mic_device}"
 
         # Engine display
-        engine_display = stt_status["active_label"]
+        engine_display = "Da caricare" if stt_status["active"] == "not_loaded" else stt_status["active_label"]
 
         # === Build Settings submenu ===
         settings_menu = pystray.Menu(
@@ -699,34 +658,25 @@ class TrayIcon:
             mic_item,
             pystray.Menu.SEPARATOR,
             # Voce notifiche
-            pystray.MenuItem(f"{E_VOICE} Voce notifiche [{voice_display}]", pystray.Menu(
-                pystray.MenuItem(f"{E_PRESETS} Voci rapide", pystray.Menu(*preset_items)),
+            pystray.MenuItem(f"Voce notifiche [{voice_display}]", pystray.Menu(
+                pystray.MenuItem(f"Voci rapide", pystray.Menu(*preset_items)),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem(f"{E_BROWSE} Tutte le voci", voice_browser),
+                pystray.MenuItem(f"Tutte le voci", voice_browser),
             )),
             # Lingua dettatura
-            pystray.MenuItem(f"{E_LANG} Lingua dettatura [{lang_display}]", pystray.Menu(*lang_items)),
+            pystray.MenuItem(f"Lingua dettatura [{lang_display}]", pystray.Menu(*lang_items)),
             pystray.Menu.SEPARATOR,
             # System
             pystray.MenuItem("Ricarica modello GPU", self._purge_vram_clicked),
             pystray.MenuItem("Libera memoria GPU", self._unload_vram_clicked, enabled=bool(self._on_unload_vram)),
             pystray.Menu.SEPARATOR,
             # Links
-            pystray.MenuItem(f"{E_REPO} Progetto su GitHub", self._open_repo),
-            pystray.MenuItem(f"{E_KEY} Ottieni chiave API Groq", self._open_groq_console),
-            pystray.MenuItem(f"{E_KEY} Ottieni chiave API Deepgram", self._open_deepgram_console),
+            pystray.MenuItem(f"Progetto su GitHub", self._open_repo),
+            pystray.MenuItem(f"Ottieni chiave API Groq", self._open_groq_console),
+            pystray.MenuItem(f"Ottieni chiave API Deepgram", self._open_deepgram_console),
         )
 
-        # === Mode emoji for status ===
-        mode_icon = MODE_EMOJI.get(current_mode, "🔔")
-        if current_pack == "random":
-            pack_icon = "🎲"
-            pack_display = "random"
-        else:
-            pack_icon = PACK_EMOJI.get(current_pack, "📦")
-            pack_display = current_pack
-        vol_display = "MUTE" if is_muted else f"{current_vol}%"
-        vol_icon = "🔇" if is_muted or current_vol == 0 else "🔊"
+        vol_display = "Disattivato" if is_muted else f"{current_vol}%"
 
         from . import autostart
         autostart_on = autostart.is_enabled()
@@ -738,31 +688,31 @@ class TrayIcon:
             pystray.MenuItem("Apri pannello", self._open_panel, default=True),
             pystray.Menu.SEPARATOR,
             # --- Status dashboard (always visible, read-only) ---
-            pystray.MenuItem(f"  🧠 {engine_display}  │  {lang_display}  │  🎤 {mic_display}", None, enabled=False),
-            pystray.MenuItem(f"  {mode_icon} {current_mode_label}  │  {vol_icon} {vol_display}  │  {pack_icon} {pack_display}", None, enabled=False),
+            pystray.MenuItem(f"Dettatura: {engine_display} - {lang_display}", None, enabled=False),
+            pystray.MenuItem(f"Microfono: {mic_display}", None, enabled=False),
             pystray.Menu.SEPARATOR,
             # --- Quick access ---
-            pystray.MenuItem(f"🔔 Notifiche [{current_mode_label}]", pystray.Menu(*mode_items)),
-            pystray.MenuItem(f"{vol_icon} Volume [{vol_display}]", pystray.Menu(*vol_items)),
+            pystray.MenuItem(f"Notifiche: {current_mode_label}", pystray.Menu(*mode_items)),
+            pystray.MenuItem(f"Volume: {vol_display}", pystray.Menu(*vol_items)),
             pystray.MenuItem(
-                f"🎵 Pacchetto suoni [{'🎲 random' if current_pack == 'random' else current_pack}]",
+                f"Suoni: {'Casuale' if current_pack == 'random' else current_pack}",
                 pystray.Menu(*pack_items),
             ),
-            pystray.MenuItem(f"🎧 Ascolta anteprima [{current_pack}]", pystray.Menu(*preview_items) if preview_items else None),
+            pystray.MenuItem("Ascolta suoni", pystray.Menu(*preview_items) if preview_items else None, enabled=bool(preview_items)),
             pystray.Menu.SEPARATOR,
             # --- Audio file batch transcription ---
-            pystray.MenuItem("🎙️ Trascrivi audio file…", self._transcribe_files_clicked),
+            pystray.MenuItem("Trascrivi file audio…", self._transcribe_files_clicked),
             pystray.Menu.SEPARATOR,
             # --- Settings & Info ---
-            pystray.MenuItem("⚙️ Impostazioni e informazioni", settings_menu),
+            pystray.MenuItem("Impostazioni", settings_menu),
             hooks_item,
             pystray.MenuItem(
-                "🚀 Avvio automatico all'accesso",
+                "Avvio con Windows",
                 self._toggle_autostart_clicked,
                 checked=lambda item, on=autostart_on: on,
             ),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("🚪 Esci", self._exit_clicked),
+            pystray.MenuItem("Esci", self._exit_clicked),
         )
 
     # ------------------------------------------------------------------
@@ -786,12 +736,13 @@ class TrayIcon:
             try:
                 for dev in devices:
                     is_current = (current_device == dev.device_id) or (current_device is None and dev.is_default)
-                    sel = E_SELECTED if is_current else E_UNSELECTED
                     default_mark = " (default)" if dev.is_default else ""
-                    label = f"{sel} [{dev.device_id}] {dev.name}{default_mark}"
+                    label = f"[{dev.device_id}] {dev.name}{default_mark}"
                     mic_items.append(pystray.MenuItem(
                         label,
                         self._make_set_mic(dev.device_id),
+                        checked=lambda item, selected=is_current: selected,
+                        radio=True,
                     ))
             except Exception as e:
                 logger.warning(f"Failed to list mic devices: {e}")
@@ -799,7 +750,7 @@ class TrayIcon:
         if not mic_items:
             mic_items.append(pystray.MenuItem("  Nessun microfono trovato", None, enabled=False))
 
-        current_name = "Default"
+        current_name = "Predefinito di Windows"
         if self._recorder and current_device is not None:
             try:
                 for dev in devices:
@@ -810,7 +761,7 @@ class TrayIcon:
                 current_name = f"Device {current_device}"
 
         return pystray.MenuItem(
-            f"🎤 Microfono [{current_name}]",
+            "Microfono",
             pystray.Menu(*mic_items),
         )
 
@@ -879,51 +830,52 @@ class TrayIcon:
         mode_items = []
         for mode_key, mode_label in STT_MODES.items():
             is_current = (stt_mode == mode_key)
-            sel = E_SELECTED if is_current else E_UNSELECTED
             mode_items.append(pystray.MenuItem(
-                f"{sel} {mode_label}",
+                f"{mode_label}",
                 self._make_set_stt_mode(mode_key),
+                checked=lambda item, selected=is_current: selected,
+                radio=True,
             ))
 
         # Status dashboard (read-only)
         gpu_state = status["gpu_state"]
-        gpu_icons = {"loaded": "✅", "loading": "⏳", "not_loaded": "○", "not_detected": "❌", "cloud": "☁️"}
-        gpu_mark = gpu_icons.get(gpu_state, "❓")
+        gpu_icons = {"loaded": "caricata", "loading": "caricamento", "not_loaded": "non caricata", "not_detected": "non rilevata", "cloud": "non in uso"}
+        gpu_mark = gpu_icons.get(gpu_state, "non disponibile")
 
         from ..core.stt_engine.key_manager import KeyManager
         has_groq = bool(KeyManager.get_key("groq"))
         has_deepgram = bool(KeyManager.get_key("deepgram"))
-        groq_mark = "✅" if has_groq else "❌"
-        deepgram_mark = "✅" if has_deepgram else "❌"
+        groq_mark = "configurata" if has_groq else "non configurata"
+        deepgram_mark = "configurata" if has_deepgram else "non configurata"
 
         status_items = [
-            pystray.MenuItem(f"  Provider: {status['active_label']}", None, enabled=False),
-            pystray.MenuItem(f"  GPU: {gpu_mark} {status['gpu']}", None, enabled=False),
-            pystray.MenuItem(f"  Groq key: {groq_mark}", None, enabled=False),
-            pystray.MenuItem(f"  Deepgram key: {deepgram_mark}", None, enabled=False),
+            pystray.MenuItem(f"Provider: {status['active_label']}", None, enabled=False),
+            pystray.MenuItem(f"GPU: {gpu_mark} {status['gpu']}", None, enabled=False),
+            pystray.MenuItem(f"Chiave Groq: {groq_mark}", None, enabled=False),
+            pystray.MenuItem(f"Chiave Deepgram: {deepgram_mark}", None, enabled=False),
         ]
 
         # API key items
         key_items = [
-            pystray.MenuItem(f"{E_KEY} Set Groq API Key...", self._ask_api_key_groq),
-            pystray.MenuItem(f"{E_KEY} Set Deepgram API Key...", self._ask_api_key_deepgram),
+            pystray.MenuItem(f"Imposta chiave Groq…", self._ask_api_key_groq),
+            pystray.MenuItem(f"Imposta chiave Deepgram…", self._ask_api_key_deepgram),
         ]
 
         # Test connection
-        test_item = pystray.MenuItem(f"{E_TEST} Verifica connessione", self._test_cloud_connection)
+        test_item = pystray.MenuItem(f"Verifica connessione", self._test_cloud_connection)
 
         # Warning if disabled
         warn_items = []
         if status["active"] == "disabled":
-            warn_items.append(pystray.MenuItem("⚠️ Configure cloud STT below", None, enabled=False))
+            warn_items.append(pystray.MenuItem("Configura un provider cloud per dettare", None, enabled=False))
 
         return pystray.MenuItem(
-            f"{E_ENGINE} Motore dettatura [{title_suffix}]",
+            f"Motore dettatura [{title_suffix}]",
             pystray.Menu(
                 *warn_items,
                 *mode_items,
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem(f"{E_STATUS} Status", pystray.Menu(*status_items)),
+                pystray.MenuItem(f"Stato del motore", pystray.Menu(*status_items)),
                 pystray.Menu.SEPARATOR,
                 *key_items,
                 test_item,
@@ -1126,7 +1078,7 @@ class TrayIcon:
         items = []
         for agent in vh.AGENTS:
             state = vh.status(agent)  # True / False / None = unreadable
-            suffix = "  ⚠️ config non leggibile" if state is None else ""
+            suffix = " (configurazione non leggibile)" if state is None else ""
             items.append(pystray.MenuItem(
                 f"{vh.AGENT_LABEL[agent]}{suffix}",
                 self._make_toggle_voice_hook(agent),
@@ -1134,12 +1086,12 @@ class TrayIcon:
             ))
         items += [
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("🔗 Collega hook per voci interattive (tutti)",
+            pystray.MenuItem("Collega entrambi",
                              self._make_set_all_voice_hooks(True)),
-            pystray.MenuItem("✂️ Scollega hook Codex e Claude Code",
+            pystray.MenuItem("Scollega entrambi",
                              self._make_set_all_voice_hooks(False)),
         ]
-        return pystray.MenuItem("🗣️ Hook voci", pystray.Menu(*items))
+        return pystray.MenuItem("Collegamenti vocali", pystray.Menu(*items))
 
     def _apply_voice_hooks(self, plan: list[tuple[str, bool]]) -> None:
         """Run connect/disconnect per agent; log + one notification for all."""
@@ -1184,8 +1136,9 @@ class TrayIcon:
 
     def _rebuild_menu(self):
         if self._icon:
-            self._icon.menu = self._build_menu()
-            self._icon.update_menu()
+            with native_menu_dpi():
+                self._icon.menu = self._build_menu()
+                self._icon.update_menu()
 
     def start(self) -> None:
         if not TRAY_AVAILABLE:
@@ -1197,11 +1150,13 @@ class TrayIcon:
         draw = ImageDraw.Draw(initial_img)
         draw.ellipse([1, 1, ICON_SIZE - 1, ICON_SIZE - 1], fill=(0, 200, 100, 255))
 
-        self._icon = pystray.Icon(
+        from .tray_popup import FlyoutIcon
+        self._icon = FlyoutIcon(
             "voice_bridge",
             initial_img,
             "parlaconclaudio - Pronto",
             self._build_menu(),
+            on_quick_controls=self._open_flyout,
         )
 
         # Start animator
@@ -1209,9 +1164,39 @@ class TrayIcon:
         self._animator.set_state("idle")
         self._animator.start()
 
-        self._thread = threading.Thread(target=self._icon.run, daemon=True)
+        self._thread = threading.Thread(target=self._run_icon, daemon=True)
         self._thread.start()
         logger.info("Tray icon started with animated marble sphere")
+
+    def _run_icon(self):
+        # Set DPI context before pystray creates the native owner windows.
+        with native_menu_dpi():
+            self._icon.run()
+
+    def _open_flyout(self, left_click=False):
+        if self._flyout_timer:
+            self._flyout_timer.cancel()
+        if left_click:
+            # Leave double-click/long-press recording gestures time to fire.
+            self._flyout_timer = threading.Timer(0.37, self._open_after_click)
+            self._flyout_timer.daemon = True
+            self._flyout_timer.start()
+            return
+        self._show_flyout()
+
+    def _open_after_click(self):
+        if self._state != "recording":
+            self._show_flyout()
+
+    def _show_flyout(self):
+        from .tray_flyout import TrayFlyout
+        if self._flyout is None:
+            self._flyout = TrayFlyout(self)
+        self._flyout.show()
+
+    def _show_full_menu(self):
+        if self._icon:
+            self._icon.show_full_menu()
 
     def set_state(self, state: str) -> None:
         self._state = state
@@ -1366,6 +1351,10 @@ class TrayIcon:
 
     def stop(self) -> None:
         self._animator.stop()
+        if self._flyout_timer:
+            self._flyout_timer.cancel()
+        if self._flyout:
+            self._flyout.stop()
         if self._panel:
             self._panel.stop()
         if self._icon:

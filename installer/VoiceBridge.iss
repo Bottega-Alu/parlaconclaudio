@@ -9,7 +9,7 @@
 ; Output: installer\Output\parlaconclaudio-voice-bridge-Setup-<version>.exe
 
 #define AppName        "parlaconclaudio - voice-bridge"
-#define AppVersion     "1.0.12"
+#define AppVersion     "1.0.13"
 #define AppPublisher   "Frisco"
 #define AppExeName     "VoiceBridge.exe"
 #define BootstrapExe   "vb_bootstrap.exe"
@@ -23,7 +23,7 @@ AppName={#AppName}
 UninstallDisplayName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-VersionInfoVersion=1.0.12.0
+VersionInfoVersion=1.0.13.0
 
 ; Per-user install: no UAC prompt, and - crucially - the venv created after the
 ; install stays writable, so repair and upgrade never need elevation.
@@ -66,7 +66,7 @@ Source: "..\sounds\*";       DestDir: "{app}\sounds";  Flags: ignoreversion recu
 Source: "..\assets\*";       DestDir: "{app}\assets";  Flags: ignoreversion
 Source: "..\README.md";      DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE";        DestDir: "{app}"; Flags: ignoreversion
-Source: "..\docs\releases\1.0.12.md"; DestDir: "{app}\docs\releases"; Flags: ignoreversion
+Source: "..\docs\releases\1.0.13.md"; DestDir: "{app}\docs\releases"; Flags: ignoreversion
 ; Optional: drop uv.exe in installer\bin\ to make setup work fully offline-capable
 ; (minus the wheels themselves). Without it the bootstrapper fetches uv itself.
 Source: "bin\uv.exe";        DestDir: "{app}\bin"; Flags: ignoreversion skipifsourcedoesntexist
@@ -110,8 +110,8 @@ Type: files;          Name: "{app}\voicebridge.log"
 Type: files;          Name: "{app}\voicebridge_debug.log"
 
 [Messages]
-en.WelcomeLabel2=Dictate into the active application: press Ctrl+Alt+Space to start, then press it again to transcribe and paste.%n%nOpen the control panel from the tray icon to check status, microphone and engine. Use a supported NVIDIA GPU for local dictation or configure a cloud provider.%n%nOptional voice hooks announce when Claude Code or Codex finishes or needs your attention. Choose each integration separately on the next pages.%n%nClose any running version before upgrading. This installer updates the normal application; the previous TEST installation stays separate.
-it.WelcomeLabel2=Detta nell'applicazione attiva: premi Ctrl+Alt+Spazio per iniziare, poi di nuovo per trascrivere e incollare.%n%nApri il pannello dall'icona nella tray per controllare stato, microfono e motore. Usa una GPU NVIDIA compatibile per dettare in locale oppure configura un provider cloud.%n%nGli hook vocali opzionali avvisano quando Claude Code o Codex termina o richiede attenzione. Puoi scegliere separatamente i due collegamenti nelle prossime pagine.%n%nChiudi ogni versione in esecuzione prima di aggiornare. Il setup aggiorna l'app normale; l'installazione TEST precedente resta separata.
+en.WelcomeLabel2=Dictate into the active application: press Ctrl+Alt+Space to start, then press it again to transcribe and paste.%n%nOpen the control panel from the tray icon to check status, microphone and engine. Use a supported NVIDIA GPU for local dictation or configure a cloud provider.%n%nOptional voice hooks announce when Claude Code or Codex finishes or needs your attention. Choose each integration separately on the next pages.%n%nNew in 1.0.13: Windows 11-style tray quick controls. Close any running version before upgrading. This installer updates the normal application; TEST installations stay separate.
+it.WelcomeLabel2=Detta nell'applicazione attiva: premi Ctrl+Alt+Spazio per iniziare, poi di nuovo per trascrivere e incollare.%n%nApri il pannello dall'icona nella tray per controllare stato, microfono e motore. Usa una GPU NVIDIA compatibile per dettare in locale oppure configura un provider cloud.%n%nGli hook vocali opzionali avvisano quando Claude Code o Codex termina o richiede attenzione. Puoi scegliere separatamente i due collegamenti nelle prossime pagine.%n%nNovita' 1.0.13: comandi rapidi della tray in stile Windows 11. Chiudi ogni versione in esecuzione prima di aggiornare. Il setup aggiorna l'app normale; le installazioni TEST restano separate.
 
 [CustomMessages]
 en.StartupGroup=Windows sign-in
