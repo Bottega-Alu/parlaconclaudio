@@ -398,9 +398,6 @@ class VoiceBridge:
 
         self._set_state(BridgeState.IDLE)
 
-        # Rebuild menu now that engine is loaded (fixes "Not Loaded" status)
-        self._tray._rebuild_menu()
-
         logger.info("Voice Bridge ready! Hold hotkey to dictate.")
         logger.info("Press Ctrl+C to exit.")
         beep_ready()

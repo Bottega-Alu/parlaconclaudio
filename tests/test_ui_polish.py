@@ -88,7 +88,6 @@ def test_auto_paste_defaults_on_and_can_be_turned_off(monkeypatch):
     monkeypatch.setattr(tray_icon, "_save_config", lambda value: (config.clear(), config.update(value)))
     assert tray_icon.output_mode_from_config("clipboard_paste") == "clipboard_paste"
     tray = tray_icon.TrayIcon()
-    monkeypatch.setattr(tray, "_rebuild_menu", lambda: None)
     tray._toggle_auto_paste_clicked()
     assert config["auto_paste"] is False
     assert tray_icon.output_mode_from_config("clipboard_paste") == "clipboard_only"
@@ -111,7 +110,6 @@ def test_voice_volume_follows_sound_volume_until_set(monkeypatch):
     monkeypatch.setattr(tray_icon, "_save_config", lambda value: config.update(value))
     assert tray_icon.voice_volume(config) == 40
     tray = tray_icon.TrayIcon()
-    monkeypatch.setattr(tray, "_rebuild_menu", lambda: None)
     tray._make_set_voice_volume(120)(None, None)
     assert config == {"volume": 40, "voice_volume": 120}
     assert tray_icon.voice_volume(config) == 120

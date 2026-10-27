@@ -33,6 +33,8 @@ class ControlPanel:
         self._thread = None
         self._lock = threading.Lock()
         self._page = "home"
+        self.root = None
+        self._voice_language = None
         self._autostart = None  # unknown until a worker has asked Windows
 
     def show(self):
@@ -42,9 +44,18 @@ class ControlPanel:
                 self._thread.start()
             else:
                 self._commands.put("show")
+                self._wake()
 
     def stop(self):
         self._commands.put("stop")
+        self._wake()
+
+    def _wake(self):
+        """Handle queued commands now instead of at the next hidden poll."""
+        try:
+            self.root.event_generate("<<PanelWake>>", when="tail")
+        except Exception:
+            pass  # not built yet or already gone: the poll still picks it up
 
     def _run(self):
         from .menu_dpi import native_menu_dpi
@@ -54,7 +65,7 @@ class ControlPanel:
                 self.root.mainloop()
         except Exception:
             logger.exception("Impossibile aprire il pannello")
-            self.tray._notify("Pannello non disponibile. Usa il menu dell'icona nell'area di notifica.")
+            self.tray._notify("Finestra non disponibile. Riavvia parlaconclaudio.")
 
     def _p(self, value):
         return round(value * self.scale)
@@ -81,6 +92,7 @@ class ControlPanel:
         root.protocol("WM_DELETE_WINDOW", root.withdraw)
         root.bind("<Escape>", lambda event: root.withdraw())
         root.bind("<MouseWheel>", self._wheel)
+        root.bind("<<PanelWake>>", lambda event: self._drain())
         self.dark = fluent.dark_mode()
         self.colors = c = fluent.colors(self.dark)
         self.font = fluent.text_font(root)
@@ -355,7 +367,7 @@ class ControlPanel:
         self._combo(self._card("mic", "Microfono", "Il dispositivo usato per la dettatura."),
                     self.mics, mic, self._apply_mic)
         self._section("Trascrizione")
-        self._combo(self._card("chip", "Riconoscimento", "GPU locale, cloud o scelta automatica."),
+        self._combo(self._card("chip", "Riconoscimento", self._engine_summary()),
                     STT_MODES.values(), STT_MODES.get(config.get("stt_mode", "auto"), STT_MODES["auto"]),
                     self._apply_mode)
         language = next((label for label, code in WHISPER_LANGUAGES.items()
@@ -375,6 +387,17 @@ class ControlPanel:
         self._button(control, "Ricarica modello", lambda: self.tray._purge_vram_clicked(None, None)).pack(side="right")
         self._button(control, "Libera memoria", lambda: self.tray._unload_vram_clicked(),
                      enabled=bool(self.tray._on_unload_vram)).pack(side="right", padx=(0, self._p(8)))
+
+    def _engine_summary(self):
+        status = self.tray._get_stt_status(self.config)
+        gpu = {"loaded": "caricata", "not_loaded": "non ancora caricata", "not_detected": "non rilevata",
+               "cloud": "presente, non in uso"}.get(status["gpu_state"], "non disponibile")
+        summary = f"In uso: {status['active_label']} · GPU {gpu}"
+        if status["gpu"] not in ("Unknown", "Not detected"):
+            summary += f" ({status['gpu']})"
+        if status["active"] == "disabled":
+            summary += ". Configura un provider cloud per dettare."
+        return summary
 
     def _page_alerts(self):
         import tkinter as tk
@@ -413,10 +436,11 @@ class ControlPanel:
         presets = dict(VOICE_PRESETS)
         current = next((name for name, data in presets.items() if data["voice"] == voice_id),
                        self.tray._voice_display_name(voice_id))
-        self._combo(self._card("chat", "Voce", "Altre voci per lingua nel menu completo dell'icona."),
+        self._combo(self._card("chat", "Voce rapida", "Le voci più usate."),
                     list(presets) if current in presets else [current] + list(presets), current,
                     lambda name: name in presets and self._work(
                         lambda: self.tray._make_set_voice_preset(name)(None, None)))
+        self._all_voices(voice_id)
         self._section("Suoni")
         names = {"Casuale": "random"}
         names.update({f"{fluent.pretty_pack(name)} ({count})": name for name, count in self.packs})
@@ -428,6 +452,26 @@ class ControlPanel:
         box = self._combo(control, names, current,
                           lambda label: self._work(lambda: self.tray._make_set_sound_pack(names[label])(None, None)),
                           width=24)
+
+    def _all_voices(self, voice_id):
+        from .tray_icon import EDGE_VOICES
+        language = self._voice_language or next(
+            (lang for lang, voices in EDGE_VOICES.items() if any(v["id"] == voice_id for v in voices)),
+            next(iter(EDGE_VOICES)))
+        voices = {f"{v['name']} ({'femminile' if v['gender'] == 'F' else 'maschile'})": v["id"]
+                  for v in EDGE_VOICES[language]}
+        current = next((label for label, vid in voices.items() if vid == voice_id), "Scegli…")
+        control = self._card("globe", "Tutte le voci", "Scegli la lingua, poi la voce.")
+        self._combo(control, voices, current,
+                    lambda label: self._work(lambda: self.tray._make_set_voice(voices[label])(None, None)),
+                    width=22)
+        self._combo(control, EDGE_VOICES, language, self._pick_voice_language, width=14).pack_configure(
+            padx=(0, self._p(8)))
+
+    def _pick_voice_language(self, language):
+        self._voice_language = language
+        self._commands.put("refresh")
+        self._wake()
 
     def _page_links(self):
         from ..core import voice_hooks
@@ -445,10 +489,17 @@ class ControlPanel:
         else:
             self._switch(control, self._autostart, lambda on: self._toggle_autostart())
         self._section("Riconoscimento cloud")
-        control = self._card("cloud", "Chiavi API", "Servono solo per Groq o Deepgram. Restano nel portachiavi di Windows.")
-        self._button(control, "Deepgram…", lambda: self.tray._ask_api_key_deepgram(None, None)).pack(side="right")
-        self._button(control, "Groq…", lambda: self.tray._ask_api_key_groq(None, None)).pack(
-            side="right", padx=(0, self._p(8)))
+        from ..core.stt_engine.key_manager import KeyManager
+        for provider, label, ask, get in (
+                ("groq", "Groq", self.tray._ask_api_key_groq, self.tray._open_groq_console),
+                ("deepgram", "Deepgram", self.tray._ask_api_key_deepgram, self.tray._open_deepgram_console)):
+            configured = bool(KeyManager.get_key(provider))
+            control = self._card("cloud", f"Chiave {label}",
+                                 ("Configurata" if configured else "Non configurata")
+                                 + ". Resta nel portachiavi di Windows.")
+            self._button(control, "Imposta…", lambda ask=ask: ask(None, None)).pack(side="right")
+            self._button(control, "Ottieni chiave", lambda get=get: get(None, None)).pack(
+                side="right", padx=(0, self._p(8)))
         control = self._card("refresh", "Verifica connessione", "Prova i provider cloud configurati.")
         self._button(control, "Verifica", lambda: self.tray._test_cloud_connection(None, None)).pack(side="right")
 
@@ -459,8 +510,8 @@ class ControlPanel:
                    "Build di test" if IS_TEST_BUILD else "Dettatura vocale per Windows con avvisi per Claude Code e Codex.")
         control = self._card("link", "Progetto e guida", "Documentazione, novità e segnalazioni.")
         self._button(control, "Apri", lambda: self.tray._open_repo(None, None)).pack(side="right")
-        control = self._card("list", "Menu completo", "Tutte le opzioni avanzate dall'icona nell'area di notifica.")
-        self._button(control, "Apri", self.tray._show_full_menu).pack(side="right")
+        control = self._card("power", "Esci", "Chiude l'app: dettatura e avvisi si fermano fino al prossimo avvio.")
+        self._button(control, "Esci", self._exit).pack(side="right")
 
     # ── actions ─────────────────────────────────────────────────────
 
@@ -471,10 +522,14 @@ class ControlPanel:
                     callback()
                 except Exception:
                     logger.exception("Azione del pannello non riuscita")
-                    self.tray._notify("Operazione non riuscita. Riprova dal menu dell'icona.")
+                    self.tray._notify("Operazione non riuscita. Riprova.")
                 finally:
                     self._commands.put("refresh")
             threading.Thread(target=run, daemon=True).start()
+
+    def _exit(self):
+        self.root.withdraw()
+        threading.Thread(target=self.tray._exit_clicked, args=(None, None), daemon=True).start()
 
     def _toggle_recording(self):
         # Restore the previous application before the bridge starts/stops capture.
@@ -531,15 +586,27 @@ class ControlPanel:
         self.files_button.configure(state="normal" if state == "idle" and not batch else "disabled")
 
     def _tick(self):
+        if not self._drain():
+            return
+        if self.root.state() == "withdrawn":
+            # A hidden panel needs no periodic disk reads or updates.
+            self.root.after(750, self._tick)
+            return
+        self._update_state()
+        self.root.after(750, self._tick)
+
+    def _drain(self):
+        """Run queued commands; False once the window is destroyed."""
         try:
             while True:
                 command = self._commands.get_nowait()
                 if command == "stop":
                     self.root.destroy()
-                    return
+                    return False
                 if command == "show":
                     self.root.deiconify()
                     self.root.lift()
+                    self.root.focus_force()
                     self._check_autostart()
                 if command in ("refresh", "show"):
                     focus = self.root.focus_get()
@@ -552,9 +619,4 @@ class ControlPanel:
                         self.canvas.yview_moveto(y)
         except queue.Empty:
             pass
-        if self.root.state() == "withdrawn":
-            # A hidden panel needs no periodic disk reads or updates.
-            self.root.after(750, self._tick)
-            return
-        self._update_state()
-        self.root.after(750, self._tick)
+        return True

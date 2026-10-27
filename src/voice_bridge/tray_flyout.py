@@ -60,23 +60,42 @@ class TrayFlyout:
         self._focus_key = None
         self.mics = {}
         self.packs = []
+        self.root = None
 
     def show(self):
+        self._start(visible=True)
+
+    def prewarm(self):
+        """Build the hidden window ahead of the first click."""
+        self._start(visible=False)
+
+    def _start(self, visible):
         with self._lock:
             if self._thread is None or not self._thread.is_alive():
-                self._thread = threading.Thread(target=self._run, name="tray-quick-controls", daemon=True)
+                self._thread = threading.Thread(target=self._run, args=(visible,),
+                                                name="tray-quick-controls", daemon=True)
                 self._thread.start()
-            else:
+            elif visible:
                 self._commands.put("show")
+                self._wake()
 
     def stop(self):
         self._commands.put("stop")
+        self._wake()
 
-    def _run(self):
+    def _wake(self):
+        """Handle queued commands now instead of at the next hidden poll (up to 1 s)."""
+        try:
+            self.root.event_generate("<<FlyoutWake>>", when="tail")
+        except Exception:
+            pass  # not built yet or already gone: the poll still picks the command up
+
+    def _run(self, visible=True):
         try:
             with native_menu_dpi():
                 self._build()
-                self._show()
+                if visible or not self._commands.empty():
+                    self._show()
                 self.root.mainloop()
         except Exception:
             logger.exception("Quick controls could not open")
@@ -97,6 +116,7 @@ class TrayFlyout:
         self.root.bind("<Escape>", lambda event: self._escape())
         self.root.bind("<FocusOut>", lambda event: self.root.after(180, self._dismiss_if_outside))
         self.root.bind("<MouseWheel>", self._wheel)
+        self.root.bind("<<FlyoutWake>>", lambda event: self._drain())
         self._dpi = flyout_window.window_dpi(self.root)
         self.scale = self._dpi / 96
         self._build_surface()
@@ -247,7 +267,7 @@ class TrayFlyout:
             tk.Label(self.keys, text=key, font=(self.font, 8), fg=c["text"], bg=c["raised"],
                      padx=self._p(6), pady=self._p(1), highlightthickness=1,
                      highlightbackground=c["line"]).pack(side="left")
-        self._icon_button(footer, "list", "Menu completo", self._full_menu, c["footer"]).pack(side="right")
+        self._icon_button(footer, "power", "Esci da parlaconclaudio", self._exit, c["footer"]).pack(side="right")
         self._icon_button(footer, "settings", "Impostazioni", self._settings, c["footer"]).pack(side="right")
         self.files = self._icon_button(footer, "file", "Trascrivi file audio", self._files, c["footer"])
         self.files.pack(side="right")
@@ -606,9 +626,9 @@ class TrayFlyout:
         self._hide()
         self.tray._open_panel(None, None)
 
-    def _full_menu(self):
+    def _exit(self):
         self._hide()
-        self.tray._show_full_menu()
+        threading.Thread(target=self.tray._exit_clicked, args=(None, None), daemon=True).start()
 
     def _hide(self):
         self.root.withdraw()
@@ -640,9 +660,13 @@ class TrayFlyout:
             self._build_surface()
             self._show()
             return
+        # Native frame first and invisible until final: no jump on screen.
+        self.root.attributes("-alpha", 0.0)
         self.root.deiconify()
         flyout_window.finish_window(self.root, self.dark)
         self._place()  # the native shadow frame changed the client height
+        self.root.update_idletasks()
+        self.root.attributes("-alpha", 1.0)
         self.root.lift()
         self.root.focus_force()
         if self.record_tile:
@@ -666,12 +690,21 @@ class TrayFlyout:
         self.engine.set("Motore attivo: " + self.tray._get_stt_status({})["active_label"])
 
     def _tick(self):
+        if not self._drain():
+            return
+        if self.root.state() != "withdrawn":
+            self._update_state()
+        # A hidden flyout never polls files/devices or renders frames.
+        self.root.after(1000 if self.root.state() == "withdrawn" else 250, self._tick)
+
+    def _drain(self):
+        """Run queued commands; False once the window is destroyed."""
         try:
             while True:
                 command = self._commands.get_nowait()
                 if command == "stop":
                     self.root.destroy()
-                    return
+                    return False
                 if command == "show":
                     self._show()
                 if command == "refresh":
@@ -685,7 +718,4 @@ class TrayFlyout:
                     logger.info("Sound pack preview: no sounds available")
         except queue.Empty:
             pass
-        if self.root.state() != "withdrawn":
-            self._update_state()
-        # A hidden flyout never polls files/devices or renders frames.
-        self.root.after(1000 if self.root.state() == "withdrawn" else 250, self._tick)
+        return True
