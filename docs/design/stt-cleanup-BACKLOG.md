@@ -47,6 +47,13 @@ Va prototipato sul flusso reale, non specificato a tavolino.
   in-place; oppure primo passo con modello locale a bassa latenza.
 - **Re-bench engine STT periodico** — oggi Whisper batte Qwen3-ASR sul reale, ma le
   versioni nuove vanno ri-testate; ledger + harness già pronti (`.work/stt-engine-scan/bench2/`).
+- **Re-bench STT con risultati pubblicabili** [Frisco, 2026-10-27] — rifare il bench
+  italiano (harness `.work/stt-engine-scan/bench3-it/`, FLEURS it_it: script e dati
+  ci sono) includendo i modelli STT usciti di recente, da censire al momento del run.
+  I risultati di bench3 (2026-09-21) non sono più su disco, quindi oggi il README
+  non cita numeri di WER. Questa volta salvare report e numeri in `rollouts/stt-bench/`
+  (append-only, con comando e versione dei modelli), poi citarli nel README con un
+  link all'artefatto.
 - **Bisezione on-truncation dei chunk cleanup** [Frisco, 2026-08-17] — caso reale
   (Recording 16, chunk 3/12): micro-frasi ripetute nel parlato ("Ok." ×23) mandano
   il modello in **runaway di generazione** fino al cap — `completion_tokens ==

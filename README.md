@@ -1,622 +1,408 @@
 <p align="center">
   <h1 align="center">parlaconclaudio</h1>
-  <p align="center"><strong>Talk to Claude with your voice. Dictate, listen, control.</strong></p>
+  <p align="center"><strong>Professional voice dictation for Windows, with spoken status for Claude Code and Codex.</strong></p>
 </p>
 
 <p align="center">
   <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest"><img src="https://img.shields.io/github/v/release/Bottega-Alu/parlaconclaudio?style=flat-square&color=blueviolet&label=version" alt="Latest release"></a>
   <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe"><img src="https://img.shields.io/badge/download-Windows%20installer-0078D4?style=flat-square&logo=windows" alt="Download Windows installer"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%2011-0078D4?style=flat-square&logo=windows" alt="Windows 11">
-  <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?style=flat-square&logo=windows" alt="Windows 10 | 11">
+  <img src="https://img.shields.io/badge/STT-Whisper%20large--v3%20FP16-FF6F00?style=flat-square" alt="Whisper large-v3 FP16">
   <img src="https://img.shields.io/badge/GPU-NVIDIA%20CUDA-76B900?style=flat-square&logo=nvidia" alt="NVIDIA CUDA">
   <img src="https://img.shields.io/badge/cloud-Groq%20%7C%20Deepgram%20%7C%20OpenRouter-FF6F00?style=flat-square" alt="Groq | Deepgram | OpenRouter">
-  <img src="https://img.shields.io/badge/STT-Whisper%20large--v3-FF6F00?style=flat-square" alt="Whisper large-v3">
-  <img src="https://img.shields.io/badge/TTS-edge--tts-00A4EF?style=flat-square&logo=microsoft" alt="edge-tts">
-  <img src="https://img.shields.io/badge/built%20with-Claude%20Code-7C3AED?style=flat-square" alt="Built with Claude Code">
+  <img src="https://img.shields.io/badge/tests-440%20automated-2EA043?style=flat-square" alt="440 automated tests">
+  <img src="https://img.shields.io/badge/install-per--user%2C%20no%20admin-555?style=flat-square" alt="Per-user install, no admin">
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License">
 </p>
 
 ---
 
-**[English](#english)** | **[Italiano](#italiano)** | **[Portugues BR](#portugues-br)**
+**[English](#english)** | **[Italiano](#italiano)** | **[Português BR](#português-br)**
 
 ---
 
 # English
 
-## What is parlaconclaudio?
+## What it is
 
-A voice bridge that started as a way to **talk to Claude Code** — and turned out to be a **better dictation tool than Windows built-in speech recognition**. Faster, more accurate, works in any language, and pastes into any window. Not just for developers.
+parlaconclaudio turns speech into text in **any Windows application**: press your dictation key, speak, and the text lands where you are typing (or on the clipboard, if you prefer). It started as a hands-free way to prompt Claude Code and grew into a general-purpose dictation tool that replaces Windows voice typing for email, documents, chat and code.
 
-> We built it to dictate prompts to Claude Code hands-free. Then we realized Whisper large-v3 on a local GPU crushes Windows Speech Recognition in accuracy, speed, and multilingual support. So now we use it for everything — emails, documents, chat, notes. It just works.
+It also gives your coding agents a voice: **Claude Code and Codex announce** finished work, permission requests and questions, naming the project and the agent that is speaking, so you can step away from the screen without losing track.
 
-Two components:
+## Why it is different
 
-1. **Voice Bridge (STT)** - Press `Ctrl+Alt+Space`, speak, and your words are transcribed and pasted into the active window. Works with local GPU (Whisper large-v3) or cloud providers (Groq, Deepgram) with automatic fallback. Works everywhere — Claude Code, browsers, Office, any app.
+| | |
+|---|---|
+| **Local-first speech recognition** | OpenAI Whisper **large-v3** in **FP16 on CUDA** (faster-whisper / CTranslate2). In local mode your **audio never leaves the PC**. |
+| **Deterministic fallback** | A fixed decision tree: local GPU → Groq → Deepgram. No GPU? A free Groq key is enough. |
+| **Language-preserving LLM cleanup** | An optional pass fixes slips, punctuation and phonetically mangled technical terms (*"di tab"* → **GitHub**), grounded on **your glossary**, and never translates. If the network is down, you get the raw transcript: dictation **never blocks**. |
+| **Engineered for failure** | Retry honouring `Retry-After`, circuit breaker, truncation guard, a supervisor that relaunches a crashed bridge (3 times in 5 minutes, 2/4/6 s back-off) and a single-instance mutex. |
+| **Secrets handled properly** | API keys resolve from environment variables → Windows Credential Manager (keyring) → JSON, in that order. |
+| **Non-destructive integration** | Agent hook files are parsed before writing, backed up with a timestamp and written atomically; a malformed file is reported and never overwritten. |
+| **Native Windows 11 UI** | Fluent icons, system accent colour, live light/dark switching, per-monitor DPI awareness (sharp at 4K / 300%), rounded corners and native shadow. |
+| **Your trigger, your way** | Any key combination, the **middle mouse button** or the **side buttons** (Back/Forward), toggle or hold-to-talk. Mouse triggers are swallowed system-wide so the click never reaches other apps. |
+| **Quiet when idle** | Hidden windows do not poll devices or configuration and do not redraw. |
+| **Tested and verifiable** | 440 automated tests; every release ships a SHA-256 checksum file. |
 
-2. **TTS Notifications** - A Claude Code hook that announces task completions, permission requests, and status changes with natural voices (edge-tts). Walk away from the screen and still know what Claude is doing.
+## Download
 
-## STT Multi-Backend Orchestration
+**[Download the latest Windows installer](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe)** (~23 MB), or choose a version on the **[Releases page](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest)**. Checksums are in `SHA256SUMS.txt` on each release.
 
-parlaconclaudio v0.9.9 introduces **multi-backend STT** with automatic fallback:
+- Installs **per user, without admin rights** (x64). Upgrades install in place.
+- On first launch a bootstrap creates the Python environment and downloads what your machine needs: the **GPU profile** on an NVIDIA PC (~2.3 GB including the Whisper model) or the **CPU/cloud profile** elsewhere (~0.3 GB).
+- Optional: start at sign-in, and connect the voice hooks for Claude Code and Codex.
 
-| Mode | Description |
-|------|-------------|
-| **Auto** (default) | Local GPU if available, else Groq, else Deepgram, else disabled |
-| **Local** | NVIDIA GPU only (with optional cloud fallback) |
-| **Cloud: Groq** | Free tier - 2000 req/day, no credit card required |
-| **Cloud: Deepgram** | Nova-3 model, $200 free credit |
+## Using it
 
-**No GPU? No problem.** Get a free Groq API key at [console.groq.com/keys](https://console.groq.com/keys) and you're ready.
+1. Press **`Ctrl+Alt+Space`** (default) and speak; press it again to stop. A short tone marks start, stop and delivery.
+2. The text is pasted into the active window, or only copied to the clipboard if you turn off **Auto paste**.
+3. **Left click** the tray icon for the quick controls; **right click** for the app window.
 
-API keys are stored securely: environment variables > OS keyring > JSON config.
+The animated tray sphere shows the state: rainbow drift when ready, amber while the engine loads, red while recording, gold while transcribing.
 
-## STT Cleanup (v1.0)
+### Quick controls (left click)
 
-parlaconclaudio v1.0 adds a **language-preserving LLM cleanup** pass over every transcription. Whisper is fast and accurate, but it still drops the odd word, mangles English tech terms heard phonetically (e.g. "di tab" -> **GitHub**), and skips punctuation. The cleanup pass fixes exactly that — and nothing else.
+Laid out like Windows 11 Quick Settings: dictation, audio on/off, sound pack, voice announcements, microphone and recognition engine, separate **sound** and **voice** volume sliders, and shortcuts to audio-file transcription, settings and exit. Sound packs are chosen like Wi-Fi networks: expand a pack to **Listen** or **Use** it. It opens in about a tenth of a second and follows the Windows **system** light/dark mode, like Quick Settings.
 
-- **What it does** — corrects STT slips, restores phonetically-garbled English tech terms, and fixes punctuation, while **preserving the spoken language** (it never translates your IT / EN / PT into another language). Applied to both **live dictation** and **dropped audio files**.
-- **Never blocks you (NullObject)** — if the LLM is unreachable, the raw transcription is kept as-is. Dictation never stalls waiting on the network.
-- **Model** — `google/gemini-2.5-flash` (primary) + `qwen/qwen-2.5-7b-instruct` (fallback), via **[OpenRouter](https://openrouter.ai)**. Chosen empirically: it's the one model that reliably recovers severe phonetic garbles **when handed a glossary**.
-- **Config-driven glossary** (`stt_cleanup_glossary`) — a list of *your* terms (GitHub, Nextcloud, project names…) injected as grounding, so even badly-garbled audio maps back to the right term. This is an **LLM-first whitelist, not a hardcoded alias dictionary**.
-- **Multilingual** — language is auto-detected (the old hardcoded Italian bias is gone). Set `whisper_language` to force a language, leave it empty for auto.
-- **Long-file gating** — for transcriptions longer than `transcribe_extras_max_chars` (default 2500), translations + TTS dub are skipped; you get just the cleaned transcript.
+### App window (right click)
 
-### New `tts_config.json` keys
+Laid out like Windows 11 Settings:
 
-| Key | Default | Purpose |
-|-----|---------|---------|
-| `enable_stt_cleanup` | `true` | Master switch for the LLM cleanup pass |
-| `stt_cleanup_model` | `google/gemini-2.5-flash` | Primary cleanup model (OpenRouter) |
-| `stt_cleanup_fallback` | `qwen/qwen-2.5-7b-instruct` | Fallback model when the primary fails |
-| `stt_cleanup_glossary` | `[]` | Your domain terms, injected as grounding |
-| `transcribe_translations` | `true` | Produce EN/IT/PT translations for dropped audio files |
-| `transcribe_tts_dub` | `true` | Synthesize spoken TTS dubs of the translations |
-| `transcribe_extras_max_chars` | `2500` | Above this length, skip translations + dub (cleaned transcript only) |
+- **Home**: status, engine in use, start dictation, transcribe audio files.
+- **Dictation**: trigger (key combination or mouse button), toggle or hold, a **live test** area that shows the events it receives without dictating, microphone, engine with GPU status, language, auto paste, GPU memory.
+- **Voice alerts**: mute, sound and voice volume, announcement mode, quick voices and all 44 voices in 8 languages, sound pack with preview.
+- **Connections**: Claude Code and Codex voice hooks, start at sign-in, Groq and Deepgram keys (status, where to get them, connection test).
+- **About**: version, documentation, exit.
 
-**OpenRouter key** — set `OPENROUTER_API_KEY` as an environment variable, or `stt_api_key_openrouter` in `tts_config.json`. Same secure resolution scale as the other providers: **environment variables > OS keyring > JSON config**.
+### Audio files
 
-## Architecture
+*Transcribe audio file…* processes recordings in the background with the same engine and cleanup, and can add translations and a spoken dub (see the configuration keys below).
 
-```
-Voice Bridge (STT)
-  Ctrl+Alt+Space -> Microphone -> STT Engine (auto) -> LLM Cleanup -> Clipboard + Ctrl+V -> Terminal
-                                     |                       |
-                                     |                       +-- google/gemini-2.5-flash (primary)
-                                     |                       +-- qwen/qwen-2.5-7b-instruct (fallback)
-                                     |                       +-- NullObject: raw text if LLM down
-                                     +-- Local: Whisper large-v3 (CUDA float16)
-                                     +-- Cloud: Groq (whisper-large-v3)
-                                     +-- Cloud: Deepgram (Nova-3)
+## Speech recognition engines
 
-TTS Notifications
-  Claude Code Hook -> notify-tts.py -> Chime + edge-tts voice announcement
-```
+| Mode | Engine | Notes |
+|---|---|---|
+| **Automatic** (default) | Local GPU, then Groq, then Deepgram | Picks the first available |
+| **Local GPU** | Whisper large-v3, FP16, CUDA | NVIDIA GPU required |
+| **Cloud: Groq** | whisper-large-v3 | Free tier, no credit card |
+| **Cloud: Deepgram** | Nova-3 | Free starting credit |
 
-## Download (Windows installer)
+Dictation language: automatic detection, or fixed to Italian, English, Portuguese, Spanish, French, German or Japanese. Fixing it avoids misdetection on short phrases.
 
-**[Download the latest Windows installer](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe)** (`parlaconclaudio-voice-bridge-Setup.exe`, ~23 MB) or pick a specific version from the **[Releases page](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest)**.
+## LLM cleanup
 
-The installer ships only the app (~20 MB) and installs per-user, no admin rights. On first launch a bootstrap creates the Python venv and downloads the dependencies and the Whisper model that match your machine: GPU profile on an NVIDIA box (~2.3 GB), CPU/cloud profile elsewhere (~0.3 GB). Upgrades install in place over the previous version.
+After transcription an optional pass, through **[OpenRouter](https://openrouter.ai)**, corrects recognition slips, restores English technical terms heard phonetically and fixes punctuation, while **keeping the spoken language**. The model is `google/gemini-2.5-flash` with `qwen/qwen-2.5-7b-instruct` as fallback. Your terms in `stt_cleanup_glossary` are passed to the model as grounding: an LLM-first whitelist, not a hardcoded alias table. In local mode with cleanup on, the **text** (never the audio) is sent to OpenRouter; turn `enable_stt_cleanup` off for fully offline operation.
 
-## Prerequisites
+| `tts_config.json` key | Default | Purpose |
+|---|---|---|
+| `enable_stt_cleanup` | `true` | Master switch for the cleanup pass |
+| `stt_cleanup_model` | `google/gemini-2.5-flash` | Primary model |
+| `stt_cleanup_fallback` | `qwen/qwen-2.5-7b-instruct` | Fallback model |
+| `stt_cleanup_glossary` | `[]` | Your domain terms, used as grounding |
+| `transcribe_translations` | `true` | EN/IT/PT translations for audio files |
+| `transcribe_tts_dub` | `true` | Spoken dub of the translations |
+| `transcribe_extras_max_chars` | `2500` | Above this length: cleaned transcript only |
 
-- Windows 10/11
-- Python 3.11+
-- FFmpeg (`ffplay` in PATH)
-- Claude Code CLI
-- **One of:** NVIDIA GPU with CUDA **or** free Groq/Deepgram API key
+OpenRouter key: `OPENROUTER_API_KEY`, the keyring, or `stt_api_key_openrouter` in `tts_config.json`, in this order.
 
-## Installation from source
+## Voice hooks for Claude Code and Codex
 
-Prefer the installer above unless you want to hack on the code.
+Turn them on in **App window → Connections**. The switches read the real files:
+
+| Agent | File | Events |
+|---|---|---|
+| Claude Code | `%CLAUDE_CONFIG_DIR%` or `~/.claude/settings.json` | `Stop`, `TaskCompleted` (done), `Notification` (needs you), `PreToolUse` on `AskUserQuestion` (needs your choice) |
+| Codex | `%CODEX_HOME%` or `~/.codex/hooks.json` | `Stop` (done), `PermissionRequest` (needs you) |
+
+Connecting adds only the missing entries; disconnecting removes only the entries that run `notify-tts.py`. Each write is parsed first, backed up as `<file>.bak-<timestamp>` and written atomically. The `AskUserQuestion` hook is asynchronous and never answers or approves anything. Codex runs a new hook only after you trust it in `/hooks`; its `notify` key in `config.toml` is left untouched.
+
+Announcements say who is speaking, for example *"Progetto explore-benchmark, Claudio ha bisogno del tuo aiuto"* (status phrases are in Italian; the voice is yours to choose). When several terminals work in parallel, give each session a name so you recognise the agent.
+
+## Sound packs
+
+Eight packs are included in the installer (R2-D2, South Park EN and IT, American Dad, Star Wars, Dune, Maccio Capatonda, Horror Zombie). Each pack is a folder in `~/.claude/cache/tts/sounds/<pack>/` with MP3 files and a `manifest.json` that maps sounds to seven events (`task_done`, `stop`, `permission`, `question`, `idle`, `auth`, `default`). Add a folder and it appears in the list, with no code changes.
+
+## Reliability and operations
+
+- **Single instance**: a second launch exits while a bridge is running (named mutex) and never kills the running one.
+- **Supervisor**: the bridge runs as a child process and is relaunched after a crash, up to 3 times in 5 minutes, then the supervisor stops and logs `supervisor_gave_up`. *Exit* is never relaunched.
+- **Start at sign-in**: a per-user Task Scheduler task (`parlaconclaudio-voice-bridge`), with no admin rights or time limit and restart on failure. If the task cannot be registered, an `HKCU\...\Run` entry is used instead. It is deliberately not a Windows service: services run in session 0, with no hotkeys, clipboard, tray or per-user microphone. Command line: `python -m src.voice_bridge.autostart enable|disable|status`.
+- **Logs**: `voicebridge.log` in the installation folder; TTS errors in `~/.claude/cache/tts/notify-tts.log`.
+
+## Build from source
+
+Prerequisites: Windows 10/11, Python 3.11+, FFmpeg (`ffplay` on `PATH`), and an NVIDIA GPU with CUDA **or** a Groq/Deepgram key.
 
 ```bash
 git clone https://github.com/Bottega-Alu/parlaconclaudio.git
 cd parlaconclaudio
-
 python -m venv venv
 .\venv\Scripts\activate
+pip install faster-whisper pynput pyperclip pyaudio pystray Pillow pywin32 "edge-tts>=7.3.1" keyring
+pip install -e .[gpu]          # optional: local GPU (cuBLAS/cuDNN for CTranslate2, no torch)
 
-# Core dependencies
-pip install faster-whisper pynput pyperclip pyaudio pystray Pillow pywin32 "edge-tts>=7.3.1"
-
-# GPU support (optional - for local Whisper): cuBLAS/cuDNN for ctranslate2, no torch needed
-pip install -e .[gpu]
-
-# Secure key storage (optional)
-pip install keyring
+.\VoiceBridge.bat              # no console window
+.\venv\Scripts\python.exe -m src.voice_bridge    # with live log
+.\venv\Scripts\python.exe -m pytest              # test suite
 ```
 
-## Configure the voice hooks (Claude Code and Codex)
+Installer: `scripts\build_exe.ps1 -Installer` (PyInstaller + Inno Setup 6).
 
-Easiest: tray menu > **🗣️ Hook voci** > tick *Claude Code* and/or *Codex* (or
-*Collega hook per voci interattive (tutti)*); untick, or *Scollega hook Codex e
-Claude Code*, to remove them. The ticks are read from the real files:
-
-| Agent | File | Events wired |
-|---|---|---|
-| Claude Code | `%CLAUDE_CONFIG_DIR%` or `~/.claude/settings.json` | `Stop`, `TaskCompleted` (done), `Notification` (needs you), `PreToolUse` matcher `AskUserQuestion` (needs your choice) |
-| Codex | `%CODEX_HOME%` or `~/.codex/hooks.json` | `Stop` (done), `PermissionRequest` (needs you) |
-
-Connecting only adds the missing entries; disconnecting removes only the entries
-that run `notify-tts.py`, everything else is preserved. Every write is parsed first
-(a malformed file is reported, never overwritten), backed up as
-`<file>.bak-<timestamp>`, and written atomically. The command reuses the
-interpreter + script of an existing notify-tts hook, else the app's
-`venv\Scripts\python.exe`; Codex gets `--source codex`. Codex runs a new hook only
-after you trust it: open `/hooks` in Codex and approve the two entries. Codex's
-`notify` key in `config.toml` is left alone (it holds a single program and is often
-already used).
-
-The `AskUserQuestion` hook is async, prints nothing and exits 0, so it never
-blocks, approves or answers the question. If Claude Code also sends a
-`Notification` for the same pending question, a Notification from the same
-session within 20 s of the question is not spoken (marker
-`~/.claude/cache/tts/notify_question.json`). A 1.0.7 connection (three events)
-shows as unticked: tick it again to add the question hook.
-
-Manual alternative for Claude Code, add to `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "Stop": [{ "hooks": [{ "type": "command", "command": "python C:/PROJECTS/parlaconclaudio/scripts/notify-tts.py", "timeout": 10 }] }],
-    "Notification": [{ "hooks": [{ "type": "command", "command": "python C:/PROJECTS/parlaconclaudio/scripts/notify-tts.py", "timeout": 10 }] }]
-  }
-}
-```
-
-## Launch
-
-```bash
-# Option 1: Batch file (no console window: runs venv\Scripts\pythonw.exe)
-.\VoiceBridge.bat
-
-# Option 2: Direct, with a console showing the live log
-.\venv\Scripts\python.exe -m src.voice_bridge
-```
-
-- **Single instance:** a second launch exits by itself while a bridge is running
-  (named mutex); it never kills the running one. The log is `voicebridge.log`.
-- **Crash relaunch:** the launched process is a supervisor that runs the bridge as a
-  child and relaunches it if it exits with an error (max 3 relaunches in 5 minutes,
-  then it stops and logs `supervisor_gave_up`). *Exit* from the tray is not relaunched.
-- **Start at sign-in:** tray menu > *Avvio automatico all'accesso* (or the installer's
-  "Start when I sign in" option) registers a per-user Task Scheduler task
-  `parlaconclaudio-voice-bridge`: at logon, no admin, no time limit, restart on
-  failure. Not a Windows Service on purpose: services run in session 0, where there
-  is no hotkey, clipboard, tray or per-user microphone. Manage it by hand with
-  `.\venv\Scripts\python.exe -m src.voice_bridge.autostart enable|disable|status`.
-  If the task cannot be registered (access denied, schtasks/Task Scheduler error)
-  the same start is written as the per-user value `parlaconclaudio-voice-bridge`
-  under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (it runs
-  `scripts\start_voice_bridge.py`, which starts the same supervisor). The tray tick
-  is on when either is present, turning it off removes both, and so does the
-  uninstaller; the mechanism used is shown in the tray notification and logged.
-
-## How to Use
-
-1. **Launch** `VoiceBridge.bat` — the Rorschach sphere appears in the system tray
-2. **Press `Ctrl+Alt+Space`** to start recording (sphere turns red, you hear a beep)
-3. **Speak** your message
-4. **Press `Ctrl+Alt+Space` again** to stop recording (second beep)
-5. Your words are transcribed and **automatically pasted** into the active window (third beep)
-
-> **Hotkey:** `Ctrl+Alt+Space` (toggle mode — press once to start, once to stop)
->
-> The text goes to clipboard and is pasted via `Ctrl+V`. In Claude Code CLI, you can also right-click to paste.
-
-## Tray Menu
-
-Right-click the animated Rorschach sphere in the system tray:
+## Project structure
 
 ```
-✨ Voice Bridge v1.0.0.0630 ✨
-────────────────────────────
-🧠 Local GPU  ·  🇮🇹 Italiano  ·  🎤 Default     <- always visible status
-────────────────────────────
-🔔 Mode [full | semi-silent | silent]
-🔊 Volume [25% - 300%]
-🎵 Sound Pack
-🎧 Preview
-────────────────────────────
-⚙️ Settings & Info
-  ├── 🧠 STT Engine [Auto → Local GPU]
-  │     ├── Mode selector (Auto/Local/Groq/Deepgram)
-  │     ├── 📊 Status (GPU ✅/⏳/❌, API keys)
-  │     ├── 🔑 Set API keys (masked input)
-  │     └── 🔗 Test Connection
-  ├── 🎤 Microphone selector
-  ├── 🎙️ TTS Voice (8 presets + full browser)
-  ├── 🌐 STT Language
-  ├── 🧹 Purge VRAM
-  └── 🔗 Links (GitHub, Groq console, Deepgram console)
-────────────────────────────
-🚪 Exit
-```
-
-The sphere animates based on state:
-- **Rainbow drift** - idle, ready
-- **Yellow/amber pulse** - loading STT engine
-- **Red/magenta pulse** - recording
-- **Golden shimmer** - transcribing
-
-## Tip: Name your terminals
-
-When running multiple Claude Code terminals in parallel, start each session with:
-
-```
-You are "Frontend" terminal. You work on UI components.
-```
-
-The TTS voice announces the project name, but naming each terminal helps you recognize **which agent is speaking**.
-
-## Sound Pack System
-
-The TTS system uses **data-driven sound packs** with semantic event mapping.
-
-### Available Packs (188 sounds)
-
-| Pack | Sounds | Description |
-|------|--------|-------------|
-| `r2d2` | 22 | R2-D2 semantic chimes - robot beeps and boops |
-| `south-park` | 28 | Cartman, Kenny, Butters - English |
-| `south-park-ita` | 25 | Cartman doppiaggio italiano, Trombino & Pompadour |
-| `american-dad` | 14 | Roger, Stan Smith & family |
-| `star-wars` | 17 | Lightsabers, Vader, Palpatine, Chewbacca, Duel of Fates |
-| `dune` | 48 | Bene Gesserit Voice, sandworms, shields, Zimmer score |
-| `maccio-capatonda` | 15 | Italiano Medio, SCOPAREEEEE, balletto |
-| `horror-zombie` | 19 | Zombie grunts, horror stingers, groans |
-
-### How it works
-
-Each pack lives in `~/.claude/cache/tts/sounds/<pack-name>/` with a `manifest.json` mapping sounds to 7 semantic events: `task_done`, `stop`, `permission`, `question`, `idle`, `auth`, `default`.
-
-Switch pack from the tray menu or edit `~/.claude/cache/tts/tts_config.json`.
-
-### Create your own pack
-
-1. Create a folder in `~/.claude/cache/tts/sounds/my-pack/`
-2. Add MP3 files (1-5 seconds ideal)
-3. Create `manifest.json` with chime mappings
-4. Select from tray - zero code changes needed
-
-## Project Structure
-
-```
-src/voice_bridge/          # STT Bridge
-  bridge.py                # State machine: IDLE -> RECORDING -> TRANSCRIBING -> OUTPUT
-  transcriber.py           # Multi-backend STT orchestrator (decision tree)
-  config.py                # Configuration (stt_mode, auto_fallback)
-  audio_recorder.py        # Microphone capture with device selection
-  tray_icon.py             # Animated tray icon + settings cruscotto
-  hotkey_listener.py       # Ctrl+Alt+Space hotkey
-  output_handler.py        # Clipboard + Win32 paste
-  sounds.py                # Audio feedback
-
-src/core/stt_engine/       # STT Engines
-  base.py                  # STTEngine ABC, NullSTTEngine, TranscriptionResult
-  whisper_rtx.py           # Local GPU: FasterWhisper on CUDA
-  groq_stt.py              # Cloud: Groq (whisper-large-v3)
-  deepgram_stt.py          # Cloud: Deepgram (Nova-3)
-  key_manager.py           # Secure API key storage (env > keyring > JSON)
-
-src/core/audio_capture/    # Audio Capture
-  drivers/portaudio_driver.py
-
-scripts/
-  notify-tts.py            # Claude Code + Codex TTS hook
-  download_packs.py        # Sound pack downloader
-  generate_manifests.py    # Manifest generator
+src/voice_bridge/
+  bridge.py              State machine: IDLE -> RECORDING -> TRANSCRIBING -> OUTPUT
+  transcriber.py         Multi-backend STT orchestrator (decision tree)
+  stt_cleanup.py         LLM cleanup: NullObject, retry, circuit breaker
+  dictation_trigger.py   Key combination or mouse button, toggle or hold, live test
+  hotkey_listener.py     Global keyboard listener
+  output_handler.py      Clipboard, Win32 paste
+  tray_icon.py           Animated tray icon and settings actions
+  tray_flyout.py         Quick controls (Windows 11 Quick Settings style)
+  control_panel.py       App window (Windows 11 Settings style)
+  fluent.py              Fluent icons, theme, accent, slider and switch
+  supervisor.py          Crash relaunch
+  single_instance.py     Named mutex
+  autostart.py           Task Scheduler / Run key
+src/core/stt_engine/     Whisper (CUDA), Groq, Deepgram, NullSTTEngine, key manager
+src/core/voice_hooks.py  Claude Code / Codex hook wiring
+scripts/notify-tts.py    Voice announcements hook
+installer/               Inno Setup script and bootstrap
 ```
 
 ---
 
 # Italiano
 
-## Cos'e parlaconclaudio?
+## Cos'è
 
-Un bridge vocale nato per **parlare con Claude Code** — e che si e' rivelato un **sistema di dettatura migliore di quello integrato in Windows**. Piu' veloce, piu' preciso, multilingua, e incolla in qualsiasi finestra. Non solo per sviluppatori.
+parlaconclaudio trasforma la voce in testo in **qualsiasi applicazione Windows**: premi il comando di dettatura, parla, e il testo arriva dove stai scrivendo (oppure negli appunti, se preferisci). È nato per dettare prompt a Claude Code a mani libere ed è diventato uno strumento di dettatura generale che sostituisce la dettatura di Windows per email, documenti, chat e codice.
 
-> L'abbiamo costruito per dettare prompt a Claude Code a mani libere. Poi ci siamo resi conto che Whisper large-v3 su GPU locale distrugge il riconoscimento vocale di Windows in precisione, velocita' e supporto multilingua. Ora lo usiamo per tutto — email, documenti, chat, appunti. Funziona e basta.
+Dà anche una voce ai tuoi agenti: **Claude Code e Codex annunciano** la fine dei lavori, le richieste di permesso e le domande, dicendo il progetto e l'agente che parla, così puoi allontanarti dallo schermo senza perdere il filo.
 
-Due componenti:
+## Perché è diverso
 
-1. **Voice Bridge (STT)** - Premi `Ctrl+Alt+Spazio`, parla, e le tue parole vengono trascritte e incollate nella finestra attiva. Funziona con GPU locale (Whisper large-v3) o provider cloud (Groq, Deepgram) con fallback automatico. Funziona ovunque — Claude Code, browser, Office, qualsiasi app.
+| | |
+|---|---|
+| **Riconoscimento vocale local-first** | OpenAI Whisper **large-v3** in **FP16 su CUDA** (faster-whisper / CTranslate2). In modalità locale **l'audio non lascia mai il PC**. |
+| **Fallback deterministico** | Un albero decisionale fisso: GPU locale → Groq → Deepgram. Niente GPU? Basta una chiave Groq gratuita. |
+| **Pulizia LLM che preserva la lingua** | Un passaggio opzionale corregge errori, punteggiatura e termini tecnici storpiati foneticamente (*"di tab"* → **GitHub**), ancorato al **tuo glossario**, senza mai tradurre. Se la rete non c'è ricevi il testo grezzo: la dettatura **non si blocca mai**. |
+| **Progettato per i guasti** | Retry che rispetta `Retry-After`, circuit breaker, controllo sulle risposte troncate, un supervisor che riavvia il bridge dopo un crash (3 volte in 5 minuti, attese di 2/4/6 s) e un mutex di istanza unica. |
+| **Chiavi gestite correttamente** | Le chiavi API si leggono da variabili d'ambiente → Gestione credenziali di Windows (keyring) → JSON, in quest'ordine. |
+| **Integrazione non distruttiva** | I file degli hook vengono letti e validati prima di scrivere, salvati con backup datato e scritti in modo atomico; un file malformato viene segnalato e mai sovrascritto. |
+| **Interfaccia nativa Windows 11** | Icone Fluent, colore principale del sistema, tema chiaro/scuro seguito in tempo reale, DPI per monitor (nitida anche a 4K / 300%), angoli arrotondati e ombra nativa. |
+| **Il comando che vuoi** | Qualsiasi combinazione di tasti, il **tasto centrale del mouse** o i **tasti laterali** (Indietro/Avanti), premi una volta o tieni premuto. I tasti del mouse vengono intercettati a livello di sistema: il clic non arriva alle altre app. |
+| **Silenzioso a riposo** | Le finestre nascoste non interrogano dispositivi né configurazione e non ridisegnano. |
+| **Testato e verificabile** | 440 test automatici; ogni release pubblica il file dei checksum SHA-256. |
 
-2. **Notifiche TTS** - Un hook di Claude Code che annuncia il completamento dei task, richieste di permesso e cambi di stato con voci naturali (edge-tts).
+## Download
 
-## Orchestrazione STT Multi-Backend
+**[Scarica l'ultimo installer per Windows](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe)** (~23 MB), oppure scegli una versione nella **[pagina Releases](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest)**. I checksum sono in `SHA256SUMS.txt` di ogni release.
 
-La v0.9.9 introduce **STT multi-backend** con fallback automatico:
+- Installazione **per utente, senza diritti di amministratore** (x64). Gli aggiornamenti si installano sopra la versione precedente.
+- Al primo avvio un bootstrap crea l'ambiente Python e scarica ciò che serve alla tua macchina: **profilo GPU** su PC NVIDIA (~2,3 GB compreso il modello Whisper) o **profilo CPU/cloud** altrove (~0,3 GB).
+- Opzionale: avvio all'accesso e collegamento degli avvisi vocali per Claude Code e Codex.
 
-| Modalita | Descrizione |
-|----------|-------------|
-| **Auto** (default) | GPU locale se disponibile, altrimenti Groq, Deepgram, o disabilitato |
-| **Local** | Solo GPU NVIDIA (con fallback cloud opzionale) |
-| **Cloud: Groq** | Free tier - 2000 req/giorno, nessuna carta di credito |
-| **Cloud: Deepgram** | Modello Nova-3, $200 di credito gratis |
+## Come si usa
 
-**Niente GPU? Nessun problema.** Ottieni una API key Groq gratuita su [console.groq.com/keys](https://console.groq.com/keys) e sei pronto.
+1. Premi **`Ctrl+Alt+Spazio`** (predefinito) e parla; premi di nuovo per fermare. Un breve suono segna avvio, fine e consegna.
+2. Il testo viene incollato nella finestra attiva, oppure solo copiato negli appunti se spegni **Incolla automaticamente**.
+3. **Clic sinistro** sull'icona nella tray per i comandi rapidi; **clic destro** per la finestra dell'app.
 
-Le API key sono gestite in modo sicuro: variabili d'ambiente > keyring OS > config JSON.
+La sfera animata nella tray mostra lo stato: arcobaleno quando è pronta, ambra mentre carica il motore, rosso mentre registra, oro mentre trascrive.
 
-## STT Cleanup (v1.0)
+### Comandi rapidi (clic sinistro)
 
-La v1.0 aggiunge un passaggio di **cleanup LLM language-preserving** su ogni trascrizione. Whisper e' veloce e preciso, ma ogni tanto perde una parola, storpia i termini tech inglesi sentiti foneticamente (es. "di tab" -> **GitHub**) e salta la punteggiatura. Il cleanup sistema esattamente quello — e nient'altro.
+Come le Impostazioni rapide di Windows 11: dettatura, audio sì/no, pacchetto suoni, avvisi vocali, microfono e motore di riconoscimento, slider separati per volume **suoni** e **voci**, scorciatoie per trascrivere file audio, impostazioni ed Esci. I pacchetti suoni si scelgono come le reti Wi-Fi: espandi un pacchetto per **Ascoltarlo** o **Usarlo**. Si apre in circa un decimo di secondo e segue la modalità chiaro/scuro del **sistema**, come le Impostazioni rapide.
 
-- **Cosa fa** — corregge le sviste STT, restaura i termini tech inglesi resi foneticamente e sistema la punteggiatura, **preservando la lingua parlata** (non traduce mai il tuo IT / EN / PT). Applicato sia alla **dettatura live** sia ai **file audio** droppati.
-- **Non ti blocca mai (NullObject)** — se l'LLM e' irraggiungibile resta il testo grezzo. La dettatura non si ferma mai ad aspettare la rete.
-- **Modello** — `google/gemini-2.5-flash` (primario) + `qwen/qwen-2.5-7b-instruct` (fallback), via **[OpenRouter](https://openrouter.ai)**. Scelto empiricamente: e' l'unico modello che recupera in modo affidabile i garble fonetici severi **quando gli si passa un glossario**.
-- **Glossario config-driven** (`stt_cleanup_glossary`) — una lista dei *tuoi* termini (GitHub, Nextcloud, nomi progetti…) iniettata come grounding, cosi' anche un audio molto storpiato rimappa al termine giusto. E' una **whitelist LLM-first, non un dizionario hardcoded**.
-- **Multilingua** — la lingua viene auto-rilevata (il vecchio bias hardcoded sull'italiano e' stato rimosso). Imposta `whisper_language` per forzare una lingua, lascialo vuoto per auto.
-- **Gating file lunghi** — per trascrizioni piu' lunghe di `transcribe_extras_max_chars` (default 2500) si saltano traduzioni + TTS dub; ottieni solo la trascrizione pulita.
+### Finestra dell'app (clic destro)
 
-### Nuove chiavi `tts_config.json`
+Organizzata come le Impostazioni di Windows 11:
 
-| Chiave | Default | Scopo |
-|--------|---------|-------|
-| `enable_stt_cleanup` | `true` | Interruttore principale del cleanup LLM |
-| `stt_cleanup_model` | `google/gemini-2.5-flash` | Modello di cleanup primario (OpenRouter) |
-| `stt_cleanup_fallback` | `qwen/qwen-2.5-7b-instruct` | Modello di fallback quando il primario fallisce |
-| `stt_cleanup_glossary` | `[]` | I tuoi termini di dominio, iniettati come grounding |
-| `transcribe_translations` | `true` | Produce traduzioni EN/IT/PT per i file audio droppati |
-| `transcribe_tts_dub` | `true` | Sintetizza i dub TTS parlati delle traduzioni |
-| `transcribe_extras_max_chars` | `2500` | Oltre questa lunghezza, salta traduzioni + dub (solo trascrizione pulita) |
+- **Home**: stato, motore in uso, avvio dettatura, trascrizione di file audio.
+- **Dettatura**: comando (combinazione di tasti o tasto del mouse), premi o tieni premuto, un'**area di prova** che mostra gli eventi ricevuti senza dettare, microfono, motore con stato della GPU, lingua, incolla automaticamente, memoria GPU.
+- **Avvisi vocali**: audio sì/no, volume suoni e voci, modalità degli annunci, voci rapide e tutte le 44 voci in 8 lingue, pacchetto suoni con anteprima.
+- **Collegamenti**: avvisi vocali di Claude Code e Codex, avvio all'accesso, chiavi Groq e Deepgram (stato, dove ottenerle, verifica connessione).
+- **Informazioni**: versione, documentazione, Esci.
 
-**Chiave OpenRouter** — imposta `OPENROUTER_API_KEY` come variabile d'ambiente, oppure `stt_api_key_openrouter` in `tts_config.json`. Stessa scala sicura degli altri provider: **variabili d'ambiente > keyring OS > config JSON**.
+### File audio
 
-## Prerequisiti
+*Trascrivi file audio…* elabora le registrazioni in background con lo stesso motore e la stessa pulizia, e può aggiungere traduzioni e un doppiaggio parlato (vedi le chiavi di configurazione qui sotto).
 
-- Windows 10/11
-- Python 3.11+
-- FFmpeg (`ffplay` nel PATH)
-- Claude Code CLI
-- **Uno tra:** GPU NVIDIA con CUDA **oppure** API key Groq/Deepgram gratuita
+## Motori di riconoscimento
 
-## Installazione
+| Modalità | Motore | Note |
+|---|---|---|
+| **Automatico** (predefinito) | GPU locale, poi Groq, poi Deepgram | Usa il primo disponibile |
+| **GPU locale** | Whisper large-v3, FP16, CUDA | Serve una GPU NVIDIA |
+| **Cloud: Groq** | whisper-large-v3 | Piano gratuito, senza carta di credito |
+| **Cloud: Deepgram** | Nova-3 | Credito iniziale gratuito |
 
-```bash
-git clone https://github.com/Bottega-Alu/parlaconclaudio.git
-cd parlaconclaudio
+Lingua di dettatura: rilevamento automatico, oppure fissata su italiano, inglese, portoghese, spagnolo, francese, tedesco o giapponese. Fissarla evita errori di riconoscimento sulle frasi brevi.
 
-python -m venv venv
-.\venv\Scripts\activate
+## Pulizia LLM
 
-# Dipendenze principali
-pip install faster-whisper pynput pyperclip pyaudio pystray Pillow pywin32 "edge-tts>=7.3.1"
+Dopo la trascrizione un passaggio opzionale, tramite **[OpenRouter](https://openrouter.ai)**, corregge gli errori di riconoscimento, ripristina i termini tecnici inglesi sentiti foneticamente e sistema la punteggiatura, **mantenendo la lingua parlata**. Il modello è `google/gemini-2.5-flash` con `qwen/qwen-2.5-7b-instruct` come riserva. I tuoi termini in `stt_cleanup_glossary` vengono passati al modello come riferimento: una whitelist LLM-first, non una tabella di alias scritta nel codice. In modalità locale con la pulizia attiva viene inviato a OpenRouter il **testo** (mai l'audio); spegni `enable_stt_cleanup` per lavorare completamente offline.
 
-# Supporto GPU (opzionale - per Whisper locale)
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+| Chiave in `tts_config.json` | Predefinito | Scopo |
+|---|---|---|
+| `enable_stt_cleanup` | `true` | Attiva la pulizia |
+| `stt_cleanup_model` | `google/gemini-2.5-flash` | Modello principale |
+| `stt_cleanup_fallback` | `qwen/qwen-2.5-7b-instruct` | Modello di riserva |
+| `stt_cleanup_glossary` | `[]` | I tuoi termini, usati come riferimento |
+| `transcribe_translations` | `true` | Traduzioni EN/IT/PT per i file audio |
+| `transcribe_tts_dub` | `true` | Doppiaggio parlato delle traduzioni |
+| `transcribe_extras_max_chars` | `2500` | Oltre questa lunghezza: solo trascrizione pulita |
 
-# Storage sicuro chiavi (opzionale)
-pip install keyring
-```
+Chiave OpenRouter: `OPENROUTER_API_KEY`, il keyring, oppure `stt_api_key_openrouter` in `tts_config.json`, in quest'ordine.
 
-## Avvio
+## Avvisi vocali per Claude Code e Codex
 
-```bash
-.\VoiceBridge.bat
-# oppure
-.\venv\Scripts\python.exe -m src.voice_bridge
-```
+Si attivano in **Finestra dell'app → Collegamenti**. Gli interruttori leggono i file reali:
 
-## Come si Usa
+| Agente | File | Eventi |
+|---|---|---|
+| Claude Code | `%CLAUDE_CONFIG_DIR%` o `~/.claude/settings.json` | `Stop`, `TaskCompleted` (finito), `Notification` (serve il tuo intervento), `PreToolUse` su `AskUserQuestion` (serve una tua scelta) |
+| Codex | `%CODEX_HOME%` o `~/.codex/hooks.json` | `Stop` (finito), `PermissionRequest` (serve il tuo intervento) |
 
-1. **Avvia** `VoiceBridge.bat` — la sfera Rorschach appare nel system tray
-2. **Premi `Ctrl+Alt+Spazio`** per iniziare la registrazione (sfera rossa, beep)
-3. **Parla** il tuo messaggio
-4. **Premi di nuovo `Ctrl+Alt+Spazio`** per fermare la registrazione (secondo beep)
-5. Le tue parole vengono trascritte e **incollate automaticamente** nella finestra attiva (terzo beep)
+Collegare aggiunge solo le voci mancanti; scollegare rimuove solo quelle che eseguono `notify-tts.py`. Ogni scrittura è preceduta dalla validazione del file, da un backup `<file>.bak-<timestamp>` e avviene in modo atomico. L'hook su `AskUserQuestion` è asincrono e non risponde né approva mai nulla. Codex esegue un nuovo hook solo dopo che l'hai approvato in `/hooks`; la chiave `notify` in `config.toml` non viene toccata.
 
-> **Tasto rapido:** `Ctrl+Alt+Spazio` (modalita toggle — premi una volta per iniziare, una per fermare)
->
-> Il testo va in clipboard e viene incollato con `Ctrl+V`. In Claude Code CLI puoi anche fare click destro per incollare.
+Gli annunci dicono chi parla, per esempio *"Progetto explore-benchmark, Claudio ha bisogno del tuo aiuto"*. Con più terminali in parallelo, dai un nome a ogni sessione per riconoscere l'agente.
 
-## Menu Tray
+## Pacchetti suoni
 
-Click destro sulla sfera Rorschach nel system tray:
+Otto pacchetti sono inclusi nell'installer (R2-D2, South Park EN e IT, American Dad, Star Wars, Dune, Maccio Capatonda, Horror Zombie). Ogni pacchetto è una cartella in `~/.claude/cache/tts/sounds/<pacchetto>/` con file MP3 e un `manifest.json` che associa i suoni a sette eventi (`task_done`, `stop`, `permission`, `question`, `idle`, `auth`, `default`). Aggiungi una cartella e compare nella lista, senza modificare il codice.
 
-```
-✨ Voice Bridge v1.0.0.0630 ✨
-────────────────────────────
-🧠 Local GPU  ·  🇮🇹 Italiano  ·  🎤 Default     <- barra stato sempre visibile
-────────────────────────────
-🔔 Mode [full | semi-silent | silent]
-🔊 Volume [25% - 300%]
-🎵 Sound Pack
-🎧 Preview
-────────────────────────────
-⚙️ Settings & Info
-  ├── 🧠 STT Engine (cruscotto con stato GPU/cloud)
-  ├── 🎤 Selezione microfono
-  ├── 🎙️ Voce TTS (8 preset + browser completo)
-  ├── 🌐 Lingua STT
-  ├── 🧹 Purge VRAM
-  └── 🔗 Link (GitHub, Groq, Deepgram)
-```
+## Affidabilità e gestione
 
-La sfera si anima in base allo stato: rainbow (idle), giallo/ambra pulsante (loading), rosso (registrazione), dorato (trascrizione).
+- **Istanza unica**: un secondo avvio si chiude da solo se il bridge è già attivo (mutex con nome) e non termina mai quello in esecuzione.
+- **Supervisor**: il bridge gira come processo figlio e viene riavviato dopo un crash, fino a 3 volte in 5 minuti; poi il supervisor si ferma e registra `supervisor_gave_up`. *Esci* non viene mai riavviato.
+- **Avvio all'accesso**: un'attività dell'Utilità di pianificazione per utente (`parlaconclaudio-voice-bridge`), senza diritti di amministratore né limiti di durata, con riavvio in caso di errore. Se l'attività non si può registrare si usa una voce `HKCU\...\Run`. Non è un servizio di Windows, per scelta: i servizi girano nella sessione 0, senza hotkey, appunti, tray né microfono dell'utente. Da riga di comando: `python -m src.voice_bridge.autostart enable|disable|status`.
+- **Log**: `voicebridge.log` nella cartella di installazione; errori TTS in `~/.claude/cache/tts/notify-tts.log`.
 
-## Sound Pack
+## Compilare dai sorgenti
 
-8 pack disponibili con 188 suoni: `r2d2`, `south-park`, `south-park-ita`, `american-dad`, `star-wars`, `dune`, `maccio-capatonda`, `horror-zombie`.
-
-Cambia pack dal menu tray o modifica `~/.claude/cache/tts/tts_config.json`.
-
-### Creare un pack personalizzato
-
-1. Crea una cartella in `~/.claude/cache/tts/sounds/mio-pack/`
-2. Aggiungi file MP3 (clip brevi, 1-5 secondi ideali)
-3. Crea `manifest.json` con il mapping dei chime
-4. Seleziona dal menu tray - zero codice da modificare
-
-## Tip: Dai un nome ai terminali
-
-Quando usi piu terminali Claude Code in parallelo, inizia ogni sessione con:
-
-```
-Sei il terminale "Frontend". Ti occupi dei componenti UI.
-```
-
-La voce guida annuncia il nome del progetto, ma dare un nome a ogni terminale ti aiuta a riconoscere **quale agente sta parlando**.
+Requisiti, comandi e struttura del progetto sono nella sezione **[Build from source](#build-from-source)** in inglese.
 
 ---
 
-# Portugues BR
+# Português BR
 
-## O que e parlaconclaudio?
+## O que é
 
-Um bridge vocal que comecou como uma forma de **falar com o Claude Code** — e se revelou uma **ferramenta de ditado melhor que o reconhecimento de voz do Windows**. Mais rapido, mais preciso, funciona em qualquer idioma, e cola em qualquer janela. Nao e so para desenvolvedores.
+parlaconclaudio transforma voz em texto em **qualquer aplicativo do Windows**: pressione o comando de ditado, fale, e o texto aparece onde você está digitando (ou na área de transferência, se preferir). Nasceu para ditar prompts ao Claude Code sem usar as mãos e virou uma ferramenta de ditado de uso geral que substitui a digitação por voz do Windows em e-mails, documentos, chat e código.
 
-> Construimos para ditar prompts ao Claude Code sem as maos. Depois percebemos que o Whisper large-v3 na GPU local esmaga o reconhecimento de voz do Windows em precisao, velocidade e suporte multilingual. Agora usamos para tudo — emails, documentos, chat, anotacoes. Simplesmente funciona.
+Também dá voz aos seus agentes: **Claude Code e Codex anunciam** trabalhos concluídos, pedidos de permissão e perguntas, dizendo o projeto e o agente que está falando, para você se afastar da tela sem perder o fio.
 
-Dois componentes:
+## Por que é diferente
 
-1. **Voice Bridge (STT)** - Pressione `Ctrl+Alt+Espaco`, fale, e suas palavras sao transcritas e coladas na janela ativa. Funciona com GPU local (Whisper large-v3) ou provedores cloud (Groq, Deepgram) com fallback automatico. Funciona em qualquer lugar — Claude Code, navegadores, Office, qualquer app.
+| | |
+|---|---|
+| **Reconhecimento de voz local-first** | OpenAI Whisper **large-v3** em **FP16 na CUDA** (faster-whisper / CTranslate2). No modo local **o áudio nunca sai do PC**. |
+| **Fallback determinístico** | Uma árvore de decisão fixa: GPU local → Groq → Deepgram. Sem GPU? Uma chave gratuita da Groq basta. |
+| **Limpeza por LLM que preserva o idioma** | Uma etapa opcional corrige deslizes, pontuação e termos técnicos deturpados foneticamente (*"di tab"* → **GitHub**), ancorada no **seu glossário**, e nunca traduz. Sem rede, você recebe o texto bruto: o ditado **nunca trava**. |
+| **Projetado para falhas** | Retry que respeita `Retry-After`, circuit breaker, proteção contra respostas truncadas, um supervisor que reinicia o bridge após um crash (3 vezes em 5 minutos, esperas de 2/4/6 s) e um mutex de instância única. |
+| **Chaves tratadas corretamente** | As chaves de API são lidas de variáveis de ambiente → Gerenciador de Credenciais do Windows (keyring) → JSON, nessa ordem. |
+| **Integração não destrutiva** | Os arquivos de hooks são validados antes da escrita, ganham backup com data e são gravados de forma atômica; um arquivo malformado é sinalizado e nunca sobrescrito. |
+| **Interface nativa do Windows 11** | Ícones Fluent, cor de destaque do sistema, tema claro/escuro acompanhado em tempo real, DPI por monitor (nítida até em 4K / 300%), cantos arredondados e sombra nativa. |
+| **O comando que você quiser** | Qualquer combinação de teclas, o **botão do meio do mouse** ou os **botões laterais** (Voltar/Avançar), pressionar uma vez ou segurar. Os botões do mouse são interceptados no sistema: o clique não chega aos outros apps. |
+| **Silencioso em repouso** | Janelas ocultas não consultam dispositivos nem configuração e não redesenham. |
+| **Testado e verificável** | 440 testes automatizados; cada release publica o arquivo de checksums SHA-256. |
 
-2. **Notificacoes TTS** - Um hook do Claude Code que anuncia conclusoes de tarefas, pedidos de permissao e mudancas de status com vozes naturais (edge-tts).
+## Download
 
-## Orquestracao STT Multi-Backend
+**[Baixe o instalador mais recente para Windows](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe)** (~23 MB), ou escolha uma versão na **[página Releases](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest)**. Os checksums estão em `SHA256SUMS.txt` de cada release.
 
-A v0.9.9 introduz **STT multi-backend** com fallback automatico:
+- Instalação **por usuário, sem direitos de administrador** (x64). Atualizações instalam por cima da versão anterior.
+- Na primeira execução um bootstrap cria o ambiente Python e baixa o que sua máquina precisa: **perfil GPU** em PCs NVIDIA (~2,3 GB incluindo o modelo Whisper) ou **perfil CPU/nuvem** nos demais (~0,3 GB).
+- Opcional: iniciar com o Windows e conectar os avisos de voz do Claude Code e do Codex.
 
-| Modo | Descricao |
-|------|-----------|
-| **Auto** (padrao) | GPU local se disponivel, depois Groq, Deepgram, ou desativado |
-| **Local** | Somente GPU NVIDIA (com fallback cloud opcional) |
-| **Cloud: Groq** | Free tier - 2000 req/dia, sem cartao de credito |
-| **Cloud: Deepgram** | Modelo Nova-3, $200 de credito gratis |
+## Como usar
 
-**Sem GPU? Sem problema.** Pegue uma API key Groq gratis em [console.groq.com/keys](https://console.groq.com/keys).
+1. Pressione **`Ctrl+Alt+Espaço`** (padrão) e fale; pressione de novo para parar. Um som curto marca início, fim e entrega.
+2. O texto é colado na janela ativa, ou apenas copiado para a área de transferência se você desligar **Colar automaticamente**.
+3. **Clique esquerdo** no ícone da bandeja para os controles rápidos; **clique direito** para a janela do app.
 
-As API keys sao armazenadas com seguranca: variaveis de ambiente > keyring do OS > config JSON.
+A esfera animada na bandeja mostra o estado: arco-íris quando pronta, âmbar enquanto carrega o motor, vermelho gravando, dourado transcrevendo.
 
-## STT Cleanup (v1.0)
+### Controles rápidos (clique esquerdo)
 
-A v1.0 adiciona uma etapa de **cleanup LLM que preserva o idioma** sobre cada transcricao. O Whisper e rapido e preciso, mas ainda perde uma palavra aqui e ali, distorce termos tech em ingles ouvidos foneticamente (ex. "di tab" -> **GitHub**) e pula a pontuacao. O cleanup corrige exatamente isso — e nada mais.
+Como as Configurações rápidas do Windows 11: ditado, áudio ligado/desligado, pacote de sons, avisos de voz, microfone e motor de reconhecimento, controles separados de volume de **sons** e **vozes**, atalhos para transcrever arquivos de áudio, configurações e Sair. Os pacotes de sons são escolhidos como redes Wi-Fi: expanda um pacote para **Ouvir** ou **Usar**. Abre em cerca de um décimo de segundo e acompanha o modo claro/escuro do **sistema**, como as Configurações rápidas.
 
-- **O que faz** — corrige os deslizes do STT, restaura os termos tech em ingles ouvidos foneticamente e ajusta a pontuacao, **preservando o idioma falado** (nunca traduz seu IT / EN / PT). Aplicado tanto ao **ditado ao vivo** quanto aos **arquivos de audio** soltos.
-- **Nunca te bloqueia (NullObject)** — se o LLM estiver inacessivel, o texto bruto e mantido. O ditado nunca trava esperando a rede.
-- **Modelo** — `google/gemini-2.5-flash` (primario) + `qwen/qwen-2.5-7b-instruct` (fallback), via **[OpenRouter](https://openrouter.ai)**. Escolhido empiricamente: e o unico modelo que recupera de forma confiavel os garbles foneticos severos **quando recebe um glossario**.
-- **Glossario config-driven** (`stt_cleanup_glossary`) — uma lista dos *seus* termos (GitHub, Nextcloud, nomes de projetos…) injetada como grounding, para que mesmo um audio muito distorcido remapeie ao termo certo. E uma **whitelist LLM-first, nao um dicionario hardcoded**.
-- **Multilingual** — o idioma e detectado automaticamente (o antigo bias hardcoded no italiano foi removido). Defina `whisper_language` para forcar um idioma, deixe vazio para auto.
-- **Gating de arquivos longos** — para transcricoes maiores que `transcribe_extras_max_chars` (padrao 2500), traducoes + TTS dub sao puladas; voce recebe apenas a transcricao limpa.
+### Janela do app (clique direito)
 
-### Novas chaves `tts_config.json`
+Organizada como as Configurações do Windows 11:
 
-| Chave | Padrao | Proposito |
-|-------|--------|-----------|
-| `enable_stt_cleanup` | `true` | Interruptor principal do cleanup LLM |
-| `stt_cleanup_model` | `google/gemini-2.5-flash` | Modelo de cleanup primario (OpenRouter) |
-| `stt_cleanup_fallback` | `qwen/qwen-2.5-7b-instruct` | Modelo de fallback quando o primario falha |
-| `stt_cleanup_glossary` | `[]` | Seus termos de dominio, injetados como grounding |
-| `transcribe_translations` | `true` | Produz traducoes EN/IT/PT para arquivos de audio soltos |
-| `transcribe_tts_dub` | `true` | Sintetiza os dubs TTS falados das traducoes |
-| `transcribe_extras_max_chars` | `2500` | Acima deste tamanho, pula traducoes + dub (apenas transcricao limpa) |
+- **Início**: estado, motor em uso, iniciar ditado, transcrever arquivos de áudio.
+- **Ditado**: comando (combinação de teclas ou botão do mouse), pressionar ou segurar, uma **área de teste** que mostra os eventos recebidos sem ditar, microfone, motor com estado da GPU, idioma, colar automaticamente, memória da GPU.
+- **Avisos de voz**: áudio ligado/desligado, volume de sons e vozes, modo dos avisos, vozes rápidas e todas as 44 vozes em 8 idiomas, pacote de sons com prévia.
+- **Conexões**: avisos de voz do Claude Code e do Codex, iniciar com o Windows, chaves Groq e Deepgram (estado, onde obter, teste de conexão).
+- **Sobre**: versão, documentação, Sair.
 
-**Chave OpenRouter** — defina `OPENROUTER_API_KEY` como variavel de ambiente, ou `stt_api_key_openrouter` no `tts_config.json`. Mesma escala segura dos outros provedores: **variaveis de ambiente > keyring do OS > config JSON**.
+### Arquivos de áudio
 
-## Pre-requisitos
+*Transcrever arquivo de áudio…* processa gravações em segundo plano com o mesmo motor e a mesma limpeza, e pode adicionar traduções e uma dublagem falada (veja as chaves de configuração abaixo).
 
-- Windows 10/11
-- Python 3.11+
-- FFmpeg (`ffplay` no PATH)
-- Claude Code CLI
-- **Um dos:** GPU NVIDIA com CUDA **ou** API key Groq/Deepgram gratis
+## Motores de reconhecimento
 
-## Instalacao
+| Modo | Motor | Notas |
+|---|---|---|
+| **Automático** (padrão) | GPU local, depois Groq, depois Deepgram | Usa o primeiro disponível |
+| **GPU local** | Whisper large-v3, FP16, CUDA | Requer GPU NVIDIA |
+| **Nuvem: Groq** | whisper-large-v3 | Plano gratuito, sem cartão de crédito |
+| **Nuvem: Deepgram** | Nova-3 | Crédito inicial gratuito |
 
-```bash
-git clone https://github.com/Bottega-Alu/parlaconclaudio.git
-cd parlaconclaudio
+Idioma do ditado: detecção automática, ou fixado em italiano, inglês, português, espanhol, francês, alemão ou japonês. Fixá-lo evita erros de detecção em frases curtas.
 
-python -m venv venv
-.\venv\Scripts\activate
+## Limpeza por LLM
 
-# Dependencias principais
-pip install faster-whisper pynput pyperclip pyaudio pystray Pillow pywin32 "edge-tts>=7.3.1"
+Após a transcrição, uma etapa opcional via **[OpenRouter](https://openrouter.ai)** corrige erros de reconhecimento, restaura termos técnicos em inglês ouvidos foneticamente e acerta a pontuação, **mantendo o idioma falado**. O modelo é `google/gemini-2.5-flash` com `qwen/qwen-2.5-7b-instruct` como reserva. Seus termos em `stt_cleanup_glossary` são passados ao modelo como referência: uma whitelist LLM-first, não uma tabela de aliases no código. No modo local com a limpeza ativa, o **texto** (nunca o áudio) é enviado ao OpenRouter; desligue `enable_stt_cleanup` para operar totalmente offline.
 
-# Suporte GPU (opcional - para Whisper local)
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+| Chave em `tts_config.json` | Padrão | Função |
+|---|---|---|
+| `enable_stt_cleanup` | `true` | Liga a limpeza |
+| `stt_cleanup_model` | `google/gemini-2.5-flash` | Modelo principal |
+| `stt_cleanup_fallback` | `qwen/qwen-2.5-7b-instruct` | Modelo de reserva |
+| `stt_cleanup_glossary` | `[]` | Seus termos, usados como referência |
+| `transcribe_translations` | `true` | Traduções EN/IT/PT para arquivos de áudio |
+| `transcribe_tts_dub` | `true` | Dublagem falada das traduções |
+| `transcribe_extras_max_chars` | `2500` | Acima desse tamanho: só a transcrição limpa |
 
-# Armazenamento seguro de chaves (opcional)
-pip install keyring
-```
+Chave OpenRouter: `OPENROUTER_API_KEY`, o keyring, ou `stt_api_key_openrouter` em `tts_config.json`, nessa ordem.
 
-## Executar
+## Avisos de voz para Claude Code e Codex
 
-```bash
-.\VoiceBridge.bat
-# ou
-.\venv\Scripts\python.exe -m src.voice_bridge
-```
+Ative em **Janela do app → Conexões**. Os interruptores leem os arquivos reais:
 
-## Como Usar
+| Agente | Arquivo | Eventos |
+|---|---|---|
+| Claude Code | `%CLAUDE_CONFIG_DIR%` ou `~/.claude/settings.json` | `Stop`, `TaskCompleted` (concluído), `Notification` (precisa de você), `PreToolUse` em `AskUserQuestion` (precisa da sua escolha) |
+| Codex | `%CODEX_HOME%` ou `~/.codex/hooks.json` | `Stop` (concluído), `PermissionRequest` (precisa de você) |
 
-1. **Execute** `VoiceBridge.bat` — a esfera Rorschach aparece no system tray
-2. **Pressione `Ctrl+Alt+Espaco`** para comecar a gravar (esfera vermelha, beep)
-3. **Fale** sua mensagem
-4. **Pressione `Ctrl+Alt+Espaco` novamente** para parar a gravacao (segundo beep)
-5. Suas palavras sao transcritas e **coladas automaticamente** na janela ativa (terceiro beep)
+Conectar adiciona só as entradas que faltam; desconectar remove só as que executam `notify-tts.py`. Cada escrita é precedida pela validação do arquivo e por um backup `<arquivo>.bak-<timestamp>`, e é atômica. O hook em `AskUserQuestion` é assíncrono e nunca responde nem aprova nada. O Codex só executa um hook novo depois que você o aprova em `/hooks`; a chave `notify` em `config.toml` não é alterada.
 
-> **Tecla de atalho:** `Ctrl+Alt+Espaco` (modo toggle — pressione uma vez para iniciar, uma para parar)
->
-> O texto vai para a area de transferencia e e colado com `Ctrl+V`. No Claude Code CLI voce tambem pode clicar com o botao direito para colar.
+Os avisos dizem quem está falando, por exemplo *"Progetto explore-benchmark, Claudio ha bisogno del tuo aiuto"* (as frases de estado são em italiano; a voz você escolhe). Com vários terminais em paralelo, dê um nome a cada sessão para reconhecer o agente.
 
-## Menu Tray
+## Pacotes de sons
 
-Clique direito na esfera Rorschach no system tray:
+Oito pacotes vêm incluídos no instalador (R2-D2, South Park EN e IT, American Dad, Star Wars, Dune, Maccio Capatonda, Horror Zombie). Cada pacote é uma pasta em `~/.claude/cache/tts/sounds/<pacote>/` com arquivos MP3 e um `manifest.json` que associa os sons a sete eventos (`task_done`, `stop`, `permission`, `question`, `idle`, `auth`, `default`). Adicione uma pasta e ela aparece na lista, sem mudar código.
 
-```
-✨ Voice Bridge v1.0.0.0630 ✨
-────────────────────────────
-🧠 Local GPU  ·  🇮🇹 Italiano  ·  🎤 Default     <- barra de status sempre visivel
-────────────────────────────
-🔔 Mode [full | semi-silent | silent]
-🔊 Volume [25% - 300%]
-🎵 Sound Pack
-🎧 Preview
-────────────────────────────
-⚙️ Settings & Info
-  ├── 🧠 STT Engine (painel com status GPU/cloud)
-  ├── 🎤 Selecao de microfone
-  ├── 🎙️ Voz TTS (8 presets + navegador completo)
-  ├── 🌐 Idioma STT
-  ├── 🧹 Purge VRAM
-  └── 🔗 Links (GitHub, Groq, Deepgram)
-```
+## Confiabilidade e operação
 
-A esfera anima conforme o estado: arco-iris (idle), amarelo/ambar pulsante (carregando), vermelho (gravando), dourado (transcrevendo).
+- **Instância única**: uma segunda execução se encerra sozinha se o bridge já estiver ativo (mutex nomeado) e nunca encerra o que está rodando.
+- **Supervisor**: o bridge roda como processo filho e é reiniciado após um crash, até 3 vezes em 5 minutos; depois o supervisor para e registra `supervisor_gave_up`. *Sair* nunca é reiniciado.
+- **Iniciar com o Windows**: uma tarefa do Agendador de Tarefas por usuário (`parlaconclaudio-voice-bridge`), sem direitos de administrador nem limite de duração, com reinício em caso de falha. Se a tarefa não puder ser registrada, usa-se uma entrada `HKCU\...\Run`. Não é um serviço do Windows, de propósito: serviços rodam na sessão 0, sem atalhos de teclado, área de transferência, bandeja nem microfone do usuário. Linha de comando: `python -m src.voice_bridge.autostart enable|disable|status`.
+- **Logs**: `voicebridge.log` na pasta de instalação; erros de TTS em `~/.claude/cache/tts/notify-tts.log`.
 
-## Sound Packs
+## Compilar a partir do código
 
-8 packs disponiveis com 188 sons: `r2d2`, `south-park`, `south-park-ita`, `american-dad`, `star-wars`, `dune`, `maccio-capatonda`, `horror-zombie`.
-
-Troque o pack pelo menu tray ou edite `~/.claude/cache/tts/tts_config.json`.
-
-### Criar seu proprio pack
-
-1. Crie uma pasta em `~/.claude/cache/tts/sounds/meu-pack/`
-2. Adicione arquivos MP3 (clips curtos, 1-5 segundos ideal)
-3. Crie `manifest.json` com mapeamento de chimes
-4. Selecione pelo menu tray - zero codigo para mudar
-
-## Dica: Nomeie seus terminais
-
-Quando usar varios terminais Claude Code em paralelo, comece cada sessao com:
-
-```
-Voce e o terminal "Frontend". Voce trabalha nos componentes de UI.
-```
-
-A voz guia anuncia o nome do projeto, mas nomear cada terminal ajuda a reconhecer **qual agente esta falando**.
+Requisitos, comandos e estrutura do projeto estão na seção **[Build from source](#build-from-source)** em inglês.
 
 ---
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License — see [LICENSE](LICENSE).
 
-Built with **[Claude Code](https://claude.ai/claude-code)** by [Anthropic](https://anthropic.com).
+Built with **[Claude Code](https://claude.com/claude-code)** by [Anthropic](https://www.anthropic.com).
