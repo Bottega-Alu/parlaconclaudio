@@ -260,7 +260,11 @@ class TrayFlyout:
         self.keys.pack(side="left", padx=(self._p(4), 0))
         self.hint_label = tk.Label(footer, textvariable=self.hint, font=(self.font, 9),
                                    fg=c["muted"], bg=c["footer"])
-        for index, key in enumerate(("Ctrl", "Alt", "Spazio")):
+        from .dictation_trigger import key_caps
+        caps = key_caps(self.tray.dictation_trigger())
+        if len(caps) == 1 and len(caps[0]) > 12:
+            caps = [caps[0].replace("Tasto ", "").replace(" del mouse", " mouse").capitalize()]
+        for index, key in enumerate(caps):
             if index:
                 tk.Label(self.keys, text="+", font=(self.font, 8), fg=c["subtle"],
                          bg=c["footer"]).pack(side="left", padx=self._p(2))

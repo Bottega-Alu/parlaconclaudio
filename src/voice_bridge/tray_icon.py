@@ -489,8 +489,10 @@ class TrayIcon:
         on_toggle_recording=None,
         on_unload_vram=None,
         is_busy=None,
+        dictation_trigger=None,
     ):
         self._on_toggle_recording = on_toggle_recording
+        self._dictation_trigger = dictation_trigger
         self._on_unload_vram = on_unload_vram
         self._is_busy = is_busy
         self._state = "idle"
@@ -747,6 +749,20 @@ class TrayIcon:
         config["auto_paste"] = not auto_paste_enabled(config)
         _save_config(config)
         logger.info(f"Auto paste set to: {config['auto_paste']}")
+
+    def dictation_trigger(self):
+        """The configured trigger, also when the bridge has not passed its live listener (tests, captures)."""
+        from .dictation_trigger import trigger_from_config
+        if self._dictation_trigger is not None:
+            return self._dictation_trigger.trigger
+        return trigger_from_config(_load_config())
+
+    def _set_dictation_trigger(self, trigger) -> None:
+        config = _load_config()
+        config["dictation_trigger"] = trigger.to_config()
+        _save_config(config)
+        if self._dictation_trigger is not None:
+            self._dictation_trigger.reconfigure(trigger)
 
     def _make_set_tts_mode(self, mode_value: str):
         def handler(icon, item):

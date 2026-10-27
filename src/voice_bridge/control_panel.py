@@ -35,6 +35,12 @@ class ControlPanel:
         self._page = "home"
         self.root = None
         self._voice_language = None
+        # Dictation trigger editing: recording a new combination / live test area.
+        self._capturing = False
+        self._held = set()
+        self._trigger_error = None
+        self._testing = False
+        self._test_events = []
         self._autostart = None  # unknown until a worker has asked Windows
 
     def show(self):
@@ -89,8 +95,10 @@ class ControlPanel:
         root.tk.call("tk", "scaling", dpi / 72)
         root.geometry(f"{self._p(920)}x{self._p(660)}")
         root.minsize(self._p(780), self._p(560))
-        root.protocol("WM_DELETE_WINDOW", root.withdraw)
-        root.bind("<Escape>", lambda event: root.withdraw())
+        root.protocol("WM_DELETE_WINDOW", self._close)
+        root.bind("<Escape>", lambda event: self._escape())
+        root.bind("<KeyPress>", self._capture_key, add="+")
+        root.bind("<KeyRelease>", self._capture_release, add="+")
         root.bind("<MouseWheel>", self._wheel)
         root.bind("<<PanelWake>>", lambda event: self._drain())
         self.dark = fluent.dark_mode()
@@ -215,7 +223,20 @@ class ControlPanel:
                  font=(self.font, 8), fg=c["subtle"], bg=c["surface"], justify="left",
                  anchor="w").pack(side="bottom", fill="x", padx=self._p(8))
 
+    def _close(self):
+        self._end_trigger_editing()
+        self.root.withdraw()
+
+    def _escape(self):
+        if self._capturing:
+            self._end_trigger_editing()
+            self._render()
+        else:
+            self._close()
+
     def _go(self, page):
+        if page != self._page:
+            self._end_trigger_editing()
         self._page = page
         self._load()
         self._render()
@@ -273,6 +294,16 @@ class ControlPanel:
                 widget.bind("<Enter>", lambda event: [w.configure(bg=c["hover"]) for w in widgets + [control]])
                 widget.bind("<Leave>", lambda event: [w.configure(bg=c["card"]) for w in widgets + [control]])
         return control
+
+    def _keycaps(self, parent, bg, caps=None):
+        import tkinter as tk
+        from .dictation_trigger import key_caps
+        c = self.colors
+        for index, key in enumerate(caps or key_caps(self.tray.dictation_trigger())):
+            if index:
+                tk.Label(parent, text="+", font=(self.font, 8), fg=c["subtle"], bg=bg).pack(side="left", padx=self._p(3))
+            tk.Label(parent, text=key, font=(self.font, 8), fg=c["text"], bg=c["raised"], padx=self._p(7),
+                     pady=self._p(2), highlightthickness=1, highlightbackground=c["line"]).pack(side="left")
 
     def _button(self, parent, text, command, primary=False, enabled=True):
         import tkinter as tk
@@ -335,12 +366,10 @@ class ControlPanel:
         self.files_button.pack(side="left")
         keys = tk.Frame(hero, bg=c["card"])
         keys.pack(fill="x", pady=(self._p(16), 0))
-        for index, key in enumerate(("Ctrl", "Alt", "Spazio")):
-            if index:
-                tk.Label(keys, text="+", font=(self.font, 8), fg=c["subtle"], bg=c["card"]).pack(side="left", padx=self._p(3))
-            tk.Label(keys, text=key, font=(self.font, 8), fg=c["text"], bg=c["raised"], padx=self._p(7),
-                     pady=self._p(2), highlightthickness=1, highlightbackground=c["line"]).pack(side="left")
-        tk.Label(keys, text="  in qualsiasi app: detta, poi il testo viene incollato dove stai scrivendo.",
+        self._keycaps(keys, c["card"])
+        from .tray_icon import auto_paste_enabled
+        tk.Label(keys, text="  in qualsiasi app: detta, poi il testo viene "
+                 + ("incollato dove stai scrivendo." if auto_paste_enabled(self.config) else "copiato negli appunti."),
                  font=(self.font, 8), fg=c["muted"], bg=c["card"]).pack(side="left")
 
         config = self.config
@@ -361,6 +390,7 @@ class ControlPanel:
     def _page_dictation(self):
         from .tray_icon import STT_MODES, WHISPER_LANGUAGES
         config = self.config
+        self._trigger_section()
         self._section("Ingresso")
         mic = next((name for name, value in self.mics.items() if value == config.get("mic_device_id")),
                    "Predefinito di Windows")
@@ -387,6 +417,123 @@ class ControlPanel:
         self._button(control, "Ricarica modello", lambda: self.tray._purge_vram_clicked(None, None)).pack(side="right")
         self._button(control, "Libera memoria", lambda: self.tray._unload_vram_clicked(),
                      enabled=bool(self.tray._on_unload_vram)).pack(side="right", padx=(0, self._p(8)))
+
+    def _trigger_section(self):
+        import tkinter as tk
+        from .dictation_trigger import MODES, MOUSE_BUTTONS
+        c = self.colors
+        trigger = self.tray.dictation_trigger()
+        self._section("Comando di dettatura")
+        kinds = {"Combinazione di tasti": ("keys", None)}
+        kinds.update({label: ("mouse", button) for button, label in MOUSE_BUTTONS.items()})
+        current = next(label for label, (kind, button) in kinds.items()
+                       if kind == trigger.kind and (kind == "keys" or button == trigger.button))
+        self._combo(self._card("settings", "Comando",
+                               "Un tasto del mouse assegnato alla dettatura non arriva più alle altre app."),
+                    kinds, current, lambda label: self._save_trigger(kind=kinds[label][0],
+                                                                   button=kinds[label][1] or trigger.button))
+        if trigger.kind == "keys":
+            control = self._card("list", "Combinazione",
+                                 self._trigger_error or ("Premi la combinazione da usare. Esc per annullare."
+                                                         if self._capturing else
+                                                         "Funziona in qualsiasi app, anche a finestra chiusa."))
+            if self._capturing:
+                tk.Label(control, text="In ascolto…", font=(self.font, 9, "bold"), fg=c["accent"],
+                         bg=c["card"]).pack(side="right")
+            else:
+                self._button(control, "Cambia…", self._start_capture).pack(side="right", padx=(self._p(12), 0))
+                caps = tk.Frame(control, bg=c["card"])
+                caps.pack(side="right")
+                self._keycaps(caps, c["card"])
+        self._combo(self._card("refresh", "Modalità", "Come si comporta il comando."),
+                    MODES.values(), MODES[trigger.mode],
+                    lambda label: self._save_trigger(mode=next(k for k, v in MODES.items() if v == label)))
+        control = self._card("pulse", "Prova il comando",
+                             self._test_summary() if self._testing else
+                             "Usa il comando qui senza avviare una dettatura vera.")
+        self._button(control, "Termina prova" if self._testing else "Avvia prova",
+                     self._toggle_test, primary=self._testing).pack(side="right")
+
+    def _test_summary(self):
+        if not self._test_events:
+            return "In attesa: usa il comando adesso, in qualsiasi finestra."
+        labels = {"press": "avvio", "release": "fine"}
+        recent = " → ".join(labels[event] for event in self._test_events[-6:])
+        return f"Ricevuto: {recent}. Funziona."
+
+    def _save_trigger(self, **changes):
+        from dataclasses import replace
+        trigger = replace(self.tray.dictation_trigger(), **changes)
+        self._trigger_error = None
+        self._work(lambda: self.tray._set_dictation_trigger(trigger))
+
+    def _start_capture(self):
+        self._end_trigger_editing()
+        self._capturing, self._held, self._trigger_error = True, set(), None
+        if self.tray._dictation_trigger is not None:
+            self.tray._dictation_trigger.pause()
+        self._render()
+        self.root.focus_force()
+
+    def _capture_key(self, event):
+        if not self._capturing:
+            return None
+        from .dictation_trigger import combo_from_tk, modifier_from_tk
+        modifier = modifier_from_tk(event.keysym)
+        if modifier:
+            self._held.add(modifier)
+            return "break"
+        if event.keysym == "Escape":
+            return None  # handled by _escape
+        combo, error = combo_from_tk(self._held, event.keysym)
+        if error:
+            self._trigger_error = error
+            self._render()
+            return "break"
+        if combo:
+            self._end_trigger_editing()
+            self._save_trigger(kind="keys", keys=combo)
+        return "break"
+
+    def _capture_release(self, event):
+        if self._capturing:
+            from .dictation_trigger import modifier_from_tk
+            self._held.discard(modifier_from_tk(event.keysym))
+            return "break"
+        return None
+
+    def _toggle_test(self):
+        if self._testing:
+            self._end_trigger_editing()
+        else:
+            self._end_trigger_editing()
+            listener = self.tray._dictation_trigger
+            if listener is None:
+                self._trigger_error = "La prova funziona solo con la dettatura avviata."
+            else:
+                self._testing, self._test_events = True, []
+                listener.reset_toggle()
+                listener.test_sink = self._test_event
+        self._render()
+
+    def _test_event(self, kind):
+        # Runs on the listener's thread: hand over to Tk.
+        self._test_events.append(kind)
+        self._commands.put("refresh")
+        self._wake()
+
+    def _end_trigger_editing(self):
+        listener = self.tray._dictation_trigger
+        if self._capturing:
+            self._capturing = False
+            self._held = set()
+            if listener is not None:
+                listener.resume()
+        if self._testing:
+            self._testing = False
+            if listener is not None:
+                listener.test_sink = None
+                listener.reset_toggle()
 
     def _engine_summary(self):
         status = self.tray._get_stt_status(self.config)
@@ -528,7 +675,7 @@ class ControlPanel:
             threading.Thread(target=run, daemon=True).start()
 
     def _exit(self):
-        self.root.withdraw()
+        self._close()
         threading.Thread(target=self.tray._exit_clicked, args=(None, None), daemon=True).start()
 
     def _toggle_recording(self):

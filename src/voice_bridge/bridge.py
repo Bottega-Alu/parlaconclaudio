@@ -21,8 +21,8 @@ from .sounds import beep_start, beep_stop, beep_output, beep_ready, beep_timeout
 from .audio_recorder import AudioRecorder
 from .transcriber import Transcriber
 from .output_handler import OutputHandler
-from .hotkey_listener import HotkeyListener
-from .tray_icon import TrayIcon, output_mode_from_config
+from .dictation_trigger import DictationTrigger, describe as describe_trigger, trigger_from_config
+from .tray_icon import TrayIcon, output_mode_from_config, _load_config as _load_tray_config
 from .gesture_listener import GestureListener
 
 from pathlib import Path as _Path
@@ -98,11 +98,10 @@ class VoiceBridge:
             mode=self.config.output_mode,
             auto_submit=self.config.auto_submit,
         )
-        self._hotkey = HotkeyListener(
-            hotkey_str=self.config.hotkey,
+        self._hotkey = DictationTrigger(
+            trigger_from_config(_load_tray_config(), self.config.hotkey, self.config.hotkey_mode),
             on_press=self._on_hotkey_press,
             on_release=self._on_hotkey_release,
-            mode=self.config.hotkey_mode,
         )
         self._tray = TrayIcon(
             on_exit=self.stop,
@@ -116,6 +115,7 @@ class VoiceBridge:
             on_muted_changed=self._on_muted_changed,
             transcriber=self._transcriber,
             recorder=self._recorder,
+            dictation_trigger=self._hotkey,
         )
 
         self._gesture: GestureListener | None = None
@@ -342,7 +342,7 @@ class VoiceBridge:
         self._running = True
         logger.info("=" * 50)
         logger.info("Voice Bridge starting...")
-        logger.info(f"  Hotkey: {self.config.hotkey}")
+        logger.info(f"  Dictation: {describe_trigger(self._hotkey.trigger)} ({self._hotkey.trigger.mode})")
         logger.info(f"  Mode: {self.config.mode}")
         logger.info(f"  Model: {self.config.whisper_model} ({self.config.whisper_device})")
         logger.info(f"  STT Mode: {self.config.stt_mode}")
