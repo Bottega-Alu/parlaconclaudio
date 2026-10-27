@@ -36,7 +36,8 @@ STATE_LABELS = {"idle": "Pronto per dettare", "recording": "Registrazione in cor
 
 
 def _dark_mode():
-    return fluent.dark_mode()
+    # Next to the taskbar, like Quick Settings: follows the system mode, not the app mode.
+    return fluent.dark_mode("system")
 
 
 def _short(text, limit=17):
@@ -126,6 +127,7 @@ class TrayFlyout:
         self.root.tk.call("tk", "scaling", self._dpi / 72)
         self.dark = _dark_mode()
         self.colors = fluent.colors(self.dark)
+        self._theme = (self.dark, self.colors["accent"])
         self.font = fluent.text_font(self.root)
         self.icons = fluent.icon_font(self.root)
         self.root.configure(bg=self.colors["surface"])
@@ -676,7 +678,14 @@ class TrayFlyout:
         x, y = max(left + gap, right - width - gap), max(top + gap, bottom - height - gap)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
+    def _theme_changed(self):
+        dark = _dark_mode()
+        return (dark, fluent.accent(dark)) != getattr(self, "_theme", None)
+
     def _show(self):
+        if self._theme_changed():
+            # Light/dark or accent changed since the window was built (e.g. scheduled switch).
+            self._build_surface()
         self._refresh()
         self._update_state()  # final captions first: they set the height
         self._place()

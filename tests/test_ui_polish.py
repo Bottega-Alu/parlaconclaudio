@@ -169,3 +169,45 @@ def test_frozen_rebuild_suspends_and_restores_painting(monkeypatch):
     with flyout_window.frozen(SimpleNamespace(state=lambda: "withdrawn")):
         calls.append("hidden")
     assert calls == ["hidden"]
+
+
+def test_quick_controls_follow_system_mode_switched_after_prewarm(monkeypatch):
+    from src.voice_bridge import tray_flyout, fluent
+    monkeypatch.setattr(tray_icon, "_load_config", lambda: {"volume": 100})
+    asked = []
+    monkeypatch.setattr(fluent, "dark_mode", lambda surface="apps": asked.append(surface) or state["dark"])
+    state = {"dark": False}
+    tray = tray_icon.TrayIcon()
+    with native_menu_dpi():
+        flyout = TrayFlyout(tray)
+        flyout._build()
+        try:
+            assert flyout.colors == fluent.colors(False)
+            state["dark"] = True  # e.g. Windows' scheduled switch to dark
+            flyout._show()
+            assert flyout.dark and flyout.colors == fluent.colors(True)
+            assert flyout.root["bg"] == fluent.colors(True)["surface"]
+            assert set(asked) == {"system"}  # tray surface: taskbar mode, like Quick Settings
+        finally:
+            flyout.root.destroy()
+
+
+def test_open_app_window_follows_app_mode_switch(monkeypatch):
+    from src.voice_bridge import control_panel, fluent, autostart
+    from src.core import voice_hooks
+    state = {"dark": True}
+    monkeypatch.setattr(fluent, "dark_mode", lambda surface="apps": state["dark"])
+    monkeypatch.setattr(tray_icon, "_load_config", lambda: {"volume": 100})
+    monkeypatch.setattr(voice_hooks, "status", lambda agent: False)
+    monkeypatch.setattr(autostart, "is_enabled", lambda *a, **k: False)
+    panel = control_panel.ControlPanel(tray_icon.TrayIcon())
+    with native_menu_dpi():
+        panel._build()
+        try:
+            assert panel.colors == fluent.colors(True)
+            state["dark"] = False
+            panel._follow_theme()
+            assert not panel.dark and panel.colors == fluent.colors(False)
+            assert panel.nav["bg"] == fluent.colors(False)["surface"]
+        finally:
+            panel.root.destroy()

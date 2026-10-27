@@ -103,6 +103,8 @@ class ControlPanel:
         root.bind("<<PanelWake>>", lambda event: self._drain())
         self.dark = fluent.dark_mode()
         self.colors = c = fluent.colors(self.dark)
+        self._theme = (self.dark, c["accent"])
+        self._theme_ticks = 0
         self.font = fluent.text_font(root)
         self.icons = fluent.icon_font(root)
         root.configure(bg=c["surface"])
@@ -744,8 +746,25 @@ class ControlPanel:
             # A hidden panel needs no periodic disk reads or updates.
             self.root.after(750, self._tick)
             return
+        self._theme_ticks += 1
+        if self._theme_ticks % 4 == 0:  # ~3 s: an open window follows a light/dark switch
+            self._follow_theme()
         self._update_state()
         self.root.after(750, self._tick)
+
+    def _follow_theme(self):
+        dark = fluent.dark_mode()
+        if (dark, fluent.accent(dark)) == self._theme:
+            return
+        self.dark = dark
+        self.colors = c = fluent.colors(dark)
+        self._theme = (dark, c["accent"])
+        self.root.configure(bg=c["surface"])
+        for frame in (self.nav, self.content_holder):
+            frame.configure(bg=c["surface"])
+        self._style()
+        fluent.dark_title_bar(self.root, dark)
+        self._render()
 
     def _drain(self):
         """Run queued commands; False once the window is destroyed."""
@@ -756,6 +775,7 @@ class ControlPanel:
                     self.root.destroy()
                     return False
                 if command == "show":
+                    self._follow_theme()
                     self.root.deiconify()
                     self.root.lift()
                     self.root.focus_force()
