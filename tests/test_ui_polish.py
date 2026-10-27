@@ -123,11 +123,19 @@ def test_hook_plays_voices_at_voice_volume(monkeypatch, tmp_path):
     hook = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(hook)
     monkeypatch.setattr(hook, "load_config", lambda: {"volume": 30, "voice_volume": 150})
-    calls = []
-    monkeypatch.setattr(hook.subprocess, "Popen", lambda args, **kw: calls.append(args))
+    spawned = []
+    monkeypatch.setattr(hook, "_spawn_hidden", lambda args: spawned.append(args) or True)
     clip = tmp_path / "voice.mp3"
     clip.write_bytes(b"")
-    hook.play_mp3(str(clip), hook.get_voice_volume())
+    hook.play_mp3(str(clip), voice=True)
+    hook.play_mp3(str(clip))
+    assert spawned == [["--play", "voice", str(clip)], ["--play", "sound", str(clip)]]
+
+    # No detached player: ffplay at the level read now.
+    calls = []
+    monkeypatch.setattr(hook, "_spawn_hidden", lambda args: False)
+    monkeypatch.setattr(hook.subprocess, "Popen", lambda args, **kw: calls.append(args))
+    hook.play_mp3(str(clip), voice=True)
     hook.play_mp3(str(clip))
     assert [args[args.index("-af") + 1] for args in calls] == ["volume=150/100", "volume=30/100"]
 
