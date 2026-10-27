@@ -120,6 +120,7 @@ class TrayFlyout:
         self.root.bind("<<FlyoutWake>>", lambda event: self._drain())
         self._dpi = flyout_window.window_dpi(self.root)
         self.scale = self._dpi / 96
+        self._curtain = flyout_window.Curtain(self.root)
         self._build_surface()
         self.root.after(150, self._tick)
 
@@ -131,25 +132,49 @@ class TrayFlyout:
         self.font = fluent.text_font(self.root)
         self.icons = fluent.icon_font(self.root)
         self.root.configure(bg=self.colors["surface"])
-        self._render()
+        self._build_pages()
 
-    def _render(self):
-        with flyout_window.frozen(self.root):
-            self._render_now()
+    def _build_pages(self):
+        """Build every page once, stacked in the same place, while the window is hidden.
 
-    def _render_now(self):
+        Tk on Windows paints a freshly built page piece by piece (each widget is a
+        native child window and settles its geometry over several passes): building
+        pages in front of the user is what made the quick controls flicker. Pages are
+        therefore built only here (start, theme/DPI change, new microphones or packs),
+        switching page just raises an already painted one, and actions update texts
+        and colours in place.
+        """
         import tkinter as tk
         for child in self.root.winfo_children():
             child.destroy()
-        self._images = []
-        self.list_canvas = self.slider = None
-        self.record_tile = self.audio_tile = None
-        self.page = tk.Frame(self.root, bg=self.colors["surface"])
-        self.page.pack(fill="both", expand=True)
-        if self._page == "main":
-            self._main_page()
-        else:
-            self._list_page()
+        self._tile_images = {}
+        self._pages, self._lists = {}, {}
+        self.list_canvas, self.rows = None, []
+        for page in ("main",) + ("packs", "voice", "mic", "engine"):
+            frame = tk.Frame(self.root, bg=self.colors["surface"])
+            frame.place(x=0, y=0, relwidth=1, relheight=1)
+            self.page = frame
+            if page == "main":
+                self._main_page()
+            else:
+                self._list_page(page)
+            self._pages[page] = frame
+        self._built_for = self._content_signature()
+        self._raise_page(self._page)
+
+    def _content_signature(self):
+        """What the pages were built from; anything else is updated in place."""
+        return (tuple(self.mics), tuple(self.packs), tuple(self._caps()))
+
+    def _raise_page(self, page):
+        self._page = page
+        self.page = self._pages[page]
+        self.page.tkraise()
+        self.list_canvas, self.rows = self._lists.get(page, (None, []))
+
+    def _render(self):
+        """Show the current page; rebuilding happens only in _build_pages."""
+        self._raise_page(self._page)
 
     def _glyph(self, parent, name, size=12, fg=None, bg=None):
         import tkinter as tk
@@ -259,11 +284,7 @@ class TrayFlyout:
         self.keys.pack(side="left", padx=(self._p(4), 0))
         self.hint_label = tk.Label(footer, textvariable=self.hint, font=(self.font, 9),
                                    fg=c["muted"], bg=c["footer"])
-        from .dictation_trigger import key_caps
-        caps = key_caps(self.tray.dictation_trigger())
-        if len(caps) == 1 and len(caps[0]) > 12:
-            caps = [caps[0].replace("Tasto ", "").replace(" del mouse", " mouse").capitalize()]
-        for index, key in enumerate(caps):
+        for index, key in enumerate(self._caps()):
             if index:
                 tk.Label(self.keys, text="+", font=(self.font, 8), fg=c["subtle"],
                          bg=c["footer"]).pack(side="left", padx=self._p(2))
@@ -275,6 +296,13 @@ class TrayFlyout:
         self.files = self._icon_button(footer, "file", "Trascrivi file audio", self._files, c["footer"])
         self.files.pack(side="right")
         self._paint_status()
+
+    def _caps(self):
+        from .dictation_trigger import key_caps
+        caps = key_caps(self.tray.dictation_trigger())
+        if len(caps) == 1 and len(caps[0]) > 12:
+            caps = [caps[0].replace("Tasto ", "").replace(" del mouse", " mouse").capitalize()]
+        return caps
 
     def _hint(self, text):
         if self._page != "main":
@@ -358,7 +386,10 @@ class TrayFlyout:
             fill, fg, outline = (c["hover"] if tile["hover"] else c["raised"]), c["text"], c["line"]
         if not tile["enabled"]:
             fg = c["subtle"]
-        image = fluent.rounded(self.root, w, h, self._p(6), fill, c["text"] if focused else outline)
+        key = (w, h, fill, c["text"] if focused else outline)
+        image = self._tile_images.get(key)
+        if image is None:
+            image = self._tile_images[key] = fluent.rounded(self.root, w, h, self._p(6), key[2], key[3])
         tile["image"] = image
         canvas.delete("all")
         canvas.create_image(0, 0, image=image, anchor="nw")
@@ -416,10 +447,10 @@ class TrayFlyout:
         return ("Riconoscimento", items, config.get("stt_mode", "auto"), False,
                 "Dove viene trascritta la voce.")
 
-    def _list_page(self):
+    def _list_page(self, page):
         import tkinter as tk
         c = self.colors
-        title, items, current, expandable, note = self._page_spec(self._page)
+        title, items, current, expandable, note = self._page_spec(page)
         header = tk.Frame(self.page, bg=c["surface"], padx=self._p(PAD - 6), pady=self._p(12))
         header.pack(fill="x")
         back = self._icon_button(header, "back", "Indietro", self._back)
@@ -431,20 +462,18 @@ class TrayFlyout:
                      fill="x", padx=self._p(PAD), pady=(0, self._p(8)))
         holder = tk.Frame(self.page, bg=c["surface"], padx=self._p(PAD - 8))
         holder.pack(fill="both", expand=True)
-        row_h = 52
-        visible = min(len(items) + (1 if expandable and self._expanded is not None else 0), 7)
-        self.list_canvas = tk.Canvas(holder, bg=c["surface"], highlightthickness=0,
-                                     height=self._p(visible * row_h + 8))
-        self.list_canvas.pack(fill="both", expand=True)
-        rows = tk.Frame(self.list_canvas, bg=c["surface"])
-        window = self.list_canvas.create_window(0, 0, window=rows, anchor="nw")
-        rows.bind("<Configure>", lambda event: self.list_canvas.configure(
-            scrollregion=self.list_canvas.bbox("all")))
-        self.list_canvas.bind("<Configure>", lambda event: self.list_canvas.itemconfigure(
-            window, width=event.width))
-        self.rows = []
-        for key, label, detail, icon in items:
-            self.rows.append(self._row(rows, key, label, detail, icon, key == current, expandable))
+        canvas = tk.Canvas(holder, bg=c["surface"], highlightthickness=0,
+                           height=self._p(52))  # fills what the fixed window height leaves
+        canvas.pack(fill="both", expand=True)
+        rows_frame = tk.Frame(canvas, bg=c["surface"])
+        window = canvas.create_window(0, 0, window=rows_frame, anchor="nw")
+        rows_frame.bind("<Configure>", lambda event: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window, width=event.width))
+        rows = [self._row(rows_frame, key, label, detail, icon, expandable)
+                for key, label, detail, icon in items]
+        for row in rows:
+            self._style_row(row, row._row_key == current, False)
+        self._lists[page] = (canvas, rows)
         footer = tk.Frame(self.page, bg=c["footer"], padx=self._p(PAD - 4), pady=self._p(8))
         footer.pack(fill="x", side="bottom")
         tk.Frame(self.page, bg=c["line"], height=1).pack(fill="x", side="bottom")
@@ -454,67 +483,106 @@ class TrayFlyout:
         link.bind("<Button-1>", lambda event: self._settings())
         link.bind("<Return>", lambda event: self._settings())
 
-    def _row(self, parent, key, label, detail, icon, current, expandable):
+    def _row(self, parent, key, label, detail, icon, expandable):
+        """A list row whose look is set by _style_row, so selection never rebuilds it."""
         import tkinter as tk
         c = self.colors
-        expanded = expandable and self._expanded == key
-        base = c["raised"] if (current or expanded) else c["surface"]
-        frame = tk.Frame(parent, bg=base, cursor="hand2", takefocus=1,
-                         highlightthickness=1, highlightbackground=base, highlightcolor=c["text"])
+        frame = tk.Frame(parent, cursor="hand2", takefocus=1, highlightthickness=1,
+                         highlightcolor=c["text"])
         frame.pack(fill="x", pady=(0, self._p(2)))
-        bar = tk.Frame(frame, bg=c["accent"] if current else base, width=self._p(3))
+        bar = tk.Frame(frame, width=self._p(3))
         bar.pack(side="left", fill="y", pady=self._p(12))
-        content = tk.Frame(frame, bg=base, padx=self._p(10), pady=self._p(8))
+        content = tk.Frame(frame, padx=self._p(10), pady=self._p(8))
         content.pack(side="left", fill="x", expand=True)
-        top = tk.Frame(content, bg=base)
+        top = tk.Frame(content)
         top.pack(fill="x")
-        glyph = self._glyph(top, icon, 13, c["accent"] if current else c["text"], base)
+        glyph = self._glyph(top, icon, 13)
         glyph.pack(side="left", padx=(0, self._p(12)))
-        texts = tk.Frame(top, bg=base)
+        texts = tk.Frame(top)
         texts.pack(side="left", fill="x", expand=True)
-        tk.Label(texts, text=label, font=(self.font, 10, "bold" if current else "normal"),
-                 fg=c["text"], bg=base, anchor="w").pack(fill="x")
-        tk.Label(texts, text=("In uso · " + detail) if current and expandable else detail,
-                 font=(self.font, 8), fg=c["muted"], bg=base, anchor="w").pack(fill="x")
-        if current and not expandable:
-            self._glyph(top, "check", 11, c["accent"], base).pack(side="right")
-        widgets = [frame, bar, content, top, glyph, texts] + list(texts.winfo_children())
-        if expanded:
-            actions = tk.Frame(content, bg=base)
-            actions.pack(fill="x", pady=(self._p(10), self._p(2)))
-            use = self._text_button(actions, "In uso" if current else "Usa",
-                                    lambda: self._select(key), primary=True, enabled=not current)
+        title = tk.Label(texts, text=label, fg=c["text"], anchor="w")
+        title.pack(fill="x")
+        caption = tk.Label(texts, font=(self.font, 8), fg=c["muted"], anchor="w")
+        caption.pack(fill="x")
+        check = self._glyph(top, "check", 11, c["accent"])
+        parts = {"frame": frame, "bar": bar, "content": content, "top": top, "glyph": glyph,
+                 "texts": texts, "title": title, "caption": caption, "check": check}
+        if expandable:
+            actions = tk.Frame(content)
+            use = self._text_button(actions, "Usa", lambda: self._select(key), primary=True)
             use.pack(side="right")
             listen = self._text_button(actions, "Ascolta", lambda: self._preview(key))
             listen.pack(side="right", padx=(0, self._p(8)))
+            parts.update(actions=actions, use=use)
+        frame._row_key, frame._parts, frame._detail = key, parts, detail
+        frame._expandable, frame._current, frame._expanded = expandable, False, False
+
         def click(event=None):
             if expandable:
                 self._toggle_row(key)
             else:
                 self._select(key)
+
         def hover(on):
-            if current or expanded:
+            if frame._current or frame._expanded:
                 return
-            for widget in widgets:
-                if widget is not bar and widget.winfo_exists():
-                    widget.configure(bg=c["hover"] if on else base)
-        for widget in widgets:
-            if widget is not bar:
-                widget.bind("<Button-1>", click)
-                widget.bind("<Enter>", lambda event: hover(True))
-                widget.bind("<Leave>", lambda event: hover(False))
+            self._paint_row(frame, c["hover"] if on else c["surface"])
+
+        for name in ("frame", "content", "top", "glyph", "texts", "title", "caption", "check"):
+            widget = parts[name]
+            widget.bind("<Button-1>", click)
+            widget.bind("<Enter>", lambda event: hover(True))
+            widget.bind("<Leave>", lambda event: hover(False))
         frame.bind("<Return>", click)
         frame.bind("<space>", click)
         frame.bind("<FocusIn>", lambda event: self._scroll_to(frame))
-        frame._row_key = key
         return frame
+
+    def _paint_row(self, row, base):
+        parts = row._parts
+        for name in ("content", "top", "glyph", "texts", "title", "caption", "check", "actions"):
+            if name in parts:
+                parts[name].configure(bg=base)
+        parts["frame"].configure(bg=base, highlightbackground=base)
+        parts["bar"].configure(bg=self.colors["accent"] if row._current else base)
+
+    def _style_row(self, row, current, expanded):
+        """Selected / expanded look, changed in place."""
+        if (row._current, row._expanded) == (current, expanded) and getattr(row, "_styled", False):
+            return
+        c = self.colors
+        row._current, row._expanded, row._styled = current, expanded, True
+        parts = row._parts
+        self._paint_row(row, c["raised"] if (current or expanded) else c["surface"])
+        if self.icons:
+            parts["glyph"].configure(fg=c["accent"] if current else c["text"])
+        parts["title"].configure(font=(self.font, 10, "bold" if current else "normal"))
+        parts["caption"].configure(text=("In uso · " + row._detail) if current and row._expandable else row._detail)
+        if current and not row._expandable:
+            parts["check"].pack(side="right")
+        else:
+            parts["check"].pack_forget()
+        if row._expandable:
+            parts["use"].configure(text="In uso" if current else "Usa", state="disabled" if current else "normal")
+            if expanded:
+                parts["actions"].pack(fill="x", pady=(self._p(10), self._p(2)))
+            else:
+                parts["actions"].pack_forget()
+
+    def _sync_rows(self):
+        """Every list page reflects the saved settings, without rebuilding anything."""
+        for page, (canvas, rows) in self._lists.items():
+            current = self._page_spec(page)[2]
+            for row in rows:
+                self._style_row(row, row._row_key == current,
+                                page == self._page and row._expandable and row._row_key == self._expanded)
 
     def _toggle_row(self, key):
         """Expand a row in place, like a network in the Windows Wi-Fi list."""
         self._expanded = None if self._expanded == key else key
         self._focus_key = key
-        self._render()
-        self._place()
+        with self._curtain.held():
+            self._sync_rows()
         self._focus_row(key)
 
     def _focus_row(self, key):
@@ -541,22 +609,28 @@ class TrayFlyout:
             self.list_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
 
     def _open_page(self, page):
-        self._page = page
+        if self._curtain.active:
+            return
         self._expanded = None
         self._focus_key = None
-        self._render()
-        self._place()
+        with self._curtain.held():
+            self._raise_page(page)
+            self._sync_rows()
+            self.list_canvas.yview_moveto(0)
         if self.rows:
             current = self._page_spec(page)[2]
             target = next((row for row in self.rows if row._row_key == current), self.rows[0])
             self._focus_row(target._row_key)
 
     def _back(self):
+        if self._curtain.active:
+            return
         previous = self._page
-        self._page = "main"
         self._expanded = None
-        self._render()
-        self._place()
+        with self._curtain.held():
+            self._sync_rows()
+            self._raise_page("main")
+            self._update_main()
         tile = {"packs": "packs", "voice": "voice", "mic": "mic", "engine": "engine"}.get(previous)
         if tile in self.tiles:
             self.tiles[tile]["canvas"].focus_set()
@@ -597,16 +671,21 @@ class TrayFlyout:
         self.packs = list_sound_packs()
 
     def _refresh(self, rebuild=True):
+        """Reload settings and update the pages in place.
+
+        Pages are rebuilt only when what they were built from changed (microphones,
+        sound packs, dictation trigger) or on request, and only while hidden.
+        """
         self._load()
-        focus = getattr(self, "_focus_key", None)
-        if self._page == "main":
-            if rebuild or not self.record_tile or not self.record_tile["canvas"].winfo_exists():
-                self._render()
+        hidden = self.root.state() == "withdrawn"
+        if hidden and (rebuild and self._content_signature() != getattr(self, "_built_for", None)):
+            self._build_pages()
+        # After an action the page is visible: show the new look in one step.
+        with self._curtain.held():
+            self._sync_rows()
             self._update_main()
-            return
-        self._render()
-        if focus is not None:
-            self._focus_row(focus)
+        if self._page != "main" and self._focus_key is not None:
+            self._focus_row(self._focus_key)
 
     def _draw_slider(self):
         if getattr(self, "slider", None):
@@ -662,8 +741,9 @@ class TrayFlyout:
         self.root.withdraw()
         if self._page != "main":
             # Next opening starts from the tiles, like Windows Quick Settings.
-            self._page, self._expanded = "main", None
-            self._render()
+            self._expanded = None
+            self._raise_page("main")
+            self._sync_rows()
 
     def _dismiss_if_outside(self):
         if self.root.state() != "withdrawn" and self.root.focus_displayof() is None:
@@ -673,7 +753,9 @@ class TrayFlyout:
         left, top, right, bottom = flyout_window.work_area()
         width = self._p(WIDTH)
         self.root.update_idletasks()
-        height = self.root.winfo_reqheight()
+        # One height for every page, set by the tiles: switching page never resizes
+        # or moves the window (each resize repainted it); lists scroll inside.
+        height = self._pages["main"].winfo_reqheight()
         gap = self._p(12)
         x, y = max(left + gap, right - width - gap), max(top + gap, bottom - height - gap)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
@@ -700,7 +782,8 @@ class TrayFlyout:
         self.root.deiconify()
         flyout_window.finish_window(self.root, self.dark)
         self._place()  # the native shadow frame changed the client height
-        self.root.update_idletasks()
+        # Map and paint every page while still transparent: it appears complete.
+        self.root.update()
         self.root.attributes("-alpha", 1.0)
         self.root.lift()
         self.root.focus_force()

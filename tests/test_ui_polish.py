@@ -153,23 +153,29 @@ def test_main_page_actions_update_in_place_without_rebuilding(monkeypatch):
             flyout.root.destroy()
 
 
-def test_frozen_rebuild_suspends_and_restores_painting(monkeypatch):
-    calls = []
-    user = SimpleNamespace(
-        GetParent=lambda hwnd: 42,
-        SendMessageW=lambda hwnd, msg, wparam, lparam: calls.append(("redraw", hwnd, wparam)),
-        RedrawWindow=lambda hwnd, rect, region, flags: calls.append(("paint", hwnd, flags)))
-    user.GetParent.argtypes = None
-    monkeypatch.setattr(flyout_window, "_user32", lambda: user)
-    root = SimpleNamespace(state=lambda: "normal", update_idletasks=lambda: None, winfo_id=lambda: 7)
-    with flyout_window.frozen(root):
-        calls.append("rebuild")
-    assert calls == [("redraw", 42, 0), "rebuild", ("redraw", 42, 1), ("paint", 42, flyout_window._REDRAW_ALL)]
-    calls.clear()
-    with flyout_window.frozen(SimpleNamespace(state=lambda: "withdrawn")):
-        calls.append("hidden")
-    assert calls == ["hidden"]
-
+def test_page_switch_happens_behind_a_curtain_lifted_once_painted(monkeypatch):
+    """Opening a list shows the old picture until the new page is fully painted."""
+    monkeypatch.setattr(tray_icon, "_load_config", lambda: {"volume": 100, "sound_pack": "random"})
+    tray = tray_icon.TrayIcon()
+    with native_menu_dpi():
+        flyout = TrayFlyout(tray)
+        flyout._build()
+        try:
+            flyout._show()
+            height = flyout.root.winfo_height()
+            seen = []
+            real_raise = flyout._raise_page
+            def raise_page(page):
+                seen.append((page, flyout._curtain.active, flyout._curtain.top.winfo_ismapped()))
+                real_raise(page)
+            flyout._raise_page = raise_page
+            flyout._open_page("engine")
+            flyout._back()
+            assert seen == [("engine", True, True), ("main", True, True)]
+            assert not flyout._curtain.active and not flyout._curtain.top.winfo_ismapped()
+            assert flyout.root.winfo_height() == height  # one height for every page: no resize
+        finally:
+            flyout.root.destroy()
 
 def test_quick_controls_follow_system_mode_switched_after_prewarm(monkeypatch):
     from src.voice_bridge import tray_flyout, fluent
