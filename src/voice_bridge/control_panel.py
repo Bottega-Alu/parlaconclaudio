@@ -164,6 +164,11 @@ class ControlPanel:
     # ── layout ──────────────────────────────────────────────────────
 
     def _render(self):
+        from . import flyout_window
+        with flyout_window.frozen(self.root):
+            self._render_now()
+
+    def _render_now(self):
         import tkinter as tk
         c = self.colors
         for frame in (self.nav, self.content_holder):

@@ -1,6 +1,11 @@
 """Small Win32 helpers for the application's own quick-controls window."""
 import ctypes
+from contextlib import contextmanager
 from ctypes import wintypes
+
+WM_SETREDRAW = 0x000B
+# RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME
+_REDRAW_ALL = 0x0001 | 0x0004 | 0x0080 | 0x0100 | 0x0400
 
 
 def _user32():
@@ -14,6 +19,35 @@ def window_handle(root):
     root.update_idletasks()
     user = _user32()
     return user.GetParent(root.winfo_id()) or root.winfo_id()
+
+
+@contextmanager
+def frozen(root):
+    """Rebuild a visible window's widgets with one final paint instead of a flicker.
+
+    Every Tk widget is a native child window: destroying and recreating them
+    paints each intermediate state. A withdrawn window needs nothing.
+    """
+    hwnd = None
+    user = None
+    try:
+        if root.state() != "withdrawn":
+            user = _user32()
+            user.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+            user.RedrawWindow.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.HANDLE, wintypes.UINT]
+            hwnd = window_handle(root)
+            user.SendMessageW(hwnd, WM_SETREDRAW, 0, 0)
+    except (AttributeError, OSError):
+        hwnd = None
+    try:
+        yield
+    finally:
+        if hwnd:
+            try:
+                root.update_idletasks()
+            finally:
+                user.SendMessageW(hwnd, WM_SETREDRAW, 1, 0)
+                user.RedrawWindow(hwnd, None, None, _REDRAW_ALL)
 
 
 def window_dpi(root):

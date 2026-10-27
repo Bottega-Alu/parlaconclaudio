@@ -130,3 +130,42 @@ def test_hook_plays_voices_at_voice_volume(monkeypatch, tmp_path):
     hook.play_mp3(str(clip), hook.get_voice_volume())
     hook.play_mp3(str(clip))
     assert [args[args.index("-af") + 1] for args in calls] == ["volume=150/100", "volume=30/100"]
+
+
+def test_main_page_actions_update_in_place_without_rebuilding(monkeypatch):
+    config = {"volume": 100, "muted": False, "sound_pack": "random"}
+    monkeypatch.setattr(tray_icon, "_load_config", lambda: dict(config))
+    monkeypatch.setattr(tray_icon, "_save_config", lambda value: config.update(value))
+    tray = tray_icon.TrayIcon()
+    with native_menu_dpi():
+        flyout = TrayFlyout(tray)
+        flyout._build()
+        try:
+            flyout._show()
+            canvas = flyout.record_tile["canvas"]
+            config.update(muted=True, volume=40)
+            flyout._commands.put("refresh")
+            flyout._drain()
+            assert flyout.record_tile["canvas"] is canvas  # nothing destroyed: no flicker
+            assert flyout.tiles["audio"]["value"]["text"] == "Disattivato"
+            assert flyout.slider.value == 40
+        finally:
+            flyout.root.destroy()
+
+
+def test_frozen_rebuild_suspends_and_restores_painting(monkeypatch):
+    calls = []
+    user = SimpleNamespace(
+        GetParent=lambda hwnd: 42,
+        SendMessageW=lambda hwnd, msg, wparam, lparam: calls.append(("redraw", hwnd, wparam)),
+        RedrawWindow=lambda hwnd, rect, region, flags: calls.append(("paint", hwnd, flags)))
+    user.GetParent.argtypes = None
+    monkeypatch.setattr(flyout_window, "_user32", lambda: user)
+    root = SimpleNamespace(state=lambda: "normal", update_idletasks=lambda: None, winfo_id=lambda: 7)
+    with flyout_window.frozen(root):
+        calls.append("rebuild")
+    assert calls == [("redraw", 42, 0), "rebuild", ("redraw", 42, 1), ("paint", 42, flyout_window._REDRAW_ALL)]
+    calls.clear()
+    with flyout_window.frozen(SimpleNamespace(state=lambda: "withdrawn")):
+        calls.append("hidden")
+    assert calls == ["hidden"]

@@ -36,7 +36,7 @@ def test_rapid_actions_are_serialized_and_not_dropped():
     assert not calls
     flyout._commands.put("refresh")
     flyout.root = SimpleNamespace(state=lambda: "withdrawn", after=lambda *a: None)
-    flyout._refresh = lambda: None
+    flyout._refresh = lambda rebuild=True: None
     started = []
     flyout._work = lambda action: started.append(action)
     flyout._tick()

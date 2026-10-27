@@ -132,6 +132,10 @@ class TrayFlyout:
         self._render()
 
     def _render(self):
+        with flyout_window.frozen(self.root):
+            self._render_now()
+
+    def _render_now(self):
         import tkinter as tk
         for child in self.root.winfo_children():
             child.destroy()
@@ -202,21 +206,14 @@ class TrayFlyout:
         grid = tk.Frame(body, bg=c["surface"])
         grid.pack(fill="x")
         grid.columnconfigure((0, 1, 2), weight=1, uniform="tiles")
-        config = self._config
-        pack = config.get("sound_pack", "r2d2")
-        mode = config.get("tts_mode", "full")
-        from .tray_icon import TTS_MODES, STT_MODES
-        mode_label = next((label for label, value in TTS_MODES.items() if value == mode), mode)
-        mic_label = next((name for name, value in self.mics.items()
-                          if value == config.get("mic_device_id")), "Predefinito")
+        values = self._tile_values()
         specs = [
             ("record", "mic", "Dettatura", "Avvia", self._record, None),
-            ("audio", "speaker", "Audio", "Attivo", self._mute, None),
-            ("packs", "music", "Suoni", "Casuale" if pack == "random" else fluent.pretty_pack(pack), None, "packs"),
-            ("voice", "chat", "Avvisi vocali", mode_label, None, "voice"),
-            ("mic", "mic", "Microfono", mic_label.split(" [")[0], None, "mic"),
-            ("engine", "chip", "Riconoscimento",
-             STT_MODES.get(config.get("stt_mode", "auto"), "").split(" (")[0], None, "engine"),
+            ("audio", "speaker", "Audio", values["audio"], self._mute, None),
+            ("packs", "music", "Suoni", values["packs"], None, "packs"),
+            ("voice", "chat", "Avvisi vocali", values["voice"], None, "voice"),
+            ("mic", "mic", "Microfono", values["mic"], None, "mic"),
+            ("engine", "chip", "Riconoscimento", values["engine"], None, "engine"),
         ]
         self.tiles = {}
         for index, (key, icon, title, value, action, page) in enumerate(specs):
@@ -287,6 +284,32 @@ class TrayFlyout:
         else:
             self.hint_label.pack_forget()
             self.keys.pack(side="left", padx=(self._p(4), 0))
+
+    def _tile_values(self):
+        from .tray_icon import TTS_MODES, STT_MODES
+        config = self._config
+        pack = config.get("sound_pack", "r2d2")
+        mode = config.get("tts_mode", "full")
+        mic = next((name for name, value in self.mics.items()
+                    if value == config.get("mic_device_id")), "Predefinito")
+        return {
+            "audio": "Disattivato" if self._muted else f"Suoni {self.volume}% · voci {self.voice_volume}%",
+            "packs": "Casuale" if pack == "random" else fluent.pretty_pack(pack),
+            "voice": next((label for label, value in TTS_MODES.items() if value == mode), mode),
+            "mic": mic.split(" [")[0],
+            "engine": STT_MODES.get(config.get("stt_mode", "auto"), "").split(" (")[0],
+        }
+
+    def _update_main(self):
+        """After an action on the main page: change texts and colours, rebuild nothing."""
+        for key, text in self._tile_values().items():
+            self.tiles[key]["value"].configure(text=_short(text))
+        self._paint_tile(self.audio_tile, not self._muted)
+        icon = "mute" if self._muted else "speaker"
+        if self.icons and self.volume_icon.winfo_exists():
+            self.volume_icon.configure(text=ICON[icon])
+        self._draw_slider()
+        self._update_state()
 
     def _tile(self, cell, key, icon, title, value, action, page):
         """Quick Settings tile: rounded button above a two-line caption."""
@@ -571,17 +594,16 @@ class TrayFlyout:
         self.mics.update({f"{d.name} [{d.device_id}]": d.device_id for d in self.tray._list_mics()})
         self.packs = list_sound_packs()
 
-    def _refresh(self):
+    def _refresh(self, rebuild=True):
         self._load()
         focus = getattr(self, "_focus_key", None)
-        self._render()
         if self._page == "main":
-            self._paint_tile(self.audio_tile, not self._muted)
-            self.audio_tile["value"].configure(
-                text="Disattivato" if self._muted else f"Suoni {self.volume}% · voci {self.voice_volume}%")
-            self._draw_slider()
-            self._update_state()
-        elif focus is not None:
+            if rebuild or not self.record_tile or not self.record_tile["canvas"].winfo_exists():
+                self._render()
+            self._update_main()
+            return
+        self._render()
+        if focus is not None:
             self._focus_row(focus)
 
     def _draw_slider(self):
@@ -713,7 +735,7 @@ class TrayFlyout:
                     self._show()
                 if command == "refresh":
                     self._working = False
-                    self._refresh()
+                    self._refresh(rebuild=False)
                     if self._pending_actions:
                         self._work(self._pending_actions.pop(0))
                 if command == "error" and self._page == "main":
