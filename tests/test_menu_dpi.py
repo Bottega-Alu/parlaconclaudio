@@ -46,26 +46,10 @@ def test_real_tray_run_context_is_pm_v2_then_restored():
     assert equal(get(), before)
 
 
-def test_native_volume_selection_and_action_stay_in_sync(monkeypatch, tmp_path):
-    from src.voice_bridge import autostart
-    from src.core import voice_hooks
-    from src.core.stt_engine.key_manager import KeyManager
-
-    config = {"volume": 125, "whisper_language": "it", "tts_mode": "full"}
+def test_volume_action_saves_the_level(monkeypatch):
+    config = {"volume": 125}
     monkeypatch.setattr(tray_icon, "_load_config", lambda: dict(config))
     monkeypatch.setattr(tray_icon, "_save_config", lambda new: config.update(new))
-    monkeypatch.setattr(tray_icon, "SOUNDS_DIR", tmp_path)
-    monkeypatch.setattr(autostart, "is_enabled", lambda: False)
-    monkeypatch.setattr(voice_hooks, "status", lambda agent: False)
-    monkeypatch.setattr(KeyManager, "get_key", lambda provider: None)
     tray = tray_icon.TrayIcon()
-    menu = tray._build_menu()
-    volume = next(item for item in menu if item.text.startswith("Volume:"))
-    levels = [item for item in volume.submenu if item.text.endswith("%")]
-    assert [item.text for item in levels if item.checked] == ["125%"]
-    assert all(item.radio for item in levels)
-    next(item for item in levels if item.text == "75%")(None)
+    tray._make_set_volume(75)(None, None)
     assert config["volume"] == 75
-    rebuilt = tray._build_menu()
-    volume = next(item for item in rebuilt if item.text.startswith("Volume:"))
-    assert [item.text for item in volume.submenu if item.checked] == ["75%"]

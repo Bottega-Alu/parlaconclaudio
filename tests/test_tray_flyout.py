@@ -7,12 +7,13 @@ from src.voice_bridge.tray_popup import FlyoutIcon
 from pystray._util import win32
 
 
-def test_both_tray_buttons_open_quick_controls():
+def test_left_click_opens_quick_controls_and_right_click_the_app_window():
     received = []
-    icon = SimpleNamespace(_on_quick_controls=lambda **kwargs: received.append(kwargs))
+    icon = SimpleNamespace(_on_quick_controls=lambda **kwargs: received.append(("quick", kwargs)),
+                           _on_open_panel=lambda: received.append(("panel", {})))
     FlyoutIcon._on_notify(icon, 0, win32.WM_LBUTTONUP)
     FlyoutIcon._on_notify(icon, 0, win32.WM_RBUTTONUP)
-    assert received == [{"left_click": True}, {"left_click": False}]
+    assert received == [("quick", {"left_click": True}), ("panel", {})]
 
 
 def test_hidden_flyout_does_not_poll_settings_devices_or_render():

@@ -173,6 +173,21 @@ def _save_config(config: dict) -> None:
         logger.error(f"Failed to save config: {e}")
 
 
+def auto_paste_enabled(config: dict | None = None) -> bool:
+    """Whether dictated text is pasted (Ctrl+V) or only copied to the clipboard."""
+    return bool((config if config is not None else _load_config()).get("auto_paste", True))
+
+
+def voice_volume(config: dict) -> int:
+    """Volume of spoken announcements; follows the sound volume until set on its own."""
+    return int(config.get("voice_volume", config.get("volume", 200)))
+
+
+def output_mode_from_config(default: str) -> str:
+    """Clipboard-only when the user turned auto paste off; otherwise the configured mode."""
+    return default if auto_paste_enabled() else "clipboard_only"
+
+
 def _play_sound(filepath: str) -> None:
     """Play a sound file for preview at configured volume."""
     config = _load_config()
@@ -192,6 +207,27 @@ def _play_sound(filepath: str) -> None:
         )
     except Exception:
         pass
+
+
+def list_sound_packs() -> list[tuple[str, int]]:
+    """Installed sound packs as (name, mp3 count); "_"-prefixed dirs are private."""
+    if not SOUNDS_DIR.is_dir():
+        return []
+    return [(d.name, len(list(d.glob("*.mp3")))) for d in sorted(SOUNDS_DIR.iterdir())
+            if d.is_dir() and not d.name.startswith("_")]
+
+
+def preview_sound_pack(pack_name: str) -> bool:
+    """Play one random sound of a pack ("random" picks any pack); False if empty."""
+    import random
+    packs = [name for name, count in list_sound_packs() if count]
+    if pack_name == "random":
+        pack_name = random.choice(packs) if packs else ""
+    sounds = sorted((SOUNDS_DIR / pack_name).glob("*.mp3")) if pack_name else []
+    if not sounds:
+        return False
+    _play_sound(str(random.choice(sounds)))
+    return True
 
 
 # ══════════════════════════════════════════════════
@@ -453,8 +489,10 @@ class TrayIcon:
         on_toggle_recording=None,
         on_unload_vram=None,
         is_busy=None,
+        dictation_trigger=None,
     ):
         self._on_toggle_recording = on_toggle_recording
+        self._dictation_trigger = dictation_trigger
         self._on_unload_vram = on_unload_vram
         self._is_busy = is_busy
         self._state = "idle"
@@ -472,6 +510,7 @@ class TrayIcon:
         self._thread: threading.Thread | None = None
         self._animator = _IconAnimator()
         self._flyout = None
+        self._flyout_lock = threading.Lock()
         self._flyout_timer = None
 
     @property
@@ -490,231 +529,6 @@ class TrayIcon:
             return parts[2].replace("Neural", "").replace("Multilingual", " ML")
         return voice_id
 
-    def _build_voice_submenu(self, current_voice_id: str) -> "pystray.Menu":
-        """Build voice selection submenu organized by language."""
-        lang_submenus = []
-        for lang_name, voices in EDGE_VOICES.items():
-            voice_items = []
-            for v in voices:
-                is_current = (v["id"] == current_voice_id)
-                label = f"{v['name']} ({'femminile' if v['gender'] == 'F' else 'maschile'})"
-                voice_items.append(pystray.MenuItem(
-                    label,
-                    self._make_set_voice(v["id"]),
-                    checked=lambda item, selected=is_current: selected,
-                    radio=True,
-                ))
-            lang_submenus.append(pystray.MenuItem(
-                f"{lang_name}",
-                pystray.Menu(*voice_items),
-            ))
-        return pystray.Menu(*lang_submenus)
-
-    def _build_menu(self) -> "pystray.Menu":
-        config = _load_config()
-        current_pack = config.get("sound_pack", "r2d2")
-        is_muted = config.get("muted", False)
-        current_lang = config.get("whisper_language")
-        current_voice = config.get("voice", {"voice": "it-IT-IsabellaNeural"})
-        current_voice_id = current_voice.get("voice", "it-IT-IsabellaNeural")
-
-        # --- Voci rapide submenu ---
-        preset_items = []
-        for preset_name, preset_data in VOICE_PRESETS.items():
-            is_current = (preset_data["voice"] == current_voice_id)
-            preset_items.append(pystray.MenuItem(
-                f"{preset_name}",
-                self._make_set_voice_preset(preset_name),
-                checked=lambda item, selected=is_current: selected,
-                radio=True,
-            ))
-
-        # --- Full voice browser by language ---
-        voice_display = self._voice_display_name(current_voice_id)
-        voice_browser = self._build_voice_submenu(current_voice_id)
-
-        # --- Whisper Language submenu ---
-        lang_items = []
-        for label, code in WHISPER_LANGUAGES.items():
-            checked = (current_lang == code)
-            lang_items.append(pystray.MenuItem(
-                f"{label}",
-                self._make_set_language(code),
-                checked=lambda item, selected=checked: selected,
-                radio=True,
-            ))
-
-        # --- Sound Pack submenu ---
-        pack_items = []
-        # Random meta-entry first
-        random_checked = (current_pack == "random")
-        pack_items.append(pystray.MenuItem(
-            f"Casuale (tutti i pacchetti)",
-            self._make_set_sound_pack("random"),
-            checked=lambda item, selected=random_checked: selected,
-            radio=True,
-        ))
-        if SOUNDS_DIR.is_dir():
-            for pack_dir in sorted(SOUNDS_DIR.iterdir()):
-                if pack_dir.is_dir() and not pack_dir.name.startswith("_"):
-                    pack_name = pack_dir.name
-                    count = len(list(pack_dir.glob("*.mp3")))
-                    checked = (pack_name == current_pack)
-                    pack_items.append(pystray.MenuItem(
-                        f"{pack_name} ({count})",
-                        self._make_set_sound_pack(pack_name),
-                        checked=lambda item, selected=checked: selected,
-                        radio=True,
-                    ))
-
-        # --- TTS Mode submenu ---
-        current_mode = config.get("tts_mode", "full")
-        current_mode_label = next((label for label, value in TTS_MODES.items() if value == current_mode), current_mode)
-        mode_items = []
-        for mode_label, mode_value in TTS_MODES.items():
-            checked = (current_mode == mode_value)
-            mode_items.append(pystray.MenuItem(
-                f"{mode_label}",
-                self._make_set_tts_mode(mode_value),
-                checked=lambda item, selected=checked: selected,
-                radio=True,
-            ))
-
-        # --- Volume submenu ---
-        current_vol = config.get("volume", 200)
-        vol_items = []
-
-        # Mute toggle
-        vol_items.append(pystray.MenuItem(
-            f"Disattivato",
-            self._make_toggle_mute(),
-            checked=lambda item, selected=is_muted: selected,
-        ))
-        vol_items.append(pystray.Menu.SEPARATOR)
-
-        for level in VOLUME_LEVELS:
-            checked = (level == current_vol)
-            vol_items.append(pystray.MenuItem(
-                f"{level}%",
-                self._make_set_volume(level),
-                checked=lambda item, selected=checked: selected,
-                radio=True,
-            ))
-
-        # --- Preview Sounds submenu ---
-        # When pack=random, preview shows mp3s from a deterministic pack
-        # so the menu doesn't reshuffle every rebuild.
-        preview_pack = current_pack
-        if preview_pack == "random" and SOUNDS_DIR.is_dir():
-            real_packs = sorted(
-                p.name for p in SOUNDS_DIR.iterdir()
-                if p.is_dir() and not p.name.startswith("_")
-            )
-            preview_pack = real_packs[0] if real_packs else current_pack
-        preview_items = []
-        pack_dir = SOUNDS_DIR / preview_pack
-        if pack_dir.is_dir():
-            for mp3 in sorted(pack_dir.glob("*.mp3"))[:15]:
-                preview_items.append(pystray.MenuItem(
-                    f"{mp3.stem}",
-                    self._make_preview_sound(str(mp3)),
-                ))
-
-        # === Resolve status labels for top-level display ===
-        devices = self._list_mics()
-        stt_status = self._get_stt_status(config)
-        stt_engine_item = self._build_stt_engine_menu(config)
-        mic_item = self._build_mic_menu(config, devices)
-
-        # Language display
-        lang_display = "Auto"
-        if current_lang:
-            for label, code in WHISPER_LANGUAGES.items():
-                if code == current_lang:
-                    lang_display = f"{label}"
-                    break
-
-        # Mic display
-        mic_device = config.get("mic_device_id")
-        mic_display = "Predefinito di Windows"
-        if self._recorder and mic_device is not None:
-            try:
-                for dev in devices:
-                    if dev.device_id == mic_device:
-                        mic_display = dev.name[:25]
-                        break
-            except Exception:
-                mic_display = f"Device {mic_device}"
-
-        # Engine display
-        engine_display = "Da caricare" if stt_status["active"] == "not_loaded" else stt_status["active_label"]
-
-        # === Build Settings submenu ===
-        settings_menu = pystray.Menu(
-            # STT Engine (cruscotto)
-            stt_engine_item,
-            pystray.Menu.SEPARATOR,
-            # Microphone
-            mic_item,
-            pystray.Menu.SEPARATOR,
-            # Voce notifiche
-            pystray.MenuItem(f"Voce notifiche [{voice_display}]", pystray.Menu(
-                pystray.MenuItem(f"Voci rapide", pystray.Menu(*preset_items)),
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem(f"Tutte le voci", voice_browser),
-            )),
-            # Lingua dettatura
-            pystray.MenuItem(f"Lingua dettatura [{lang_display}]", pystray.Menu(*lang_items)),
-            pystray.Menu.SEPARATOR,
-            # System
-            pystray.MenuItem("Ricarica modello GPU", self._purge_vram_clicked),
-            pystray.MenuItem("Libera memoria GPU", self._unload_vram_clicked, enabled=bool(self._on_unload_vram)),
-            pystray.Menu.SEPARATOR,
-            # Links
-            pystray.MenuItem(f"Progetto su GitHub", self._open_repo),
-            pystray.MenuItem(f"Ottieni chiave API Groq", self._open_groq_console),
-            pystray.MenuItem(f"Ottieni chiave API Deepgram", self._open_deepgram_console),
-        )
-
-        vol_display = "Disattivato" if is_muted else f"{current_vol}%"
-
-        from . import autostart
-        autostart_on = autostart.is_enabled()
-        hooks_item = self._build_voice_hooks_menu()
-
-        from .build_info import VERSION
-        return pystray.Menu(
-            pystray.MenuItem(f"parlaconclaudio {VERSION}", None, enabled=False),
-            pystray.MenuItem("Apri pannello", self._open_panel, default=True),
-            pystray.Menu.SEPARATOR,
-            # --- Status dashboard (always visible, read-only) ---
-            pystray.MenuItem(f"Dettatura: {engine_display} - {lang_display}", None, enabled=False),
-            pystray.MenuItem(f"Microfono: {mic_display}", None, enabled=False),
-            pystray.Menu.SEPARATOR,
-            # --- Quick access ---
-            pystray.MenuItem(f"Notifiche: {current_mode_label}", pystray.Menu(*mode_items)),
-            pystray.MenuItem(f"Volume: {vol_display}", pystray.Menu(*vol_items)),
-            pystray.MenuItem(
-                f"Suoni: {'Casuale' if current_pack == 'random' else current_pack}",
-                pystray.Menu(*pack_items),
-            ),
-            pystray.MenuItem("Ascolta suoni", pystray.Menu(*preview_items) if preview_items else None, enabled=bool(preview_items)),
-            pystray.Menu.SEPARATOR,
-            # --- Audio file batch transcription ---
-            pystray.MenuItem("Trascrivi file audio…", self._transcribe_files_clicked),
-            pystray.Menu.SEPARATOR,
-            # --- Settings & Info ---
-            pystray.MenuItem("Impostazioni", settings_menu),
-            hooks_item,
-            pystray.MenuItem(
-                "Avvio con Windows",
-                self._toggle_autostart_clicked,
-                checked=lambda item, on=autostart_on: on,
-            ),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Esci", self._exit_clicked),
-        )
-
     # ------------------------------------------------------------------
     # Microphone selector
     # ------------------------------------------------------------------
@@ -726,45 +540,6 @@ class TrayIcon:
             logger.warning("Failed to list microphones: %s", exc)
             return []
 
-    def _build_mic_menu(self, config: dict, devices=None) -> "pystray.MenuItem":
-        """Build microphone selection submenu."""
-        current_device = config.get("mic_device_id")  # None = default
-        devices = self._list_mics() if devices is None else devices
-
-        mic_items = []
-        if self._recorder:
-            try:
-                for dev in devices:
-                    is_current = (current_device == dev.device_id) or (current_device is None and dev.is_default)
-                    default_mark = " (default)" if dev.is_default else ""
-                    label = f"[{dev.device_id}] {dev.name}{default_mark}"
-                    mic_items.append(pystray.MenuItem(
-                        label,
-                        self._make_set_mic(dev.device_id),
-                        checked=lambda item, selected=is_current: selected,
-                        radio=True,
-                    ))
-            except Exception as e:
-                logger.warning(f"Failed to list mic devices: {e}")
-
-        if not mic_items:
-            mic_items.append(pystray.MenuItem("  Nessun microfono trovato", None, enabled=False))
-
-        current_name = "Predefinito di Windows"
-        if self._recorder and current_device is not None:
-            try:
-                for dev in devices:
-                    if dev.device_id == current_device:
-                        current_name = dev.name[:20]
-                        break
-            except Exception:
-                current_name = f"Device {current_device}"
-
-        return pystray.MenuItem(
-            "Microfono",
-            pystray.Menu(*mic_items),
-        )
-
     def _make_set_mic(self, device_id: int):
         def handler(icon, item):
             if self._on_mic_changed and self._on_mic_changed(device_id) is False:
@@ -774,7 +549,6 @@ class TrayIcon:
             config["mic_device_id"] = device_id
             _save_config(config)
             logger.info(f"Microphone set to device {device_id}")
-            self._rebuild_menu()
         return handler
 
     # ------------------------------------------------------------------
@@ -815,73 +589,6 @@ class TrayIcon:
             "gpu_state": gpu_state,
         }
 
-    def _build_stt_engine_menu(self, config: dict) -> "pystray.MenuItem":
-        """Build the STT Engine cruscotto submenu."""
-        status = self._get_stt_status(config)
-        stt_mode = status["mode"]
-
-        # Title shows resolved backend: [Auto → Groq] or [GPU locale]
-        if stt_mode == "auto":
-            title_suffix = f"Auto → {status['active_label']}"
-        else:
-            title_suffix = status["active_label"]
-
-        # Mode selector items
-        mode_items = []
-        for mode_key, mode_label in STT_MODES.items():
-            is_current = (stt_mode == mode_key)
-            mode_items.append(pystray.MenuItem(
-                f"{mode_label}",
-                self._make_set_stt_mode(mode_key),
-                checked=lambda item, selected=is_current: selected,
-                radio=True,
-            ))
-
-        # Status dashboard (read-only)
-        gpu_state = status["gpu_state"]
-        gpu_icons = {"loaded": "caricata", "loading": "caricamento", "not_loaded": "non caricata", "not_detected": "non rilevata", "cloud": "non in uso"}
-        gpu_mark = gpu_icons.get(gpu_state, "non disponibile")
-
-        from ..core.stt_engine.key_manager import KeyManager
-        has_groq = bool(KeyManager.get_key("groq"))
-        has_deepgram = bool(KeyManager.get_key("deepgram"))
-        groq_mark = "configurata" if has_groq else "non configurata"
-        deepgram_mark = "configurata" if has_deepgram else "non configurata"
-
-        status_items = [
-            pystray.MenuItem(f"Provider: {status['active_label']}", None, enabled=False),
-            pystray.MenuItem(f"GPU: {gpu_mark} {status['gpu']}", None, enabled=False),
-            pystray.MenuItem(f"Chiave Groq: {groq_mark}", None, enabled=False),
-            pystray.MenuItem(f"Chiave Deepgram: {deepgram_mark}", None, enabled=False),
-        ]
-
-        # API key items
-        key_items = [
-            pystray.MenuItem(f"Imposta chiave Groq…", self._ask_api_key_groq),
-            pystray.MenuItem(f"Imposta chiave Deepgram…", self._ask_api_key_deepgram),
-        ]
-
-        # Test connection
-        test_item = pystray.MenuItem(f"Verifica connessione", self._test_cloud_connection)
-
-        # Warning if disabled
-        warn_items = []
-        if status["active"] == "disabled":
-            warn_items.append(pystray.MenuItem("Configura un provider cloud per dettare", None, enabled=False))
-
-        return pystray.MenuItem(
-            f"Motore dettatura [{title_suffix}]",
-            pystray.Menu(
-                *warn_items,
-                *mode_items,
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem(f"Stato del motore", pystray.Menu(*status_items)),
-                pystray.Menu.SEPARATOR,
-                *key_items,
-                test_item,
-            ),
-        )
-
     def _make_set_stt_mode(self, mode: str):
         def handler(icon, item):
             if self._on_stt_mode_changed:
@@ -894,7 +601,6 @@ class TrayIcon:
                 config["stt_mode"] = mode
                 _save_config(config)
             logger.info(f"STT mode set to: {mode}")
-            self._rebuild_menu()
         return handler
 
     def _ask_api_key_groq(self, icon, item):
@@ -917,7 +623,6 @@ class TrayIcon:
                     from ..core.stt_engine.key_manager import KeyManager
                     store = KeyManager.set_key(provider, key.strip())
                     logger.info(f"{provider} API key saved ({store})")
-                    self._rebuild_menu()
             except Exception as e:
                 logger.error(f"API key dialog failed: {e}")
         threading.Thread(target=_run, daemon=True).start()
@@ -984,7 +689,6 @@ class TrayIcon:
             config["whisper_language"] = lang_code
             _save_config(config)
             logger.info(f"Whisper language set to: {lang_code or 'auto'}")
-            self._rebuild_menu()
         return handler
 
     def _make_set_voice_preset(self, preset_name):
@@ -996,7 +700,6 @@ class TrayIcon:
             config.pop("claudio", None)
             _save_config(config)
             logger.info(f"Voice set to preset: {preset_name}")
-            self._rebuild_menu()
         return handler
 
     def _make_set_voice(self, voice_id: str):
@@ -1010,7 +713,6 @@ class TrayIcon:
             _save_config(config)
             name = self._voice_display_name(voice_id)
             logger.info(f"Voice set to: {name} ({voice_id})")
-            self._rebuild_menu()
         return handler
 
     def _make_set_volume(self, level: int):
@@ -1021,7 +723,14 @@ class TrayIcon:
             if self._on_volume_changed:
                 self._on_volume_changed(level)
             logger.info(f"Volume set to: {level}%")
-            self._rebuild_menu()
+        return handler
+
+    def _make_set_voice_volume(self, level: int):
+        def handler(icon, item):
+            config = _load_config()
+            config["voice_volume"] = level
+            _save_config(config)
+            logger.info(f"Voice volume set to: {level}%")
         return handler
 
     def _make_toggle_mute(self):
@@ -1033,8 +742,27 @@ class TrayIcon:
             if self._on_muted_changed:
                 self._on_muted_changed(new_state)
             logger.info(f"Mute toggled: {new_state}")
-            self._rebuild_menu()
         return handler
+
+    def _toggle_auto_paste_clicked(self, icon=None, item=None):
+        config = _load_config()
+        config["auto_paste"] = not auto_paste_enabled(config)
+        _save_config(config)
+        logger.info(f"Auto paste set to: {config['auto_paste']}")
+
+    def dictation_trigger(self):
+        """The configured trigger, also when the bridge has not passed its live listener (tests, captures)."""
+        from .dictation_trigger import trigger_from_config
+        if self._dictation_trigger is not None:
+            return self._dictation_trigger.trigger
+        return trigger_from_config(_load_config())
+
+    def _set_dictation_trigger(self, trigger) -> None:
+        config = _load_config()
+        config["dictation_trigger"] = trigger.to_config()
+        _save_config(config)
+        if self._dictation_trigger is not None:
+            self._dictation_trigger.reconfigure(trigger)
 
     def _make_set_tts_mode(self, mode_value: str):
         def handler(icon, item):
@@ -1042,7 +770,6 @@ class TrayIcon:
             config["tts_mode"] = mode_value
             _save_config(config)
             logger.info(f"TTS mode set to: {mode_value}")
-            self._rebuild_menu()
         return handler
 
     def _make_set_sound_pack(self, pack_name):
@@ -1051,12 +778,6 @@ class TrayIcon:
             config["sound_pack"] = pack_name
             _save_config(config)
             logger.info(f"Sound pack set to: {pack_name}")
-            self._rebuild_menu()
-        return handler
-
-    def _make_preview_sound(self, filepath):
-        def handler(icon, item):
-            _play_sound(filepath)
         return handler
 
     def _notify(self, message: str) -> None:
@@ -1070,28 +791,6 @@ class TrayIcon:
     # ------------------------------------------------------------------
     # Voice hooks (notify-tts.py) for Claude Code and Codex
     # ------------------------------------------------------------------
-
-    def _build_voice_hooks_menu(self) -> "pystray.MenuItem":
-        """Checked state is read from the real config files at every rebuild."""
-        from ..core import voice_hooks as vh
-
-        items = []
-        for agent in vh.AGENTS:
-            state = vh.status(agent)  # True / False / None = unreadable
-            suffix = " (configurazione non leggibile)" if state is None else ""
-            items.append(pystray.MenuItem(
-                f"{vh.AGENT_LABEL[agent]}{suffix}",
-                self._make_toggle_voice_hook(agent),
-                checked=lambda item, on=bool(state): on,
-            ))
-        items += [
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Collega entrambi",
-                             self._make_set_all_voice_hooks(True)),
-            pystray.MenuItem("Scollega entrambi",
-                             self._make_set_all_voice_hooks(False)),
-        ]
-        return pystray.MenuItem("Collegamenti vocali", pystray.Menu(*items))
 
     def _apply_voice_hooks(self, plan: list[tuple[str, bool]]) -> None:
         """Run connect/disconnect per agent; log + one notification for all."""
@@ -1108,21 +807,6 @@ class TrayIcon:
                 f"backup={res.backup} {res.message}")
             lines.append(res.summary())
         self._notify("\n".join(lines)[:250])  # Windows balloon text limit ~256
-        self._rebuild_menu()
-
-    def _make_toggle_voice_hook(self, agent: str):
-        def handler(icon, item):
-            from ..core import voice_hooks as vh
-            want = vh.status(agent) is not True
-            threading.Thread(target=self._apply_voice_hooks, args=([(agent, want)],), daemon=True).start()
-        return handler
-
-    def _make_set_all_voice_hooks(self, want: bool):
-        def handler(icon, item):
-            from ..core import voice_hooks as vh
-            plan = [(a, want) for a in vh.AGENTS]
-            threading.Thread(target=self._apply_voice_hooks, args=(plan,), daemon=True).start()
-        return handler
 
     def _toggle_autostart_clicked(self, icon, item):
         def _run():
@@ -1131,14 +815,7 @@ class TrayIcon:
             log = logger.info if result.ok else logger.error
             log(result.log_line())  # includes the mechanism: task | run_key
             self._notify(result.summary())
-            self._rebuild_menu()
         threading.Thread(target=_run, daemon=True).start()
-
-    def _rebuild_menu(self):
-        if self._icon:
-            with native_menu_dpi():
-                self._icon.menu = self._build_menu()
-                self._icon.update_menu()
 
     def start(self) -> None:
         if not TRAY_AVAILABLE:
@@ -1155,8 +832,8 @@ class TrayIcon:
             "voice_bridge",
             initial_img,
             "parlaconclaudio - Pronto",
-            self._build_menu(),
             on_quick_controls=self._open_flyout,
+            on_open_panel=self._open_panel,
         )
 
         # Start animator
@@ -1167,6 +844,23 @@ class TrayIcon:
         self._thread = threading.Thread(target=self._run_icon, daemon=True)
         self._thread.start()
         logger.info("Tray icon started with animated marble sphere")
+        # The first click then only shows an already built window.
+        prewarm = threading.Timer(3.0, self._prewarm_flyout)
+        prewarm.daemon = True
+        prewarm.start()
+
+    def _quick_controls(self):
+        from .tray_flyout import TrayFlyout
+        with self._flyout_lock:
+            if self._flyout is None:
+                self._flyout = TrayFlyout(self)
+            return self._flyout
+
+    def _prewarm_flyout(self):
+        try:
+            self._quick_controls().prewarm()
+        except Exception:
+            logger.exception("Quick controls prewarm failed")
 
     def _run_icon(self):
         # Set DPI context before pystray creates the native owner windows.
@@ -1189,14 +883,7 @@ class TrayIcon:
             self._show_flyout()
 
     def _show_flyout(self):
-        from .tray_flyout import TrayFlyout
-        if self._flyout is None:
-            self._flyout = TrayFlyout(self)
-        self._flyout.show()
-
-    def _show_full_menu(self):
-        if self._icon:
-            self._icon.show_full_menu()
+        self._quick_controls().show()
 
     def set_state(self, state: str) -> None:
         self._state = state

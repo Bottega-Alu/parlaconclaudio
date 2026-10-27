@@ -50,19 +50,3 @@ def test_not_loaded_engine_does_not_claim_loading():
     status = tray._get_stt_status({})
     assert status['active_label'] == 'In attesa del primo utilizzo'
     assert status['gpu_state'] == 'not_loaded'
-
-
-def test_menu_enumerates_microphones_only_once(monkeypatch, tmp_path):
-    from src.voice_bridge import autostart
-    from src.core.stt_engine.key_manager import KeyManager
-    calls = []
-    device = SimpleNamespace(device_id=2, name="Test microphone", is_default=True)
-    recorder = SimpleNamespace(list_devices=lambda: calls.append(1) or [device])
-    tray = tray_icon.TrayIcon(recorder=recorder)
-    monkeypatch.setattr(tray_icon, "_load_config", lambda: {"mic_device_id": 2})
-    monkeypatch.setattr(tray_icon, "SOUNDS_DIR", tmp_path)
-    monkeypatch.setattr(autostart, "is_enabled", lambda: False)
-    monkeypatch.setattr(KeyManager, "get_key", lambda provider: None)
-    monkeypatch.setattr(tray, "_build_voice_hooks_menu", lambda: tray_icon.pystray.MenuItem("Hooks", None, enabled=False))
-    tray._build_menu()
-    assert calls == [1]

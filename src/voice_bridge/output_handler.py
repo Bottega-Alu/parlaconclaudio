@@ -107,6 +107,14 @@ class OutputHandler:
         self._mode = mode
         self._auto_submit = auto_submit
 
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    @mode.setter
+    def mode(self, value: str) -> None:
+        self._mode = value
+
     def deliver(self, text: str) -> bool:
         """
         Deliver text to the user.

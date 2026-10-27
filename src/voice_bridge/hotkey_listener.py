@@ -52,42 +52,45 @@ class HotkeyListener:
 
     @staticmethod
     def _parse_hotkey(hotkey_str: str) -> tuple[set, keyboard.Key | keyboard.KeyCode]:
-        """Parse '<ctrl>+<alt>+<space>' into (modifier_set, trigger_key)."""
-        parts = [p.strip() for p in hotkey_str.split("+")]
-        modifiers = set()
-        trigger = None
-
-        key_map = {
+        """Parse '<ctrl>+<alt>+<space>' / '<f9>' / '<ctrl>+<shift>+d' into (modifier_set, trigger_key)."""
+        parts = [p.strip().lower() for p in hotkey_str.split("+") if p.strip()]
+        modifier_keys = {
             "<ctrl>": keyboard.Key.ctrl_l,
             "<shift>": keyboard.Key.shift_l,
             "<alt>": keyboard.Key.alt_l,
-            "<space>": keyboard.Key.space,
-            "<enter>": keyboard.Key.enter,
-            "<tab>": keyboard.Key.tab,
+            "<cmd>": keyboard.Key.cmd,
         }
-
+        modifiers = set()
+        trigger = None
         for part in parts:
-            lower = part.lower()
-            if lower in ("<ctrl>", "<shift>", "<alt>"):
-                modifiers.add(key_map[lower])
-            elif lower in key_map:
-                trigger = key_map[lower]
+            if part in modifier_keys:
+                modifiers.add(modifier_keys[part])
+            elif part.startswith("<") and part.strip("<>") in keyboard.Key.__members__:
+                trigger = keyboard.Key[part.strip("<>")]
+            elif len(part.strip("<>")) == 1 and part.strip("<>").isalnum():
+                # By virtual key: with Ctrl held Windows reports a control character, not the letter.
+                trigger = keyboard.KeyCode.from_vk(ord(part.strip("<>").upper()))
             else:
-                trigger = keyboard.KeyCode.from_char(lower.strip("<>"))
-
+                logger.warning(f"Unknown hotkey part {part!r} in {hotkey_str!r}")
         if trigger is None:
             trigger = keyboard.Key.space
-
         return modifiers, trigger
 
     def _normalize_key(self, key) -> keyboard.Key | keyboard.KeyCode:
-        """Normalize left/right variants to a single modifier."""
+        """Normalize left/right variants to a single modifier and letters to their virtual key."""
         normalize_map = {
             keyboard.Key.ctrl_r: keyboard.Key.ctrl_l,
+            keyboard.Key.ctrl: keyboard.Key.ctrl_l,
             keyboard.Key.shift_r: keyboard.Key.shift_l,
+            keyboard.Key.shift: keyboard.Key.shift_l,
             keyboard.Key.alt_r: keyboard.Key.alt_l,
+            keyboard.Key.alt: keyboard.Key.alt_l,
             keyboard.Key.alt_gr: keyboard.Key.alt_l,
+            keyboard.Key.cmd_l: keyboard.Key.cmd,
+            keyboard.Key.cmd_r: keyboard.Key.cmd,
         }
+        if isinstance(key, keyboard.KeyCode) and key.vk is not None:
+            return keyboard.KeyCode.from_vk(key.vk)
         return normalize_map.get(key, key)
 
     def _hotkey_combo_pressed(self, normalized) -> bool:
