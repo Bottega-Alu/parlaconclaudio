@@ -362,6 +362,13 @@ class ControlPanel:
                          if code == config.get("whisper_language")), "Rilevamento automatico")
         self._combo(self._card("globe", "Lingua", "Fissarla evita errori di riconoscimento su frasi brevi."),
                     WHISPER_LANGUAGES, language, self._apply_language)
+        self._section("Testo dettato")
+        from .tray_icon import auto_paste_enabled
+        paste = auto_paste_enabled(config)
+        self._switch(self._card("file", "Incolla automaticamente",
+                                "Spento: il testo resta solo negli appunti e lo incolli tu con Ctrl+V."),
+                     paste, lambda on: self._work(self.tray._toggle_auto_paste_clicked),
+                     "Attivo" if paste else "Solo appunti")
         self._section("Memoria GPU")
         control = self._card("pulse", "Modello locale",
                              "Libera la VRAM quando ti serve per altro: il modello si ricarica al prossimo uso.")
@@ -379,16 +386,24 @@ class ControlPanel:
         self._switch(self._card("speaker", "Suoni e voce", "Disattiva tutti gli avvisi senza perdere le impostazioni."),
                      not muted, lambda on: self._work(lambda: self.tray._make_toggle_mute()(None, None)),
                      "Attivi" if not muted else "Disattivati")
-        control = self._card("speaker", "Volume", "Oltre il 100% amplifica i suoni più deboli.")
-        value = tk.Label(control, text=f"{config.get('volume', 200)}%", width=5, font=(self.font, 9),
-                         fg=c["muted"], bg=c["card"], anchor="e")
-        value.pack(side="right")
-        slider = fluent.Slider(control, c, self.scale, int(config.get("volume", 200)),
-                               lambda level: self._work(lambda: self.tray._make_set_volume(level)(None, None)))
-        slider.disabled = muted
-        slider.listeners.append(lambda level: value.configure(text=f"{level}%"))
-        slider.canvas.configure(width=self._p(220))
-        slider.canvas.pack(side="right")
+        from .tray_icon import voice_volume
+        levels = (
+            ("music", "Volume suoni", "Il pacchetto suoni. Oltre il 100% amplifica i suoni più deboli.",
+             int(config.get("volume", 200)), self.tray._make_set_volume),
+            ("chat", "Volume voci", "Gli annunci parlati, regolabili a parte rispetto ai suoni.",
+             voice_volume(config), self.tray._make_set_voice_volume),
+        )
+        for icon, title, description, level, make_handler in levels:
+            control = self._card(icon, title, description)
+            value = tk.Label(control, text=f"{level}%", width=5, font=(self.font, 9),
+                             fg=c["muted"], bg=c["card"], anchor="e")
+            value.pack(side="right")
+            slider = fluent.Slider(control, c, self.scale, level,
+                                   lambda new, make=make_handler: self._work(lambda: make(new)(None, None)))
+            slider.disabled = muted
+            slider.listeners.append(lambda new, label=value: label.configure(text=f"{new}%"))
+            slider.canvas.configure(width=self._p(220))
+            slider.canvas.pack(side="right")
         self._section("Annunci")
         mode = next((label for label, v in TTS_MODES.items() if v == config.get("tts_mode", "full")), "Voce e suoni")
         self._combo(self._card("chat", "Modalità", "Quando parlare e quando usare solo un suono."),

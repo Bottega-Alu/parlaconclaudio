@@ -80,3 +80,55 @@ def test_visible_taskbar_leaves_work_area_untouched(monkeypatch):
                         lambda name: SimpleNamespace(SHAppBarMessage=lambda code, data: 0))
     monitor = SimpleNamespace(left=0, top=0, right=1920, bottom=1080)
     assert flyout_window._without_autohide_taskbar([0, 0, 1920, 1040], monitor) == [0, 0, 1920, 1040]
+
+
+def test_auto_paste_defaults_on_and_can_be_turned_off(monkeypatch):
+    config = {}
+    monkeypatch.setattr(tray_icon, "_load_config", lambda: dict(config))
+    monkeypatch.setattr(tray_icon, "_save_config", lambda value: (config.clear(), config.update(value)))
+    assert tray_icon.output_mode_from_config("clipboard_paste") == "clipboard_paste"
+    tray = tray_icon.TrayIcon()
+    monkeypatch.setattr(tray, "_rebuild_menu", lambda: None)
+    tray._toggle_auto_paste_clicked()
+    assert config["auto_paste"] is False
+    assert tray_icon.output_mode_from_config("clipboard_paste") == "clipboard_only"
+
+
+def test_clipboard_only_never_sends_ctrl_v(monkeypatch):
+    from src.voice_bridge import output_handler
+    copied, keys = [], []
+    monkeypatch.setattr(output_handler.pyperclip, "copy", copied.append)
+    monkeypatch.setattr(output_handler, "_send_ctrl_v", lambda: keys.append("ctrl+v"))
+    handler = output_handler.OutputHandler(mode="clipboard_paste")
+    handler.mode = "clipboard_only"
+    assert handler.deliver("ciao")
+    assert copied == ["ciao"] and keys == []
+
+
+def test_voice_volume_follows_sound_volume_until_set(monkeypatch):
+    config = {"volume": 40}
+    monkeypatch.setattr(tray_icon, "_load_config", lambda: dict(config))
+    monkeypatch.setattr(tray_icon, "_save_config", lambda value: config.update(value))
+    assert tray_icon.voice_volume(config) == 40
+    tray = tray_icon.TrayIcon()
+    monkeypatch.setattr(tray, "_rebuild_menu", lambda: None)
+    tray._make_set_voice_volume(120)(None, None)
+    assert config == {"volume": 40, "voice_volume": 120}
+    assert tray_icon.voice_volume(config) == 120
+
+
+def test_hook_plays_voices_at_voice_volume(monkeypatch, tmp_path):
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "notify_tts_under_test", Path(__file__).resolve().parents[1] / "scripts" / "notify-tts.py")
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    monkeypatch.setattr(hook, "load_config", lambda: {"volume": 30, "voice_volume": 150})
+    calls = []
+    monkeypatch.setattr(hook.subprocess, "Popen", lambda args, **kw: calls.append(args))
+    clip = tmp_path / "voice.mp3"
+    clip.write_bytes(b"")
+    hook.play_mp3(str(clip), hook.get_voice_volume())
+    hook.play_mp3(str(clip))
+    assert [args[args.index("-af") + 1] for args in calls] == ["volume=150/100", "volume=30/100"]

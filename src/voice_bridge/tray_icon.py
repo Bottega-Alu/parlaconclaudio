@@ -173,6 +173,21 @@ def _save_config(config: dict) -> None:
         logger.error(f"Failed to save config: {e}")
 
 
+def auto_paste_enabled(config: dict | None = None) -> bool:
+    """Whether dictated text is pasted (Ctrl+V) or only copied to the clipboard."""
+    return bool((config if config is not None else _load_config()).get("auto_paste", True))
+
+
+def voice_volume(config: dict) -> int:
+    """Volume of spoken announcements; follows the sound volume until set on its own."""
+    return int(config.get("voice_volume", config.get("volume", 200)))
+
+
+def output_mode_from_config(default: str) -> str:
+    """Clipboard-only when the user turned auto paste off; otherwise the configured mode."""
+    return default if auto_paste_enabled() else "clipboard_only"
+
+
 def _play_sound(filepath: str) -> None:
     """Play a sound file for preview at configured volume."""
     config = _load_config()
@@ -618,6 +633,17 @@ class TrayIcon:
                 radio=True,
             ))
 
+        current_voice_vol = voice_volume(config)
+        voice_vol_items = [
+            pystray.MenuItem(
+                f"{level}%",
+                self._make_set_voice_volume(level),
+                checked=lambda item, selected=(level == current_voice_vol): selected,
+                radio=True,
+            )
+            for level in VOLUME_LEVELS
+        ]
+
         # --- Preview Sounds submenu ---
         # When pack=random, preview shows mp3s from a deterministic pack
         # so the menu doesn't reshuffle every rebuild.
@@ -710,7 +736,8 @@ class TrayIcon:
             pystray.Menu.SEPARATOR,
             # --- Quick access ---
             pystray.MenuItem(f"Notifiche: {current_mode_label}", pystray.Menu(*mode_items)),
-            pystray.MenuItem(f"Volume: {vol_display}", pystray.Menu(*vol_items)),
+            pystray.MenuItem(f"Volume suoni: {vol_display}", pystray.Menu(*vol_items)),
+            pystray.MenuItem(f"Volume voci: {current_voice_vol}%", pystray.Menu(*voice_vol_items)),
             pystray.MenuItem(
                 f"Suoni: {'Casuale' if current_pack == 'random' else current_pack}",
                 pystray.Menu(*pack_items),
@@ -718,6 +745,11 @@ class TrayIcon:
             pystray.MenuItem("Ascolta suoni", pystray.Menu(*preview_items) if preview_items else None, enabled=bool(preview_items)),
             pystray.Menu.SEPARATOR,
             # --- Audio file batch transcription ---
+            pystray.MenuItem(
+                "Incolla automaticamente",
+                self._toggle_auto_paste_clicked,
+                checked=lambda item, on=auto_paste_enabled(config): on,
+            ),
             pystray.MenuItem("Trascrivi file audio…", self._transcribe_files_clicked),
             pystray.Menu.SEPARATOR,
             # --- Settings & Info ---
@@ -1041,6 +1073,15 @@ class TrayIcon:
             self._rebuild_menu()
         return handler
 
+    def _make_set_voice_volume(self, level: int):
+        def handler(icon, item):
+            config = _load_config()
+            config["voice_volume"] = level
+            _save_config(config)
+            logger.info(f"Voice volume set to: {level}%")
+            self._rebuild_menu()
+        return handler
+
     def _make_toggle_mute(self):
         def handler(icon, item):
             config = _load_config()
@@ -1052,6 +1093,13 @@ class TrayIcon:
             logger.info(f"Mute toggled: {new_state}")
             self._rebuild_menu()
         return handler
+
+    def _toggle_auto_paste_clicked(self, icon=None, item=None):
+        config = _load_config()
+        config["auto_paste"] = not auto_paste_enabled(config)
+        _save_config(config)
+        logger.info(f"Auto paste set to: {config['auto_paste']}")
+        self._rebuild_menu()
 
     def _make_set_tts_mode(self, mode_value: str):
         def handler(icon, item):

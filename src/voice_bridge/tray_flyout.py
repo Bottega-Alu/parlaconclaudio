@@ -56,6 +56,7 @@ class TrayFlyout:
         self._config = {}
         self._muted = False
         self.volume = 200
+        self.voice_volume = 200
         self._focus_key = None
         self.mics = {}
         self.packs = []
@@ -217,6 +218,16 @@ class TrayFlyout:
         self.slider = fluent.Slider(volume, c, self.scale, self.volume, self._save_volume)
         self.slider.listeners.append(lambda value: self.volume_text.set(f"{value}%"))
         self.slider.canvas.pack(side="left", fill="x", expand=True, padx=(self._p(4), 0))
+        voices = tk.Frame(body, bg=c["surface"])
+        voices.pack(fill="x")
+        # Same widget as the mute button so both sliders start at the same x.
+        self._icon_button(voices, "chat", "Volume delle voci", lambda: None).pack(side="left")
+        self.voice_text = tk.StringVar(value=f"{self.voice_volume}%")
+        tk.Label(voices, textvariable=self.voice_text, width=5, font=(self.font, 9),
+                 bg=c["surface"], fg=c["muted"], anchor="e").pack(side="right")
+        self.voice_slider = fluent.Slider(voices, c, self.scale, self.voice_volume, self._save_voice_volume)
+        self.voice_slider.listeners.append(lambda value: self.voice_text.set(f"{value}%"))
+        self.voice_slider.canvas.pack(side="left", fill="x", expand=True, padx=(self._p(4), 0))
         self.engine = tk.StringVar()
         tk.Label(body, textvariable=self.engine, font=(self.font, 8), fg=c["subtle"],
                  bg=c["surface"], anchor="w").pack(fill="x", pady=(self._p(6), 0))
@@ -526,11 +537,12 @@ class TrayFlyout:
     # ── state and actions ───────────────────────────────────────────
 
     def _load(self):
-        from .tray_icon import _load_config, list_sound_packs
+        from .tray_icon import _load_config, list_sound_packs, voice_volume
         config = _load_config()
         self._config = config
         self._muted = bool(config.get("muted", False))
         self.volume = max(0, min(300, int(config.get("volume", 200))))
+        self.voice_volume = max(0, min(300, voice_volume(config)))
         self.mics = {"Predefinito di Windows": None}
         self.mics.update({f"{d.name} [{d.device_id}]": d.device_id for d in self.tray._list_mics()})
         self.packs = list_sound_packs()
@@ -541,7 +553,8 @@ class TrayFlyout:
         self._render()
         if self._page == "main":
             self._paint_tile(self.audio_tile, not self._muted)
-            self.audio_tile["value"].configure(text="Disattivato" if self._muted else f"Volume {self.volume}%")
+            self.audio_tile["value"].configure(
+                text="Disattivato" if self._muted else f"Suoni {self.volume}% · voci {self.voice_volume}%")
             self._draw_slider()
             self._update_state()
         elif focus is not None:
@@ -550,10 +563,16 @@ class TrayFlyout:
     def _draw_slider(self):
         if getattr(self, "slider", None):
             self.slider.set(self.volume, disabled=self._muted)
+        if getattr(self, "voice_slider", None):
+            self.voice_slider.set(self.voice_volume, disabled=self._muted)
 
     def _save_volume(self, value):
         self.volume = value
         self._work(lambda: self.tray._make_set_volume(value)(None, None))
+
+    def _save_voice_volume(self, value):
+        self.voice_volume = value
+        self._work(lambda: self.tray._make_set_voice_volume(value)(None, None))
 
     def _work(self, callback):
         if self._working:

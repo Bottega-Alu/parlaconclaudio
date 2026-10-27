@@ -116,6 +116,12 @@ def get_volume() -> int:
     return load_config().get("volume", 200)
 
 
+def get_voice_volume() -> int:
+    """Spoken announcements have their own level; older configs fall back to the sound volume."""
+    config = load_config()
+    return config.get("voice_volume", config.get("volume", 200))
+
+
 def get_muted() -> bool:
     return load_config().get("muted", False)
 
@@ -327,14 +333,15 @@ def play_mp3_sync(filepath: str) -> None:
         pass
 
 
-def play_mp3(filepath: str) -> None:
-    if not os.path.isfile(filepath) or get_muted() or get_volume() <= 0:
+def play_mp3(filepath: str, volume: int | None = None) -> None:
+    volume = get_volume() if volume is None else volume
+    if not os.path.isfile(filepath) or get_muted() or volume <= 0:
         return
     try:
         CREATE_NO_WINDOW = 0x08000000
         subprocess.Popen(
             ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
-             "-af", f"volume={get_volume()}/100", filepath],
+             "-af", f"volume={volume}/100", filepath],
             creationflags=CREATE_NO_WINDOW,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
@@ -914,7 +921,7 @@ def maybe_play_easter_egg(tts_mode: str) -> None:
     audio_path = resolve_audio(quote_text, profile)
     if audio_path:
         time.sleep(0.8)
-        play_mp3(audio_path)
+        play_mp3(audio_path, get_voice_volume())
 
 
 def play_subagent_voice() -> None:
@@ -930,7 +937,7 @@ def play_subagent_voice() -> None:
     profile = {"voice": voice_id, "rate": "+0%", "pitch": "+0Hz"}
     audio_path = resolve_audio(SUBAGENT_PHRASE, profile)
     if audio_path:
-        play_mp3(audio_path)
+        play_mp3(audio_path, get_voice_volume())
 
 
 # ══════════════════════════════════════════════════
@@ -1279,7 +1286,7 @@ def main(argv: list[str] | None = None, read_stdin=None, detach=None) -> None:
         return
 
     time.sleep(CHIME_GAP_MS / 1000)
-    play_mp3(audio_path)
+    play_mp3(audio_path, get_voice_volume())
 
     # Easter egg: ~7% chance of Frisco appreciation in a random language
     maybe_play_easter_egg(tts_mode)

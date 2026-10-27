@@ -60,12 +60,12 @@ def test_native_volume_selection_and_action_stay_in_sync(monkeypatch, tmp_path):
     monkeypatch.setattr(KeyManager, "get_key", lambda provider: None)
     tray = tray_icon.TrayIcon()
     menu = tray._build_menu()
-    volume = next(item for item in menu if item.text.startswith("Volume:"))
+    volume = next(item for item in menu if item.text.startswith("Volume suoni:"))
     levels = [item for item in volume.submenu if item.text.endswith("%")]
     assert [item.text for item in levels if item.checked] == ["125%"]
     assert all(item.radio for item in levels)
     next(item for item in levels if item.text == "75%")(None)
     assert config["volume"] == 75
     rebuilt = tray._build_menu()
-    volume = next(item for item in rebuilt if item.text.startswith("Volume:"))
+    volume = next(item for item in rebuilt if item.text.startswith("Volume suoni:"))
     assert [item.text for item in volume.submenu if item.checked] == ["75%"]

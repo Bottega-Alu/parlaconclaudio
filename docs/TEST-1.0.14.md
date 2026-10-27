@@ -1,4 +1,4 @@
-# 1.0.14-test.1 — Comandi rapidi e finestra ridisegnati
+# 1.0.14-test.2 — Comandi rapidi e finestra ridisegnati
 
 Anteprima basata sulla stabile 1.0.13.
 
@@ -16,6 +16,13 @@ Anteprima basata sulla stabile 1.0.13.
   (Segoe Fluent Icons).
 - Con la taskbar in auto-hide il pannello non finisce più sotto la taskbar e il
   fondo non viene più tagliato dal bordo nativo.
+
+## Novità della test.2
+
+- **Incolla automaticamente** si può spegnere (pannello > Dettatura, o menu
+  completo): il testo dettato resta solo negli appunti e lo incolli tu con Ctrl+V.
+- **Volume voci** separato dal volume dei suoni, nei comandi rapidi, nel
+  pannello e nel menu completo. Finché non lo cambi segue il volume dei suoni.
 
 ## Finestra dell'app (Impostazioni)
 

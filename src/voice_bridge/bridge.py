@@ -22,7 +22,7 @@ from .audio_recorder import AudioRecorder
 from .transcriber import Transcriber
 from .output_handler import OutputHandler
 from .hotkey_listener import HotkeyListener
-from .tray_icon import TrayIcon
+from .tray_icon import TrayIcon, output_mode_from_config
 from .gesture_listener import GestureListener
 
 from pathlib import Path as _Path
@@ -299,6 +299,7 @@ class VoiceBridge:
                 with self._lock:
                     self._set_state(BridgeState.OUTPUT)
 
+                self._output.mode = output_mode_from_config(self.config.output_mode)
                 delivered = self._output.deliver(text)
                 if not delivered:
                     logger.warning("Text delivery failed")
