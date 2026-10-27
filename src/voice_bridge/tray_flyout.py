@@ -116,6 +116,7 @@ class TrayFlyout:
         self.root.protocol("WM_DELETE_WINDOW", self._hide)
         self.root.bind("<Escape>", lambda event: self._escape())
         self.root.bind("<FocusOut>", lambda event: self.root.after(180, self._dismiss_if_outside))
+        self.root.bind("<FocusIn>", lambda event: setattr(self, "_had_focus", True))
         self.root.bind("<MouseWheel>", self._wheel)
         self.root.bind("<<FlyoutWake>>", lambda event: self._drain())
         self._dpi = flyout_window.window_dpi(self.root)
@@ -746,6 +747,10 @@ class TrayFlyout:
             self._sync_rows()
 
     def _dismiss_if_outside(self):
+        # Only a click elsewhere closes it: focus we had and lost. When Windows refuses
+        # the focus at opening (foreground lock), there is nothing to dismiss.
+        if not getattr(self, "_had_focus", False):
+            return
         if self.root.state() != "withdrawn" and self.root.focus_displayof() is None:
             self._hide()
 
@@ -777,6 +782,7 @@ class TrayFlyout:
             self._build_surface()
             self._show()
             return
+        self._had_focus = False
         # Native frame first and invisible until final: no jump on screen.
         self.root.attributes("-alpha", 0.0)
         self.root.deiconify()

@@ -69,3 +69,16 @@ def test_real_popup_is_visible_and_inside_work_area(monkeypatch):
             assert flyout.root.state() == "withdrawn"
         finally:
             flyout.root.destroy()
+
+
+def test_focus_never_received_does_not_dismiss_but_focus_lost_does():
+    hidden = []
+    flyout = TrayFlyout(SimpleNamespace())
+    flyout._hide = lambda: hidden.append(True)
+    flyout.root = SimpleNamespace(state=lambda: "normal", focus_displayof=lambda: None)
+    flyout._had_focus = False  # Windows refused the focus when it opened
+    flyout._dismiss_if_outside()
+    assert hidden == []
+    flyout._had_focus = True  # user clicked elsewhere afterwards
+    flyout._dismiss_if_outside()
+    assert hidden == [True]
