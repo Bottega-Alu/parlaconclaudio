@@ -18,12 +18,14 @@ ICON = {
 _PALETTE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent"
 
 
-def dark_mode():
+def dark_mode(surface="apps"):
+    """Windows "app mode" for windows; "system" mode (taskbar, Quick Settings) for tray surfaces."""
+    value = "SystemUsesLightTheme" if surface == "system" else "AppsUseLightTheme"
     try:
         import winreg
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                             r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
-            return winreg.QueryValueEx(key, "AppsUseLightTheme")[0] == 0
+            return winreg.QueryValueEx(key, value)[0] == 0
     except OSError:
         return False
 
@@ -88,8 +90,12 @@ def dark_title_bar(root, dark):
         import ctypes
         from .flyout_window import window_handle
         value = ctypes.c_int(int(dark))
-        ctypes.WinDLL("dwmapi").DwmSetWindowAttribute(
-            window_handle(root), 20, ctypes.byref(value), ctypes.sizeof(value))
+        hwnd = window_handle(root)
+        ctypes.WinDLL("dwmapi").DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
+        # Repaint the frame now: a theme switch on an open window would otherwise wait for a resize.
+        user = ctypes.WinDLL("user32")
+        user.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p] + [ctypes.c_int] * 4 + [ctypes.c_uint]
+        user.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0027)  # NOSIZE|NOMOVE|NOZORDER|FRAMECHANGED
     except (AttributeError, OSError):
         pass
 

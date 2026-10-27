@@ -130,3 +130,84 @@ def test_hook_plays_voices_at_voice_volume(monkeypatch, tmp_path):
     hook.play_mp3(str(clip), hook.get_voice_volume())
     hook.play_mp3(str(clip))
     assert [args[args.index("-af") + 1] for args in calls] == ["volume=150/100", "volume=30/100"]
+
+
+def test_main_page_actions_update_in_place_without_rebuilding(monkeypatch):
+    config = {"volume": 100, "muted": False, "sound_pack": "random"}
+    monkeypatch.setattr(tray_icon, "_load_config", lambda: dict(config))
+    monkeypatch.setattr(tray_icon, "_save_config", lambda value: config.update(value))
+    tray = tray_icon.TrayIcon()
+    with native_menu_dpi():
+        flyout = TrayFlyout(tray)
+        flyout._build()
+        try:
+            flyout._show()
+            canvas = flyout.record_tile["canvas"]
+            config.update(muted=True, volume=40)
+            flyout._commands.put("refresh")
+            flyout._drain()
+            assert flyout.record_tile["canvas"] is canvas  # nothing destroyed: no flicker
+            assert flyout.tiles["audio"]["value"]["text"] == "Disattivato"
+            assert flyout.slider.value == 40
+        finally:
+            flyout.root.destroy()
+
+
+def test_frozen_rebuild_suspends_and_restores_painting(monkeypatch):
+    calls = []
+    user = SimpleNamespace(
+        GetParent=lambda hwnd: 42,
+        SendMessageW=lambda hwnd, msg, wparam, lparam: calls.append(("redraw", hwnd, wparam)),
+        RedrawWindow=lambda hwnd, rect, region, flags: calls.append(("paint", hwnd, flags)))
+    user.GetParent.argtypes = None
+    monkeypatch.setattr(flyout_window, "_user32", lambda: user)
+    root = SimpleNamespace(state=lambda: "normal", update_idletasks=lambda: None, winfo_id=lambda: 7)
+    with flyout_window.frozen(root):
+        calls.append("rebuild")
+    assert calls == [("redraw", 42, 0), "rebuild", ("redraw", 42, 1), ("paint", 42, flyout_window._REDRAW_ALL)]
+    calls.clear()
+    with flyout_window.frozen(SimpleNamespace(state=lambda: "withdrawn")):
+        calls.append("hidden")
+    assert calls == ["hidden"]
+
+
+def test_quick_controls_follow_system_mode_switched_after_prewarm(monkeypatch):
+    from src.voice_bridge import tray_flyout, fluent
+    monkeypatch.setattr(tray_icon, "_load_config", lambda: {"volume": 100})
+    asked = []
+    monkeypatch.setattr(fluent, "dark_mode", lambda surface="apps": asked.append(surface) or state["dark"])
+    state = {"dark": False}
+    tray = tray_icon.TrayIcon()
+    with native_menu_dpi():
+        flyout = TrayFlyout(tray)
+        flyout._build()
+        try:
+            assert flyout.colors == fluent.colors(False)
+            state["dark"] = True  # e.g. Windows' scheduled switch to dark
+            flyout._show()
+            assert flyout.dark and flyout.colors == fluent.colors(True)
+            assert flyout.root["bg"] == fluent.colors(True)["surface"]
+            assert set(asked) == {"system"}  # tray surface: taskbar mode, like Quick Settings
+        finally:
+            flyout.root.destroy()
+
+
+def test_open_app_window_follows_app_mode_switch(monkeypatch):
+    from src.voice_bridge import control_panel, fluent, autostart
+    from src.core import voice_hooks
+    state = {"dark": True}
+    monkeypatch.setattr(fluent, "dark_mode", lambda surface="apps": state["dark"])
+    monkeypatch.setattr(tray_icon, "_load_config", lambda: {"volume": 100})
+    monkeypatch.setattr(voice_hooks, "status", lambda agent: False)
+    monkeypatch.setattr(autostart, "is_enabled", lambda *a, **k: False)
+    panel = control_panel.ControlPanel(tray_icon.TrayIcon())
+    with native_menu_dpi():
+        panel._build()
+        try:
+            assert panel.colors == fluent.colors(True)
+            state["dark"] = False
+            panel._follow_theme()
+            assert not panel.dark and panel.colors == fluent.colors(False)
+            assert panel.nav["bg"] == fluent.colors(False)["surface"]
+        finally:
+            panel.root.destroy()
