@@ -86,6 +86,7 @@ class ControlPanel:
 
         self.root = root = tk.Tk()
         root.withdraw()
+        self._curtain = flyout_window.Curtain(root)
         root.title(f"parlaconclaudio • {VERSION}")
         app_icon = Path(__file__).resolve().parents[2] / "assets" / "voicebridge.ico"
         if app_icon.is_file():
@@ -166,8 +167,9 @@ class ControlPanel:
     # ── layout ──────────────────────────────────────────────────────
 
     def _render(self):
-        from . import flyout_window
-        with flyout_window.frozen(self.root):
+        # Rebuilding the page in front of the user paints it widget by widget:
+        # the curtain shows the old content until the new one is complete.
+        with self._curtain.held():
             self._render_now()
 
     def _render_now(self):
