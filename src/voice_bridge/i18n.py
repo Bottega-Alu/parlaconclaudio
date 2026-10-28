@@ -3,8 +3,8 @@
 Source strings are Italian and wrapped in `_()`; `locales/<code>.json` maps each
 one to its translation. Decision tree for the language shown:
   1. `ui_language` in tts_config.json set to a supported code -> that language
-  2. "system" (the default)  -> the Windows display language, if supported
-  3. otherwise               -> Italian
+  2. "system"                -> the Windows display language, if supported
+  3. otherwise (or never set) -> Italian
 A string missing from a catalogue shows in Italian, never empty; tests keep the
 catalogues complete (tests/test_i18n.py).
 

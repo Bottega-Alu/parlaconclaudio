@@ -17,6 +17,7 @@ import time
 from enum import Enum
 
 from .config import VoiceBridgeConfig
+from .i18n import _
 from .sounds import beep_start, beep_stop, beep_output, beep_ready, beep_timeout
 from .audio_recorder import AudioRecorder
 from .transcriber import Transcriber
@@ -155,7 +156,7 @@ class VoiceBridge:
                 self._set_state(BridgeState.IDLE)
                 self._hotkey.reset_toggle()
                 logger.exception("Microphone could not start")
-                self._tray._notify("Microfono non disponibile. Controlla il dispositivo e riprova.")
+                self._tray._notify(_("Microfono non disponibile. Controlla il dispositivo e riprova."))
                 return
 
         if self.config.sound_on_start and not self.config.muted and self.config.volume > 0:
@@ -223,7 +224,7 @@ class VoiceBridge:
             with self._lock:
                 self._set_state(BridgeState.IDLE)
             self._hotkey.reset_toggle()
-            self._tray._notify("Errore del microfono. Riprova la registrazione.")
+            self._tray._notify(_("Errore del microfono. Riprova la registrazione."))
             return
 
         # Transcribe in background thread to not block hotkey listener
@@ -303,13 +304,13 @@ class VoiceBridge:
                 delivered = self._output.deliver(text)
                 if not delivered:
                     logger.warning("Text delivery failed")
-                    self._tray._notify("Invio del testo non riuscito. Controlla gli appunti e la finestra attiva.")
+                    self._tray._notify(_("Invio del testo non riuscito. Controlla gli appunti e la finestra attiva."))
 
                 if delivered and self.config.sound_on_output and not self.config.muted and self.config.volume > 0:
                     beep_output(self.config.sound_output_freq, self.config.sound_output_duration)
             else:
                 if self._transcriber.last_error:
-                    self._tray._notify("Trascrizione non riuscita. Controlla motore, connessione e chiavi API.")
+                    self._tray._notify(_("Trascrizione non riuscita. Controlla motore, connessione e chiavi API."))
                 else:
                     logger.info("No speech detected")
         except Exception as e:

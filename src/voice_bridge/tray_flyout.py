@@ -9,6 +9,8 @@ import logging
 import queue
 import threading
 
+from .i18n import _, N_, APP_NAME
+from . import i18n
 from .menu_dpi import native_menu_dpi
 from . import flyout_window
 from . import fluent
@@ -20,24 +22,29 @@ WIDTH = 380
 PAD = 16
 
 TTS_MODE_DETAILS = {
-    "full": "Suono e voce a ogni avviso",
-    "semi-silent": "Voce solo quando l'agente termina",
-    "silent": "Solo suoni, nessuna voce",
+    "full": N_("Suono e voce a ogni avviso"),
+    "semi-silent": N_("Voce solo quando l'agente termina"),
+    "silent": N_("Solo suoni, nessuna voce"),
 }
 STT_MODE_DETAILS = {
-    "auto": "GPU locale se disponibile, altrimenti cloud",
-    "local": "Richiede una GPU NVIDIA compatibile",
-    "cloud_groq": "Richiede una chiave API Groq",
-    "cloud_deepgram": "Richiede una chiave API Deepgram",
+    "auto": N_("GPU locale se disponibile, altrimenti cloud"),
+    "local": N_("Richiede una GPU NVIDIA compatibile"),
+    "cloud_groq": N_("Richiede una chiave API Groq"),
+    "cloud_deepgram": N_("Richiede una chiave API Deepgram"),
 }
-STATE_LABELS = {"idle": "Pronto per dettare", "recording": "Registrazione in corso",
-                "transcribing": "Trascrizione in corso", "loading": "Caricamento del motore…",
-                "output": "Invio del testo…"}
+STATE_LABELS = {"idle": N_("Pronto per dettare"), "recording": N_("Registrazione in corso"),
+                "transcribing": N_("Trascrizione in corso"), "loading": N_("Caricamento del motore…"),
+                "output": N_("Invio del testo…")}
 
 
 def _dark_mode():
     # Next to the taskbar, like Quick Settings: follows the system mode, not the app mode.
     return fluent.dark_mode("system")
+
+
+def _t(text):
+    """Translate a display-only label (empty stays empty)."""
+    return _(text) if text else text
 
 
 def _short(text, limit=17):
@@ -111,7 +118,7 @@ class TrayFlyout:
         import tkinter as tk
         self.root = tk.Tk()
         self.root.withdraw()
-        self.root.title("parlaconclaudio - Comandi rapidi")
+        self.root.title(_("{app} - Comandi rapidi").format(app=APP_NAME))
         self.root.overrideredirect(True)
         self.root.protocol("WM_DELETE_WINDOW", self._hide)
         self.root.bind("<Escape>", lambda event: self._escape())
@@ -165,7 +172,7 @@ class TrayFlyout:
 
     def _content_signature(self):
         """What the pages were built from; anything else is updated in place."""
-        return (tuple(self.mics), tuple(self.packs), tuple(self._caps()))
+        return (tuple(self.mics), tuple(self.packs), tuple(self._caps()), i18n.current())
 
     def _raise_page(self, page):
         self._page = page
@@ -221,14 +228,14 @@ class TrayFlyout:
         body.pack(fill="both", expand=True)
         header = tk.Frame(body, bg=c["surface"])
         header.pack(fill="x")
-        tk.Label(header, text="parlaconclaudio", font=(self.font, 12, "bold"),
+        tk.Label(header, text=APP_NAME, font=(self.font, 12, "bold"),
                  fg=c["text"], bg=c["surface"]).pack(side="left")
         status = tk.Frame(body, bg=c["surface"])
         status.pack(fill="x", pady=(self._p(4), self._p(14)))
         self.status_dot = tk.Canvas(status, width=self._p(10), height=self._p(10),
                                     bg=c["surface"], highlightthickness=0)
         self.status_dot.pack(side="left", padx=(0, self._p(7)))
-        self.state = tk.StringVar(master=status, value=STATE_LABELS["idle"])
+        self.state = tk.StringVar(master=status, value=_(STATE_LABELS["idle"]))
         tk.Label(status, textvariable=self.state, font=(self.font, 9), fg=c["muted"],
                  bg=c["surface"], anchor="w").pack(side="left")
 
@@ -237,12 +244,12 @@ class TrayFlyout:
         grid.columnconfigure((0, 1, 2), weight=1, uniform="tiles")
         values = self._tile_values()
         specs = [
-            ("record", "mic", "Dettatura", "Avvia", self._record, None),
-            ("audio", "speaker", "Audio", values["audio"], self._mute, None),
-            ("packs", "music", "Suoni", values["packs"], None, "packs"),
-            ("voice", "chat", "Avvisi vocali", values["voice"], None, "voice"),
-            ("mic", "mic", "Microfono", values["mic"], None, "mic"),
-            ("engine", "chip", "Riconoscimento", values["engine"], None, "engine"),
+            ("record", "mic", _("Dettatura"), _("Avvia"), self._record, None),
+            ("audio", "speaker", _("Audio"), values["audio"], self._mute, None),
+            ("packs", "music", _("Suoni"), values["packs"], None, "packs"),
+            ("voice", "chat", _("Avvisi vocali"), values["voice"], None, "voice"),
+            ("mic", "mic", _("Microfono"), values["mic"], None, "mic"),
+            ("engine", "chip", _("Riconoscimento"), values["engine"], None, "engine"),
         ]
         self.tiles = {}
         for index, (key, icon, title, value, action, page) in enumerate(specs):
@@ -256,7 +263,7 @@ class TrayFlyout:
         volume = tk.Frame(body, bg=c["surface"])
         volume.pack(fill="x", pady=(self._p(4), 0))
         self.volume_icon = self._icon_button(volume, "mute" if self._muted else "speaker",
-                                             "Attiva o disattiva l'audio", self._mute)
+                                             _("Attiva o disattiva l'audio"), self._mute)
         self.volume_icon.pack(side="left")
         self.volume_text = tk.StringVar(master=volume, value=f"{self.volume}%")
         tk.Label(volume, textvariable=self.volume_text, width=5, font=(self.font, 9),
@@ -268,7 +275,7 @@ class TrayFlyout:
         voices = tk.Frame(body, bg=c["surface"])
         voices.pack(fill="x")
         # Same widget as the mute button so both sliders start at the same x.
-        self._icon_button(voices, "chat", "Volume delle voci", lambda: None).pack(side="left")
+        self._icon_button(voices, "chat", _("Volume delle voci"), lambda: None).pack(side="left")
         self.voice_text = tk.StringVar(master=voices, value=f"{self.voice_volume}%")
         tk.Label(voices, textvariable=self.voice_text, width=5, font=(self.font, 9),
                  bg=c["surface"], fg=c["muted"], anchor="e").pack(side="right")
@@ -295,9 +302,9 @@ class TrayFlyout:
             tk.Label(self.keys, text=key, font=(self.font, 8), fg=c["text"], bg=c["raised"],
                      padx=self._p(6), pady=self._p(1), highlightthickness=1,
                      highlightbackground=c["line"]).pack(side="left")
-        self._icon_button(footer, "power", "Esci da parlaconclaudio", self._exit, c["footer"]).pack(side="right")
-        self._icon_button(footer, "settings", "Impostazioni", self._settings, c["footer"]).pack(side="right")
-        self.files = self._icon_button(footer, "file", "Trascrivi file audio", self._files, c["footer"])
+        self._icon_button(footer, "power", _("Esci da {app}").format(app=APP_NAME), self._exit, c["footer"]).pack(side="right")
+        self._icon_button(footer, "settings", _("Impostazioni"), self._settings, c["footer"]).pack(side="right")
+        self.files = self._icon_button(footer, "file", _("Trascrivi file audio"), self._files, c["footer"])
         self.files.pack(side="right")
         self._paint_status()
 
@@ -325,13 +332,14 @@ class TrayFlyout:
         pack = config.get("sound_pack", "r2d2")
         mode = config.get("tts_mode", "full")
         mic = next((name for name, value in self.mics.items()
-                    if value == config.get("mic_device_id")), "Predefinito")
+                    if value == config.get("mic_device_id")), _("Predefinito"))
         return {
-            "audio": "Disattivato" if self._muted else f"Suoni {self.volume}% · voci {self.voice_volume}%",
-            "packs": "Casuale" if pack == "random" else fluent.pretty_pack(pack),
-            "voice": next((label for label, value in TTS_MODES.items() if value == mode), mode),
-            "mic": mic.split(" [")[0],
-            "engine": STT_MODES.get(config.get("stt_mode", "auto"), "").split(" (")[0],
+            "audio": _("Disattivato") if self._muted else _("Suoni {volume}% · voci {voices}%").format(
+                volume=self.volume, voices=self.voice_volume),
+            "packs": _("Casuale") if pack == "random" else fluent.pretty_pack(pack),
+            "voice": next((_(label) for label, value in TTS_MODES.items() if value == mode), mode),
+            "mic": _t(mic.split(" [")[0]),
+            "engine": _t(STT_MODES.get(config.get("stt_mode", "auto"), "")).split(" (")[0],
         }
 
     def _update_main(self):
@@ -431,25 +439,25 @@ class TrayFlyout:
         from .tray_icon import TTS_MODES, STT_MODES
         config = self._config
         if page == "packs":
-            items = [("random", "Casuale", "Un pacchetto diverso a ogni avviso", "shuffle")]
-            items += [(name, fluent.pretty_pack(name), f"{count} suoni", "music")
+            items = [("random", _("Casuale"), _("Un pacchetto diverso a ogni avviso"), "shuffle")]
+            items += [(name, fluent.pretty_pack(name), _("{count} suoni").format(count=count), "music")
                       for name, count in self.packs]
-            return ("Pacchetti suoni", items, config.get("sound_pack", "r2d2"), True,
-                    "Ogni avviso di Claude Code e Codex usa un suono del pacchetto scelto.")
+            return (_("Pacchetti suoni"), items, config.get("sound_pack", "r2d2"), True,
+                    _("Ogni avviso di Claude Code e Codex usa un suono del pacchetto scelto."))
         if page == "voice":
-            items = [(value, label, TTS_MODE_DETAILS.get(value, ""), "chat")
+            items = [(value, _(label), _t(TTS_MODE_DETAILS.get(value, "")), "chat")
                      for label, value in TTS_MODES.items()]
-            return ("Avvisi vocali", items, config.get("tts_mode", "full"), False,
-                    "Come vengono annunciati la fine di un'attività e le richieste di permesso.")
+            return (_("Avvisi vocali"), items, config.get("tts_mode", "full"), False,
+                    _("Come vengono annunciati la fine di un'attività e le richieste di permesso."))
         if page == "mic":
-            items = [(value, name.split(" [")[0], "Segue l'impostazione di Windows" if value is None
-                      else f"Dispositivo {value}", "mic") for name, value in self.mics.items()]
-            return ("Microfono", items, config.get("mic_device_id"), False,
-                    "Il dispositivo usato per la dettatura.")
-        items = [(key, label.split(" (")[0], STT_MODE_DETAILS.get(key, ""), "cloud" if key.startswith("cloud") else "chip")
+            items = [(value, _t(name.split(" [")[0]), _("Segue l'impostazione di Windows") if value is None
+                      else _("Dispositivo {number}").format(number=value), "mic") for name, value in self.mics.items()]
+            return (_("Microfono"), items, config.get("mic_device_id"), False,
+                    _("Il dispositivo usato per la dettatura."))
+        items = [(key, _t(label).split(" (")[0], _t(STT_MODE_DETAILS.get(key, "")), "cloud" if key.startswith("cloud") else "chip")
                  for key, label in STT_MODES.items()]
-        return ("Riconoscimento", items, config.get("stt_mode", "auto"), False,
-                "Dove viene trascritta la voce.")
+        return (_("Riconoscimento"), items, config.get("stt_mode", "auto"), False,
+                _("Dove viene trascritta la voce."))
 
     def _list_page(self, page):
         import tkinter as tk
@@ -457,7 +465,7 @@ class TrayFlyout:
         title, items, current, expandable, note = self._page_spec(page)
         header = tk.Frame(self.page, bg=c["surface"], padx=self._p(PAD - 6), pady=self._p(12))
         header.pack(fill="x")
-        back = self._icon_button(header, "back", "Indietro", self._back)
+        back = self._icon_button(header, "back", _("Indietro"), self._back)
         back.pack(side="left")
         tk.Label(header, text=title, font=(self.font, 12, "bold"), fg=c["text"],
                  bg=c["surface"]).pack(side="left", padx=(self._p(6), 0))
@@ -481,7 +489,7 @@ class TrayFlyout:
         footer = tk.Frame(self.page, bg=c["footer"], padx=self._p(PAD - 4), pady=self._p(8))
         footer.pack(fill="x", side="bottom")
         tk.Frame(self.page, bg=c["line"], height=1).pack(fill="x", side="bottom")
-        link = tk.Label(footer, text="Altre impostazioni", font=(self.font, 9, "underline"),
+        link = tk.Label(footer, text=_("Altre impostazioni"), font=(self.font, 9, "underline"),
                         fg=c["accent"], bg=c["footer"], cursor="hand2", takefocus=1)
         link.pack(side="left", padx=(self._p(4), 0), pady=self._p(5))
         link.bind("<Button-1>", lambda event: self._settings())
@@ -513,9 +521,9 @@ class TrayFlyout:
                  "texts": texts, "title": title, "caption": caption, "check": check}
         if expandable:
             actions = tk.Frame(content)
-            use = self._text_button(actions, "Usa", lambda: self._select(key), primary=True)
+            use = self._text_button(actions, _("Usa"), lambda: self._select(key), primary=True)
             use.pack(side="right")
-            listen = self._text_button(actions, "Ascolta", lambda: self._preview(key))
+            listen = self._text_button(actions, _("Ascolta"), lambda: self._preview(key))
             listen.pack(side="right", padx=(0, self._p(8)))
             parts.update(actions=actions, use=use)
         frame._row_key, frame._parts, frame._detail = key, parts, detail
@@ -561,13 +569,13 @@ class TrayFlyout:
         if self.icons:
             parts["glyph"].configure(fg=c["accent"] if current else c["text"])
         parts["title"].configure(font=(self.font, 10, "bold" if current else "normal"))
-        parts["caption"].configure(text=("In uso · " + row._detail) if current and row._expandable else row._detail)
+        parts["caption"].configure(text=_("In uso · {detail}").format(detail=row._detail) if current and row._expandable else row._detail)
         if current and not row._expandable:
             parts["check"].pack(side="right")
         else:
             parts["check"].pack_forget()
         if row._expandable:
-            parts["use"].configure(text="In uso" if current else "Usa", state="disabled" if current else "normal")
+            parts["use"].configure(text=_("In uso") if current else _("Usa"), state="disabled" if current else "normal")
             if expanded:
                 parts["actions"].pack(fill="x", pady=(self._p(10), self._p(2)))
             else:
@@ -670,7 +678,7 @@ class TrayFlyout:
         self._muted = bool(config.get("muted", False))
         self.volume = sound_volume(config)
         self.voice_volume = voice_volume(config)
-        self.mics = {"Predefinito di Windows": None}
+        self.mics = {N_("Predefinito di Windows"): None}
         self.mics.update({f"{d.name} [{d.device_id}]": d.device_id for d in self.tray._list_mics()})
         self.packs = list_sound_packs()
 
@@ -804,17 +812,18 @@ class TrayFlyout:
             return
         state = self.tray._state
         batch = self.tray.batch_busy
-        self.state.set("Trascrizione file in corso" if batch else STATE_LABELS.get(state, state))
+        self.state.set(_("Trascrizione file in corso") if batch
+                       else _(STATE_LABELS[state]) if state in STATE_LABELS else state)
         self._paint_status()
         recording = state == "recording"
         tile = self.record_tile
-        tile["value"].configure(text="In ascolto" if recording else "Avvia")
+        tile["value"].configure(text=_("In ascolto") if recording else _("Avvia"))
         enabled = bool(self.tray._on_toggle_recording) and state in ("idle", "recording") and not batch
         if tile["active"] != recording or tile["enabled"] != enabled:
             tile["enabled"] = enabled
             self._paint_tile(tile, recording)
         self.files.configure(state="normal" if state == "idle" and not batch else "disabled")
-        self.engine.set("Motore attivo: " + self.tray._get_stt_status({})["active_label"])
+        self.engine.set(_("Motore attivo: {engine}").format(engine=self.tray._get_stt_status({})["active_label"]))
 
     def _tick(self):
         if not self._drain():
@@ -840,7 +849,7 @@ class TrayFlyout:
                     if self._pending_actions:
                         self._work(self._pending_actions.pop(0))
                 if command == "error" and self._page == "main":
-                    self.state.set("Operazione non riuscita. Riprova.")
+                    self.state.set(_("Operazione non riuscita. Riprova."))
                 if command == "silent":
                     logger.info("Sound pack preview: no sounds available")
         except queue.Empty:

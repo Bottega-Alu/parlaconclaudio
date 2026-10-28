@@ -1,6 +1,6 @@
 """Shared Windows 11 look for the quick controls and the control window.
 
-Theme and accent are read from Windows; glyphs come from the system icon font
+Theme follows Windows unless chosen in the app (set_theme); accent is read from Windows; glyphs come from the system icon font
 (Segoe Fluent Icons on Windows 11, Segoe MDL2 Assets on Windows 10). All widgets
 are plain Tk, created and touched only on the owning window's thread.
 """
@@ -18,8 +18,26 @@ ICON = {
 _PALETTE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent"
 
 
+# Theme chosen in the app ("ui_theme" in tts_config.json). Decision tree in dark_mode:
+# "light"/"dark" -> that theme on every surface; "system" -> what Windows uses.
+THEMES = ("system", "light", "dark")
+_theme = "system"
+
+
+def set_theme(choice):
+    global _theme
+    _theme = choice if choice in THEMES else "system"
+
+
+def theme():
+    return _theme
+
+
 def dark_mode(surface="apps"):
-    """Windows "app mode" for windows; "system" mode (taskbar, Quick Settings) for tray surfaces."""
+    """The chosen theme, or Windows "app mode" for windows and "system" mode
+    (taskbar, Quick Settings) for tray surfaces."""
+    if _theme != "system":
+        return _theme == "dark"
     value = "SystemUsesLightTheme" if surface == "system" else "AppsUseLightTheme"
     try:
         import winreg

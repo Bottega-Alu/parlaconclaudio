@@ -128,3 +128,35 @@ def test_tray_saves_trigger_and_reconfigures_live(monkeypatch):
     tray._set_dictation_trigger(new)
     assert config["dictation_trigger"] == new.to_config()
     assert tray.dictation_trigger() == new
+
+
+def _either(mode):
+    events = []
+    listener = dt.EitherListener("<ctrl>+<alt>+<space>", "middle", lambda: events.append("press"),
+                                 lambda: events.append("release"), mode=mode)
+    listener._debounce = 0
+    return listener, events
+
+
+def test_keys_or_mouse_share_one_dictation_state():
+    assert dt.trigger_from_config({"dictation_trigger": {"kind": "both", "button": "x1"}}) == \
+        dt.Trigger(kind="both", button="x1")
+    listener, events = _either("toggle")
+    listener.handle(True)    # mouse starts
+    listener.handle(False)   # its release does nothing in toggle mode
+    listener.handle(True)    # keys stop it, not start a second one
+    assert events == ["press", "release"] and not listener.is_active
+
+    listener, events = _either("hold")
+    listener.handle(True)
+    listener.handle(True)    # the other input pressed while already dictating
+    listener.handle(False)
+    assert events == ["press", "release"]
+
+
+def test_both_kind_builds_either_listener_and_describes_both():
+    trigger = dt.Trigger(kind="both", button="x2")
+    live = dt.DictationTrigger(trigger, on_press=lambda: None, on_release=lambda: None)
+    assert isinstance(live._listener, dt.EitherListener)
+    assert dt.describe(trigger) == "Ctrl + Alt + Spazio oppure Tasto laterale Avanti"
+    assert dt.key_caps(trigger) == ["Ctrl", "Alt", "Spazio"]
