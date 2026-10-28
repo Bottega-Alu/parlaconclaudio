@@ -51,6 +51,14 @@ def _never_touch_the_real_clipboard(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_network_prewarm(monkeypatch):
+    """Starting a recording opens a connection to OpenRouter: never from tests."""
+    from src.voice_bridge import stt_cleanup
+    monkeypatch.setattr(stt_cleanup, "prewarm", lambda *a, **k: None)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _never_touch_the_real_credential_vault(monkeypatch):
     """No test reads or writes the Windows Credential Manager: keyring is absent unless a test fakes it."""
     import sys

@@ -175,7 +175,9 @@ class OutputHandler:
 
             elif self._mode == "clipboard_paste":
                 _copy(text)
-                time.sleep(0.3)  # Wait for clipboard + window focus to settle
+                # The clipboard is set once _copy returns; focus settled while Whisper ran.
+                # Was 0.3 s on every dictation since the first version, with no recorded reason.
+                time.sleep(0.05)
                 # Release any lingering modifier keys before pasting
                 _send_key(0x11, up=True)  # VK_CONTROL up
                 _send_key(0x12, up=True)  # VK_MENU (Alt) up

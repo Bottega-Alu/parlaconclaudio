@@ -161,6 +161,19 @@ class VoiceBridge:
 
         if self.config.sound_on_start and not self.config.muted and self.config.volume > 0:
             beep_start(self.config.sound_start_freq, self.config.sound_start_duration)
+        threading.Thread(target=self._prewarm_cleanup, name="cleanup-prewarm", daemon=True).start()
+
+    def _prewarm_cleanup(self) -> None:
+        """While the user speaks, open the HTTPS connection the cleanup will use."""
+        try:
+            if not bool(self._transcriber._load_config().get("enable_stt_cleanup", True)):
+                return
+            from ..core.stt_engine.key_manager import KeyManager
+            if KeyManager.get_key("openrouter"):
+                from .stt_cleanup import prewarm
+                prewarm()
+        except Exception:
+            logger.debug("Cleanup prewarm skipped", exc_info=True)
 
         # Start recording watchdog
         threading.Thread(
@@ -355,7 +368,7 @@ class VoiceBridge:
         logger.info("Voice Bridge starting...")
         logger.info(f"  Dictation: {describe_trigger(self._hotkey.trigger)} ({self._hotkey.trigger.mode})")
         logger.info(f"  Mode: {self.config.mode}")
-        logger.info(f"  Model: {self.config.whisper_model} ({self.config.whisper_device})")
+        logger.info(f"  Model: {self.config.whisper_model or 'from hardware profile'}")
         logger.info(f"  STT Mode: {self.config.stt_mode}")
         logger.info(f"  Output: {self.config.output_mode}")
         logger.info("=" * 50)
@@ -396,7 +409,10 @@ class VoiceBridge:
         logger.info("Initializing STT engine...")
         try:
             self._transcriber._ensure_engine()
-            logger.info(f"STT engine ready: {self._transcriber.active_engine_name()}")
+            started = time.perf_counter()
+            self._transcriber.warm_up()
+            logger.info(f"STT engine ready: {self._transcriber.active_engine_name()} "
+                        f"(warm-up {time.perf_counter() - started:.1f} s)")
         except Exception as e:
             logger.warning(f"STT engine pre-load failed: {e} — will retry on first transcription")
 

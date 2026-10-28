@@ -40,6 +40,9 @@ pywin32 = {version = "^306", markers = "sys_platform == 'win32'"}
 # API keys in the Windows Credential Manager (src/core/stt_engine/key_manager.py)
 keyring = "^25.0"
 
+# Pooled HTTPS for the live LLM cleanup (src/voice_bridge/stt_cleanup.py)
+requests = "^2.32"
+
 # TTS (for notify-tts.py hook)
 edge-tts = ">=7.3.1"
 

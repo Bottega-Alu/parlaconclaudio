@@ -32,9 +32,10 @@ Design notes
   *failure*, never a success — its body is mutilated by construction. The
   error carries the provider's token accounting (including
   ``reasoning_tokens``) so the next incident is read, not guessed.
-* Circuit-breaker: after N consecutive *full* failures in a session the
-  agent stops calling the network and returns ``None`` immediately, so a
-  prolonged outage costs nothing per file.
+* Circuit-breaker: after N consecutive *full* failures the agent stops
+  calling the network and returns ``None`` immediately, so a prolonged
+  outage costs nothing per file. After a cooldown one call goes through
+  again (half-open): a success closes it, a failure restarts the cooldown.
 * The detected language is NOT passed to the model as authoritative —
   the model infers the language from the text itself (the Whisper
   language label is the unreliable signal we are working around).
@@ -130,6 +131,7 @@ _CLEANUP_CHUNK_CHARS = 8000
 
 _MAX_RETRIES = 1                 # one retry on 429 / 5xx / network (à la groq_stt)
 _CIRCUIT_BREAKER_THRESHOLD = 3   # consecutive full failures before we give up
+_CIRCUIT_BREAKER_COOLDOWN_S = 60  # then one trial call per minute (half-open)
 
 # System prompt — single source of truth is
 # rollouts/llm-bench/prompt_stt_cleanup.txt; embedded here as a constant so
@@ -270,15 +272,19 @@ def _chunk_text(text: str, limit: int = _CLEANUP_CHUNK_CHARS) -> list[str]:
 # --------------------------------------------------------------------------- #
 
 _consecutive_failures = 0
+_last_failure_at = 0.0
 
 
 def _breaker_open() -> bool:
-    return _consecutive_failures >= _CIRCUIT_BREAKER_THRESHOLD
+    if _consecutive_failures < _CIRCUIT_BREAKER_THRESHOLD:
+        return False
+    return time.monotonic() - _last_failure_at < _CIRCUIT_BREAKER_COOLDOWN_S
 
 
 def _record_failure() -> None:
-    global _consecutive_failures
+    global _consecutive_failures, _last_failure_at
     _consecutive_failures += 1
+    _last_failure_at = time.monotonic()
 
 
 def _record_success() -> None:
@@ -322,6 +328,35 @@ class _HttpError(Exception):
         self.retry_after = retry_after
 
 
+_http_session = None
+_session_lock = threading.Lock()
+
+
+def _session(requests):
+    """One pooled HTTPS connection for the whole run: every dictation used to pay a
+    fresh TCP + TLS handshake to openrouter.ai (~100-250 ms) before the request."""
+    global _http_session
+    with _session_lock:
+        if _http_session is None:
+            _http_session = requests.Session()
+        return _http_session
+
+
+def prewarm(timeout: float = 3.0) -> None:
+    """Open the pooled connection to OpenRouter in the background, e.g. while the
+    user is still speaking, so the cleanup request does not wait for the handshake."""
+    def run():
+        try:
+            import requests  # type: ignore
+            _session(requests).head("https://openrouter.ai/", timeout=timeout,
+                                    headers={"User-Agent": HTTP_USER_AGENT})
+        except Exception:
+            pass  # best effort: the real request connects by itself
+
+    if not _breaker_open():
+        threading.Thread(target=run, name="stt-cleanup-prewarm", daemon=True).start()
+
+
 def _http_post_json(url: str, body: bytes, headers: dict, timeout: float) -> dict:
     """POST raw JSON bytes and return the parsed response dict.
 
@@ -336,7 +371,7 @@ def _http_post_json(url: str, body: bytes, headers: dict, timeout: float) -> dic
 
     if requests is not None:
         try:
-            r = requests.post(url, data=body, headers=headers, timeout=timeout)
+            r = _session(requests).post(url, data=body, headers=headers, timeout=timeout)
         except requests.exceptions.RequestException as e:  # type: ignore[attr-defined]
             raise _HttpError(status=None, message=str(e))
         if r.status_code >= 400:

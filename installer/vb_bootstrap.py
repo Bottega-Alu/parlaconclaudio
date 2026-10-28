@@ -102,6 +102,9 @@ BASE_DEPS = [
     "ctranslate2>=4.0,<5",
     "pywin32>=306",
     "keyring>=25",  # API keys in the Windows Credential Manager, not in plaintext JSON
+    # Pooled HTTPS for the live LLM cleanup: urllib reconnects (TCP+TLS, ~300 ms
+    # to openrouter.ai) on every dictation, a kept-alive Session does not (~30 ms).
+    "requests>=2.32",
     EDGE_TTS_REQ,
 ]
 
@@ -883,10 +886,13 @@ def setup(args: argparse.Namespace, root: Path, log_path: Path | None) -> int:
         env_python = venv / "Scripts" / "python.exe"
         run_streamed([uv, "pip", "install", "--python", str(env_python), *deps], rep)
 
-        # The app currently supports local CUDA transcription only. CPU/base
-        # installs need a configured cloud provider, so downloading a CPU model
-        # here wastes disk/network without enabling dictation.
-        if not args.skip_model and kind == "gpu":
+        # Without a usable GPU the app dictates with Whisper small on CPU
+        # (transcriber decision tree), so the CPU profile pre-fetches it too.
+        # "cloud" skips the download: the user chose a provider.
+        if kind == "cpu" and profile.device != "cpu":  # CPU forced on a GPU host
+            from src.core.gpu_probe import GpuInfo, select_profile
+            profile = select_profile(GpuInfo(present=False))
+        if not args.skip_model and kind in ("gpu", "cpu"):
             rep.step(f"Pre-fetching Whisper model '{profile.model}'")
             rep.info("first download only; later starts read it from cache")
             run_streamed(

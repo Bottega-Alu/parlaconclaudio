@@ -120,6 +120,7 @@ class WhisperRTXEngine(STTEngine):
         vad_filter: Optional[bool] = None,
         word_timestamps: bool = True,
         initial_prompt: Optional[str] = None,
+        without_timestamps: bool = False,
         temperature: Union[float, List[float]] = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
     ) -> TranscriptionResult:
         """
@@ -132,6 +133,7 @@ class WhisperRTXEngine(STTEngine):
             beam_size: Override default beam size
             vad_filter: Override default VAD filter setting
             word_timestamps: Return word-level timestamps (default: True)
+            without_timestamps: Skip segment timestamp tokens (text-only dictation, faster)
             initial_prompt: Optional prompt to guide the model
             temperature: Temperature for sampling (single value or list for fallback)
 
@@ -159,6 +161,7 @@ class WhisperRTXEngine(STTEngine):
                 vad_filter=vad_filter,
                 vad_parameters=self.vad_parameters if vad_filter else None,
                 word_timestamps=word_timestamps,
+                without_timestamps=without_timestamps,
                 initial_prompt=initial_prompt,
                 temperature=temperature,
             )

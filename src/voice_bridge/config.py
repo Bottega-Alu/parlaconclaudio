@@ -23,9 +23,10 @@ class VoiceBridgeConfig:
     hotkey_mode: str = "toggle"
 
     # Whisper engine settings
-    whisper_model: str = "large-v3"
-    whisper_device: str = "cuda"
-    whisper_compute_type: str = "float16"
+    # None = chosen from the hardware at runtime (src/core/gpu_probe.select_profile).
+    whisper_model: str | None = None
+    whisper_device: str | None = None
+    whisper_compute_type: str | None = None
     whisper_language: str | None = None  # None = auto-detect
 
     # Output mode: clipboard_paste | clipboard_only | type_keys
