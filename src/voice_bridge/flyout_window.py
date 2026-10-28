@@ -125,6 +125,12 @@ class Curtain:
         self.top.update()
         self.top.attributes("-alpha", 1.0)
         self.top.update_idletasks()
+        try:
+            # The desktop shows the curtain only at its next composition; wait for it,
+            # or the change behind starts painting before it is covered.
+            ctypes.WinDLL("dwmapi").DwmFlush()
+        except (AttributeError, OSError):
+            pass
 
 
 def window_dpi(root):
