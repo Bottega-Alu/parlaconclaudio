@@ -9,7 +9,7 @@
 ; Output: installer\Output\parlaconclaudio-voice-bridge-Setup-<version>.exe
 
 #define AppName        "parlaconclaudio - voice-bridge"
-#define AppVersion     "1.0.16"
+#define AppVersion     "1.0.17"
 #define AppPublisher   "Frisco"
 #define AppExeName     "VoiceBridge.exe"
 #define BootstrapExe   "vb_bootstrap.exe"
@@ -23,7 +23,7 @@ AppName={#AppName}
 UninstallDisplayName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-VersionInfoVersion=1.0.16.0
+VersionInfoVersion=1.0.17.0
 
 ; Per-user install: no UAC prompt, and - crucially - the venv created after the
 ; install stays writable, so repair and upgrade never need elevation.
@@ -66,7 +66,7 @@ Source: "..\sounds\*";       DestDir: "{app}\sounds";  Flags: ignoreversion recu
 Source: "..\assets\*";       DestDir: "{app}\assets";  Flags: ignoreversion
 Source: "..\README.md";      DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE";        DestDir: "{app}"; Flags: ignoreversion
-Source: "..\docs\releases\1.0.16.md"; DestDir: "{app}\docs\releases"; Flags: ignoreversion
+Source: "..\docs\releases\1.0.17.md"; DestDir: "{app}\docs\releases"; Flags: ignoreversion
 ; Optional: drop uv.exe in installer\bin\ to make setup work fully offline-capable
 ; (minus the wheels themselves). Without it the bootstrapper fetches uv itself.
 Source: "bin\uv.exe";        DestDir: "{app}\bin"; Flags: ignoreversion skipifsourcedoesntexist
@@ -110,8 +110,8 @@ Type: files;          Name: "{app}\voicebridge.log"
 Type: files;          Name: "{app}\voicebridge_debug.log"
 
 [Messages]
-en.WelcomeLabel2=Dictate into the active application: press Ctrl+Alt+Space to start, then press it again to transcribe and paste.%n%nOpen the control panel from the tray icon to check status, microphone and engine. Use a supported NVIDIA GPU for local dictation or configure a cloud provider.%n%nOptional voice hooks announce when Claude Code or Codex finishes or needs your attention. Choose each integration separately on the next pages.%n%nNew in 1.0.16: quick controls and app window switch pages without flicker. Since 1.0.15: light/dark theme follows Windows while the app runs. Since 1.0.14: Settings-style app window (right click on the tray icon), your choice of dictation key combination or mouse button, clipboard-only option and separate voice volume. Close any running version before upgrading. This installer updates the normal application; TEST installations stay separate.
-it.WelcomeLabel2=Detta nell'applicazione attiva: premi Ctrl+Alt+Spazio per iniziare, poi di nuovo per trascrivere e incollare.%n%nApri il pannello dall'icona nella tray per controllare stato, microfono e motore. Usa una GPU NVIDIA compatibile per dettare in locale oppure configura un provider cloud.%n%nGli hook vocali opzionali avvisano quando Claude Code o Codex termina o richiede attenzione. Puoi scegliere separatamente i due collegamenti nelle prossime pagine.%n%nNovita' 1.0.16: comandi rapidi e finestra cambiano pagina senza sfarfallio. Dalla 1.0.15: tema chiaro/scuro che segue Windows anche con l'app aperta. Dalla 1.0.14: finestra in stile Impostazioni (clic destro sull'icona), combinazione di tasti o tasto del mouse a scelta per dettare, opzione solo appunti e volume voci separato. Chiudi ogni versione in esecuzione prima di aggiornare. Il setup aggiorna l'app normale; le installazioni TEST restano separate.
+en.WelcomeLabel2=Dictate into the active application: press Ctrl+Alt+Space to start, then press it again to transcribe and paste.%n%nOpen the control panel from the tray icon to check status, microphone and engine. Use a supported NVIDIA GPU for local dictation or configure a cloud provider.%n%nOptional voice hooks announce when Claude Code or Codex finishes or needs your attention. Choose each integration separately on the next pages.%n%nNew in 1.0.17: the volume sliders change the voice already speaking and range from 0 to 125%. Since 1.0.16: quick controls and app window switch pages without flicker. Since 1.0.15: light/dark theme follows Windows while the app runs. Since 1.0.14: Settings-style app window (right click on the tray icon), your choice of dictation key combination or mouse button, clipboard-only option and separate voice volume. Close any running version before upgrading. This installer updates the normal application; TEST installations stay separate.
+it.WelcomeLabel2=Detta nell'applicazione attiva: premi Ctrl+Alt+Spazio per iniziare, poi di nuovo per trascrivere e incollare.%n%nApri il pannello dall'icona nella tray per controllare stato, microfono e motore. Usa una GPU NVIDIA compatibile per dettare in locale oppure configura un provider cloud.%n%nGli hook vocali opzionali avvisano quando Claude Code o Codex termina o richiede attenzione. Puoi scegliere separatamente i due collegamenti nelle prossime pagine.%n%nNovita' 1.0.17: gli slider del volume cambiano anche la voce che sta parlando e vanno da 0 a 125%. Dalla 1.0.16: comandi rapidi e finestra cambiano pagina senza sfarfallio. Dalla 1.0.15: tema chiaro/scuro che segue Windows anche con l'app aperta. Dalla 1.0.14: finestra in stile Impostazioni (clic destro sull'icona), combinazione di tasti o tasto del mouse a scelta per dettare, opzione solo appunti e volume voci separato. Chiudi ogni versione in esecuzione prima di aggiornare. Il setup aggiorna l'app normale; le installazioni TEST restano separate.
 
 [CustomMessages]
 en.StartupGroup=Windows sign-in
