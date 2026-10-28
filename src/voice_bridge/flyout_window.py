@@ -21,8 +21,14 @@ def _grab(x, y, w, h):
     from PIL import Image
     # Private DLL objects: argtypes set here must not leak into other ctypes users.
     user, gdi = ctypes.WinDLL("user32"), ctypes.WinDLL("gdi32")
+    # Every handle typed as a pointer: an untyped 64-bit handle overflows ctypes' C int
+    # (intermittent OverflowError -> no curtain -> flicker).
+    gdi.CreateCompatibleBitmap.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
     gdi.CreateCompatibleBitmap.restype = ctypes.c_void_p
+    gdi.CreateCompatibleDC.argtypes = [ctypes.c_void_p]
     gdi.CreateCompatibleDC.restype = ctypes.c_void_p
+    gdi.SelectObject.restype = ctypes.c_void_p
+    user.GetDC.argtypes = [ctypes.c_void_p]
     gdi.SelectObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
     gdi.BitBlt.argtypes = [ctypes.c_void_p] + [ctypes.c_int] * 4 + [ctypes.c_void_p] + [ctypes.c_int] * 2 + [wintypes.DWORD]
     gdi.GetDIBits.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT, wintypes.UINT,

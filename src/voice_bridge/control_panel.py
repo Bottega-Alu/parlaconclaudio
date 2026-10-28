@@ -9,7 +9,7 @@ import logging
 import queue
 import threading
 
-from . import fluent
+from . import fluent, i18n
 from .fluent import ICON
 from .i18n import APP_NAME, N_, _
 
@@ -25,6 +25,25 @@ PAGES = (
 STATE_LABELS = {"idle": N_("Pronto per dettare"), "recording": N_("Registrazione in corso"),
                 "transcribing": N_("Trascrizione in corso"), "loading": N_("Caricamento del motore"),
                 "output": N_("Invio del testo")}
+
+
+HISTORY_SHOWN = 5
+OUTCOME_LABELS = {"pasted": N_("Incollata"), "clipboard": N_("Negli appunti"), "failed": N_("Non inviata")}
+
+
+def _when(timestamp):
+    """'14:32' today, '27/10 14:32' on other days."""
+    from datetime import datetime
+    try:
+        moment = datetime.fromisoformat(timestamp)
+    except (TypeError, ValueError):
+        return ""
+    return moment.strftime("%H:%M" if moment.date() == datetime.now().date() else "%d/%m %H:%M")
+
+
+def _clip(text, limit):
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
 def _join_and(items):
@@ -50,6 +69,8 @@ class ControlPanel:
         self._testing = False
         self._test_events = []
         self._autostart = None  # unknown until a worker has asked Windows
+        self._history_all = False
+        self._history_mtime = None
 
     def show(self):
         with self._lock:
@@ -312,15 +333,24 @@ class ControlPanel:
                 widget.bind("<Leave>", lambda event: [w.configure(bg=c["card"]) for w in widgets + [control]])
         return control
 
-    def _keycaps(self, parent, bg, caps=None):
+    def _keycaps(self, parent, bg, caps=None, with_mouse=True):
         import tkinter as tk
-        from .dictation_trigger import key_caps
+        from .dictation_trigger import MOUSE_BUTTONS, key_caps
         c = self.colors
-        for index, key in enumerate(caps or key_caps(self.tray.dictation_trigger())):
+        trigger = self.tray.dictation_trigger()
+
+        def cap(text):
+            tk.Label(parent, text=text, font=(self.font, 8), fg=c["text"], bg=c["raised"], padx=self._p(7),
+                     pady=self._p(2), highlightthickness=1, highlightbackground=c["line"]).pack(side="left")
+
+        for index, key in enumerate(caps or key_caps(trigger)):
             if index:
                 tk.Label(parent, text="+", font=(self.font, 8), fg=c["subtle"], bg=bg).pack(side="left", padx=self._p(3))
-            tk.Label(parent, text=_(key), font=(self.font, 8), fg=c["text"], bg=c["raised"], padx=self._p(7),
-                     pady=self._p(2), highlightthickness=1, highlightbackground=c["line"]).pack(side="left")
+            cap(_(key))
+        if caps is None and with_mouse and trigger.kind == "both":
+            tk.Label(parent, text=_("oppure"), font=(self.font, 8), fg=c["subtle"], bg=bg).pack(
+                side="left", padx=self._p(6))
+            cap(_(MOUSE_BUTTONS[trigger.button]))
 
     def _button(self, parent, text, command, primary=False, enabled=True):
         import tkinter as tk
@@ -346,6 +376,26 @@ class ControlPanel:
         box.pack(side="right")
         box.bind("<<ComboboxSelected>>", lambda event: on_select(variable.get()))
         return box
+
+    def _segmented(self, parent, options, current, on_select):
+        """Every choice visible at once, the current one filled with the accent."""
+        import tkinter as tk
+        c = self.colors
+        row = tk.Frame(parent, bg=c["line"], padx=1, pady=1)
+        row.pack(side="right")
+        for index, (value, label) in enumerate(options):
+            selected = value == current
+            bg, fg = (c["accent"], c["on"]) if selected else (c["raised"], c["text"])
+            button = tk.Button(row, text=label, font=(self.font, 9, "bold" if selected else "normal"),
+                               bg=bg, fg=fg, activebackground=bg if selected else c["hover"],
+                               activeforeground=fg, relief="flat", bd=0, cursor="hand2",
+                               padx=self._p(12), pady=self._p(6), highlightthickness=0,
+                               command=(lambda v=value: on_select(v)) if not selected else None)
+            button.pack(side="left", padx=(1 if index else 0, 0))
+            if not selected:
+                button.bind("<Enter>", lambda event, b=button: b.configure(bg=c["hover"]))
+                button.bind("<Leave>", lambda event, b=button, color=bg: b.configure(bg=color))
+        return row
 
     def _switch(self, parent, value, on_toggle, label=None):
         import tkinter as tk
@@ -385,26 +435,109 @@ class ControlPanel:
         keys.pack(fill="x", pady=(self._p(16), 0))
         self._keycaps(keys, c["card"])
         from .tray_icon import auto_paste_enabled, sound_volume
-        tk.Label(keys, text="  " + (_("in qualsiasi app: detta, poi il testo viene incollato dove stai scrivendo.")
-                                   if auto_paste_enabled(self.config) else
-                                   _("in qualsiasi app: detta, poi il testo viene copiato negli appunti.")),
-                 font=(self.font, 8), fg=c["muted"], bg=c["card"]).pack(side="left")
+        # Own line: next to long keycaps ("Ctrl + Alt + Spazio oppure Tasto laterale…") it was cut.
+        tk.Label(hero, text=(_("in qualsiasi app: detta, poi il testo viene incollato dove stai scrivendo.")
+                             if auto_paste_enabled(self.config) else
+                             _("in qualsiasi app: detta, poi il testo viene copiato negli appunti.")),
+                 font=(self.font, 8), fg=c["muted"], bg=c["card"], anchor="w").pack(fill="x", pady=(self._p(6), 0))
 
+        self._appearance_section()
+        self._history_section()
+        self._quick_line()
+
+    def _appearance_section(self):
+        self._section(_("Aspetto"))
+        self._segmented(self._card("settings", _("Tema"), _("Chiaro, scuro o come Windows.")),
+                        [("system", _("Sistema")), ("light", _("Chiaro")), ("dark", _("Scuro"))],
+                        fluent.theme(), self._apply_theme)
+        # Language names stay in their own language: findable whatever is shown now.
+        self._segmented(self._card("globe", _("Lingua"), _("Menu, finestre e notifiche.")),
+                        [(i18n.SYSTEM, _("Sistema"))] + list(i18n.LANGUAGES.items()),
+                        self.config.get("ui_language", i18n.SOURCE), self._apply_ui_language)
+
+    def _history_section(self):
+        import tkinter as tk
+        from . import history
+        c = self.colors
+        try:
+            self._history_mtime = history.history_file().stat().st_mtime_ns
+        except OSError:
+            self._history_mtime = None
+        saved = list(reversed(history.entries()))
+        head = tk.Frame(self.body, bg=c["surface"])
+        head.pack(fill="x", pady=(self._p(14), self._p(6)))
+        tk.Label(head, text=_("Ultime trascrizioni"), font=(self.font, 10, "bold"), fg=c["text"],
+                 bg=c["surface"], anchor="w").pack(side="left")
+        if not saved:
+            self._card("file", _("Ancora nessuna trascrizione"),
+                       _("Quello che detti compare qui, anche se non è stato incollato."))
+            return
+        self._button(head, _("Cancella storico"), self._clear_history).pack(side="right")
+        for item in saved if self._history_all else saved[:HISTORY_SHOWN]:
+            self._history_row(item)
+        if len(saved) > HISTORY_SHOWN:
+            more = tk.Label(self.body, text=_("Mostra meno") if self._history_all
+                            else _("Mostra tutte ({count})").format(count=len(saved)),
+                            font=(self.font, 9), fg=c["accent"], bg=c["surface"], cursor="hand2", anchor="w")
+            more.pack(fill="x", pady=(self._p(2), 0))
+            more.bind("<Button-1>", lambda event: self._toggle_history())
+
+    def _history_row(self, item):
+        import tkinter as tk
+        c = self.colors
+        card = tk.Frame(self.body, bg=c["card"], highlightthickness=1, highlightbackground=c["line"],
+                        padx=self._p(16), pady=self._p(10))
+        card.pack(fill="x", pady=(0, self._p(4)))
+        copy = self._button(card, _("Copia"), None)
+        copy.configure(command=lambda: self._copy_text(item["text"], copy))
+        copy.pack(side="right", padx=(self._p(16), 0))
+        texts = tk.Frame(card, bg=c["card"])
+        texts.pack(side="left", fill="x", expand=True)
+        outcome = item.get("outcome", "failed")
+        meta = f"{_when(item.get('ts'))} · {_(OUTCOME_LABELS.get(outcome, OUTCOME_LABELS['failed']))}"
+        tk.Label(texts, text=meta, font=(self.font, 8), fg=c["rec"] if outcome == "failed" else c["muted"],
+                 bg=c["card"], anchor="w").pack(fill="x")
+        body = tk.Label(texts, text=_clip(item["text"], 220), font=(self.font, 10), fg=c["text"],
+                        bg=c["card"], anchor="w", justify="left", wraplength=self._p(420))
+        body.pack(fill="x")
+        texts.bind("<Configure>", lambda event: body.configure(
+            wraplength=max(self._p(120), event.width - self._p(4))))
+
+    def _quick_line(self):
+        """Quick settings on one line: each part opens its page."""
+        import tkinter as tk
+        from .tray_icon import TTS_MODES, sound_volume
+        from ..core import voice_hooks
+        c = self.colors
         config = self.config
-        self._section(_("Impostazioni rapide"))
         mic = next((name for name, value in self.mics.items() if value == config.get("mic_device_id")),
                    _("Predefinito di Windows"))
-        self._card("mic", _("Microfono"), mic.split(" [")[0], on_click=lambda: self._go("dictation"))
-        pack = config.get("sound_pack", "r2d2")
         mode = _(next((label for label, value in TTS_MODES.items() if value == config.get("tts_mode", "full")), ""))
+        pack = config.get("sound_pack", "r2d2")
         sound = _("Casuale") if pack == "random" else fluent.pretty_pack(pack)
-        volume = _("audio disattivato") if config.get("muted") else _("volume {level}%").format(level=sound_volume(config))
-        self._card("bell", _("Avvisi vocali"), f"{mode} · {sound} · {volume}", on_click=lambda: self._go("alerts"))
-        from ..core import voice_hooks
+        volume = _("audio disattivato") if config.get("muted") else f"{sound_volume(config)}%"
         linked = [voice_hooks.AGENT_LABEL[a] for a, on in self.hooks.items() if on]
-        self._card("link", _("Collegamenti"),
-                   _("Avvisi attivi per {agents}").format(agents=_join_and(linked)) if linked
-                   else _("Nessun agente collegato agli avvisi vocali"), on_click=lambda: self._go("links"))
+        parts = (
+            ("mic", _clip(mic.split(" [")[0], 26), "dictation"),
+            ("bell", _clip(f"{mode} · {sound} · {volume}", 40), "alerts"),
+            ("link", _clip(_join_and(linked), 26) if linked else _("Nessun agente"), "links"),
+        )
+        self._section(_("Impostazioni rapide"))
+        line = tk.Frame(self.body, bg=c["card"], highlightthickness=1, highlightbackground=c["line"],
+                        padx=self._p(12), pady=self._p(8))
+        line.pack(fill="x")
+        for icon, text, page in parts:
+            chip = tk.Frame(line, bg=c["card"], cursor="hand2", padx=self._p(6), pady=self._p(3))
+            chip.pack(side="left", padx=(0, self._p(8)))
+            glyph = self._glyph(chip, icon, 10, c["muted"], c["card"])
+            glyph.pack(side="left", padx=(0, self._p(6)))
+            label = tk.Label(chip, text=text, font=(self.font, 9), fg=c["text"], bg=c["card"], cursor="hand2")
+            label.pack(side="left")
+            widgets = (chip, glyph, label)
+            for widget in widgets:
+                widget.bind("<Button-1>", lambda event, p=page: self._go(p))
+                widget.bind("<Enter>", lambda event, w=widgets: [x.configure(bg=c["hover"]) for x in w])
+                widget.bind("<Leave>", lambda event, w=widgets: [x.configure(bg=c["card"]) for x in w])
 
     def _page_dictation(self):
         from .tray_icon import STT_MODES, WHISPER_LANGUAGES
@@ -444,15 +577,18 @@ class ControlPanel:
         c = self.colors
         trigger = self.tray.dictation_trigger()
         self._section(_("Comando di dettatura"))
-        kinds = {_("Combinazione di tasti"): ("keys", None)}
-        kinds.update({_(label): ("mouse", button) for button, label in MOUSE_BUTTONS.items()})
-        current = next(label for label, (kind, button) in kinds.items()
-                       if kind == trigger.kind and (kind == "keys" or button == trigger.button))
+        kinds = {_("Combinazione di tasti"): "keys", _("Tasto del mouse"): "mouse",
+                 _("Tasti oppure mouse"): "both"}
+        current = next(label for label, kind in kinds.items() if kind == trigger.kind)
         self._combo(self._card("settings", _("Comando"),
                                _("Un tasto del mouse assegnato alla dettatura non arriva più alle altre app.")),
-                    kinds, current, lambda label: self._save_trigger(kind=kinds[label][0],
-                                                                   button=kinds[label][1] or trigger.button))
-        if trigger.kind == "keys":
+                    kinds, current, lambda label: self._save_trigger(kind=kinds[label]))
+        if trigger.kind in ("mouse", "both"):
+            buttons = {_(label): button for button, label in MOUSE_BUTTONS.items()}
+            self._combo(self._card("settings", _("Tasto del mouse"), _("Il tasto centrale o uno dei laterali.")),
+                        buttons, _(MOUSE_BUTTONS[trigger.button]),
+                        lambda label: self._save_trigger(button=buttons[label]))
+        if trigger.kind in ("keys", "both"):
             control = self._card("list", _("Combinazione"),
                                  _(self._trigger_error) if self._trigger_error else
                                  (_("Premi la combinazione da usare. Esc per annullare.")
@@ -465,7 +601,7 @@ class ControlPanel:
                 self._button(control, _("Cambia…"), self._start_capture).pack(side="right", padx=(self._p(12), 0))
                 caps = tk.Frame(control, bg=c["card"])
                 caps.pack(side="right")
-                self._keycaps(caps, c["card"])
+                self._keycaps(caps, c["card"], with_mouse=False)  # the mouse button has its own card
         self._combo(self._card("refresh", _("Modalità"), _("Come si comporta il comando.")),
                     [_(v) for v in MODES.values()], _(MODES[trigger.mode]),
                     lambda label: self._save_trigger(mode=next(k for k, v in MODES.items() if _(v) == label)))
@@ -513,7 +649,9 @@ class ControlPanel:
             return "break"
         if combo:
             self._end_trigger_editing()
-            self._save_trigger(kind="keys", keys=combo)
+            # A new combination keeps "keys or mouse" if that was the choice.
+            self._save_trigger(kind="both" if self.tray.dictation_trigger().kind == "both" else "keys",
+                               keys=combo)
         return "break"
 
     def _capture_release(self, event):
@@ -678,6 +816,20 @@ class ControlPanel:
                 side="right", padx=(0, self._p(8)))
         control = self._card("refresh", _("Verifica connessione"), _("Prova i provider cloud configurati."))
         self._button(control, _("Verifica"), lambda: self.tray._test_cloud_connection(None, None)).pack(side="right")
+        self._section(_("Correzione del testo"))
+        self._switch(self._card("chat", _("Correggi la trascrizione con un LLM"),
+                                _("Sistema punteggiatura e parole fraintese tramite OpenRouter, "
+                                  "con la tua chiave. Senza chiave il testo resta com'è.")),
+                     bool(self.config.get("enable_stt_cleanup", True)),
+                     lambda on: self._work(lambda: self.tray._set_text_cleanup(on)))
+        configured = bool(KeyManager.get_key("openrouter"))
+        control = self._card("cloud", _("Chiave {provider}").format(provider="OpenRouter"),
+                             _("Configurata. Resta nel portachiavi di Windows.") if configured
+                             else _("Non configurata. Resta nel portachiavi di Windows."))
+        self._button(control, _("Imposta…"),
+                     lambda: self.tray._ask_api_key_openrouter(None, None, on_done=self._refresh_soon)).pack(side="right")
+        self._button(control, _("Ottieni chiave"), lambda: self.tray._open_openrouter_console(None, None)).pack(
+            side="right", padx=(0, self._p(8)))
 
     def _page_about(self):
         from .build_info import VERSION, IS_TEST_BUILD
@@ -690,6 +842,38 @@ class ControlPanel:
         self._button(control, _("Esci"), self._exit).pack(side="right")
 
     # ── actions ─────────────────────────────────────────────────────
+
+    def _refresh_soon(self):
+        """From any thread: reload settings and redraw the page."""
+        self._commands.put("refresh")
+        self._wake()
+
+    def _apply_theme(self, choice):
+        self.tray._set_ui_theme(choice)
+        self._load()
+        if not self._follow_theme():
+            self._render()  # same colours (e.g. Sistema -> Scuro on a dark Windows): show the choice
+
+    def _apply_ui_language(self, setting):
+        self.tray._set_ui_language(setting)
+        self._load()
+        self._render()
+
+    def _toggle_history(self):
+        self._history_all = not self._history_all
+        self._render()
+
+    def _clear_history(self):
+        from . import history
+        history.clear()
+        self._history_all = False
+        self._render()
+
+    def _copy_text(self, text, button):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        button.configure(text=_("Copiato"))
+        self.root.after(1500, lambda: button.winfo_exists() and button.configure(text=_("Copia")))
 
     def _work(self, callback):
         if callback:
@@ -772,13 +956,27 @@ class ControlPanel:
         self._theme_ticks += 1
         if self._theme_ticks % 4 == 0:  # ~3 s: an open window follows a light/dark switch
             self._follow_theme()
+        if self._page == "home" and self._history_changed():
+            y = self.canvas.yview()[0]
+            self._render()
+            self.root.update_idletasks()
+            self.canvas.yview_moveto(y)
         self._update_state()
         self.root.after(750, self._tick)
 
+    def _history_changed(self):
+        from . import history
+        try:
+            mtime = history.history_file().stat().st_mtime_ns
+        except OSError:
+            mtime = None
+        return mtime != self._history_mtime
+
     def _follow_theme(self):
+        """Repaint if light/dark or the accent changed; True when it did."""
         dark = fluent.dark_mode()
         if (dark, fluent.accent(dark)) == self._theme:
-            return
+            return False
         self.dark = dark
         self.colors = c = fluent.colors(dark)
         self._theme = (dark, c["accent"])
@@ -788,6 +986,7 @@ class ControlPanel:
         self._style()
         fluent.dark_title_bar(self.root, dark)
         self._render()
+        return True
 
     def _drain(self):
         """Run queued commands; False once the window is destroyed."""

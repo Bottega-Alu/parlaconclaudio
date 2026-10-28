@@ -632,7 +632,37 @@ class TrayIcon:
     def _ask_api_key_deepgram(self, icon, item):
         self._ask_api_key("deepgram", _("Deepgram API Key"), _("Enter your Deepgram API key:\n(Get $200 free at console.deepgram.com)"))
 
-    def _ask_api_key(self, provider: str, title: str, prompt: str):
+    def _ask_api_key_openrouter(self, icon, item, on_done=None):
+        self._ask_api_key("openrouter", _("Chiave API OpenRouter"),
+                          _("Incolla la chiave API di OpenRouter:\n(la crei su openrouter.ai/keys)"), on_done)
+
+    def _open_openrouter_console(self, icon, item):
+        import webbrowser
+        webbrowser.open("https://openrouter.ai/keys")
+
+    def _set_text_cleanup(self, enabled: bool) -> None:
+        """LLM correction of the transcript (OpenRouter); read at every dictation."""
+        config = _load_config()
+        config["enable_stt_cleanup"] = bool(enabled)
+        _save_config(config)
+        logger.info(f"STT cleanup set to: {enabled}")
+
+    def _set_ui_theme(self, choice: str) -> None:
+        from . import fluent
+        fluent.set_theme(choice)
+        config = _load_config()
+        config["ui_theme"] = fluent.theme()
+        _save_config(config)
+        logger.info(f"Interface theme set to: {fluent.theme()}")
+
+    def _set_ui_language(self, setting: str) -> None:
+        shown = i18n.set_language(setting)
+        config = _load_config()
+        config["ui_language"] = setting if setting in i18n.LANGUAGES else i18n.SYSTEM
+        _save_config(config)
+        logger.info(f"Interface language set to: {config['ui_language']} (showing {shown})")
+
+    def _ask_api_key(self, provider: str, title: str, prompt: str, on_done=None):
         def _run():
             try:
                 import tkinter as tk
@@ -646,6 +676,8 @@ class TrayIcon:
                     from ..core.stt_engine.key_manager import KeyManager
                     store = KeyManager.set_key(provider, key.strip())
                     logger.info(f"{provider} API key saved ({store})")
+                    if on_done:
+                        on_done()
             except Exception as e:
                 logger.error(f"API key dialog failed: {e}")
         threading.Thread(target=_run, daemon=True).start()

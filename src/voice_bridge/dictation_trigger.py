@@ -30,6 +30,12 @@ MOUSE_BUTTONS = {
     "x1": N_("Tasto laterale Indietro"),
     "x2": N_("Tasto laterale Avanti"),
 }
+# Short forms for narrow surfaces (quick controls keycaps).
+SHORT_MOUSE_BUTTONS = {
+    "middle": N_("Centrale mouse"),
+    "x1": N_("Laterale Indietro"),
+    "x2": N_("Laterale Avanti"),
+}
 MODES = {
     "toggle": N_("Premi per avviare e per fermare"),
     "hold": N_("Tieni premuto mentre parli"),

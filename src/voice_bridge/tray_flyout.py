@@ -37,6 +37,9 @@ STATE_LABELS = {"idle": N_("Pronto per dettare"), "recording": N_("Registrazione
                 "output": N_("Invio del testo…")}
 
 
+THEME_LABELS = {"system": N_("Sistema"), "light": N_("Chiaro"), "dark": N_("Scuro")}
+
+
 def _dark_mode():
     # Next to the taskbar, like Quick Settings: follows the system mode, not the app mode.
     return fluent.dark_mode("system")
@@ -250,6 +253,8 @@ class TrayFlyout:
             ("voice", "chat", _("Avvisi vocali"), values["voice"], None, "voice"),
             ("mic", "mic", _("Microfono"), values["mic"], None, "mic"),
             ("engine", "chip", _("Riconoscimento"), values["engine"], None, "engine"),
+            ("theme", "settings", _("Tema"), values["theme"], self._next_theme, None),
+            ("language", "globe", _("Lingua"), values["language"], self._next_language, None),
         ]
         self.tiles = {}
         for index, (key, icon, title, value, action, page) in enumerate(specs):
@@ -309,11 +314,11 @@ class TrayFlyout:
         self._paint_status()
 
     def _caps(self):
-        from .dictation_trigger import key_caps
-        caps = key_caps(self.tray.dictation_trigger())
-        if len(caps) == 1 and len(caps[0]) > 12:
-            caps = [caps[0].replace("Tasto ", "").replace(" del mouse", " mouse").capitalize()]
-        return caps
+        from .dictation_trigger import SHORT_MOUSE_BUTTONS, key_caps
+        trigger = self.tray.dictation_trigger()
+        if trigger.kind == "mouse":
+            return [_(SHORT_MOUSE_BUTTONS[trigger.button])]
+        return key_caps(trigger)
 
     def _hint(self, text):
         if self._page != "main":
@@ -340,6 +345,8 @@ class TrayFlyout:
             "voice": next((_(label) for label, value in TTS_MODES.items() if value == mode), mode),
             "mic": _t(mic.split(" [")[0]),
             "engine": _t(STT_MODES.get(config.get("stt_mode", "auto"), "")).split(" (")[0],
+            "theme": _(THEME_LABELS[fluent.theme()]),
+            "language": i18n.LANGUAGES.get(config.get("ui_language", i18n.SOURCE), _("Sistema")),
         }
 
     def _update_main(self):
@@ -727,6 +734,30 @@ class TrayFlyout:
             finally:
                 self._commands.put("refresh")
         threading.Thread(target=run, daemon=True).start()
+
+    def _next_theme(self):
+        """Tile action: Sistema -> Chiaro -> Scuro, repainted at once behind the curtain."""
+        themes = list(THEME_LABELS)
+        choice = themes[(themes.index(fluent.theme()) + 1) % len(themes)]
+        self.tray._set_ui_theme(choice)
+        self._rebuild_in_place()
+
+    def _next_language(self):
+        """Tile action: Sistema -> each language in turn."""
+        settings = [i18n.SYSTEM] + list(i18n.LANGUAGES)
+        current = self._config.get("ui_language", i18n.SOURCE)
+        current = current if current in settings else i18n.SYSTEM
+        self.tray._set_ui_language(settings[(settings.index(current) + 1) % len(settings)])
+        self._rebuild_in_place()
+
+    def _rebuild_in_place(self):
+        # Every page changes (colours or language): rebuild them all while the
+        # snapshot of the current view covers the window.
+        with self._curtain.held():
+            self._load()
+            self._build_surface()
+            self._update_main()
+        flyout_window.finish_window(self.root, self.dark)
 
     def _record(self):
         self._hide()

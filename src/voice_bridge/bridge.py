@@ -302,6 +302,9 @@ class VoiceBridge:
 
                 self._output.mode = output_mode_from_config(self.config.output_mode)
                 delivered = self._output.deliver(text)
+                from . import history
+                history.add(text, "failed" if not delivered
+                            else "clipboard" if self._output.mode == "clipboard_only" else "pasted")
                 if not delivered:
                     logger.warning("Text delivery failed")
                     self._tray._notify(_("Invio del testo non riuscito. Controlla gli appunti e la finestra attiva."))
