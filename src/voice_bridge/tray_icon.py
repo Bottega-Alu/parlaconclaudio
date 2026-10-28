@@ -121,7 +121,9 @@ EDGE_VOICES = {
     ],
 }
 
-VOLUME_LEVELS = [0, 25, 50, 75, 100, 125, 150, 200, 250, 300]
+MAX_VOLUME = 125
+DEFAULT_VOLUME = 100
+VOLUME_LEVELS = [0, 25, 50, 75, 100, 125]
 
 _VOICE_HOOKS_LOCK = threading.Lock()
 
@@ -162,7 +164,7 @@ def _load_config() -> dict:
             return json.loads(TTS_CONFIG.read_text())
     except Exception:
         pass
-    return {"sound_pack": "r2d2", "whisper_language": None, "volume": 200, "muted": False}
+    return {"sound_pack": "r2d2", "whisper_language": None, "volume": DEFAULT_VOLUME, "muted": False}
 
 
 def _save_config(config: dict) -> None:
@@ -178,9 +180,22 @@ def auto_paste_enabled(config: dict | None = None) -> bool:
     return bool((config if config is not None else _load_config()).get("auto_paste", True))
 
 
+def _clamp_volume(level) -> int:
+    """0..MAX_VOLUME; older configs may hold up to 300 from the previous range."""
+    try:
+        return max(0, min(MAX_VOLUME, int(level)))
+    except (TypeError, ValueError):
+        return DEFAULT_VOLUME
+
+
+def sound_volume(config: dict) -> int:
+    """Volume of the sound pack."""
+    return _clamp_volume(config.get("volume", DEFAULT_VOLUME))
+
+
 def voice_volume(config: dict) -> int:
     """Volume of spoken announcements; follows the sound volume until set on its own."""
-    return int(config.get("voice_volume", config.get("volume", 200)))
+    return _clamp_volume(config.get("voice_volume", config.get("volume", DEFAULT_VOLUME)))
 
 
 def output_mode_from_config(default: str) -> str:
@@ -193,7 +208,7 @@ def _play_sound(filepath: str) -> None:
     config = _load_config()
     if config.get("muted"):
         return
-    volume = config.get("volume", 200)
+    volume = sound_volume(config)
     if volume <= 0:
         return
     try:

@@ -58,6 +58,14 @@ ERROR_BEEP_TONES = ((330, 120), (220, 120), (150, 250))  # (Hz, ms) descending
 # latest on disk.
 BURST_WAIT_MS = 300
 
+# Live playback: the detached player re-reads the sliders every block, so a
+# volume change reaches the voice already speaking. ffplay is the fallback.
+MAX_VOLUME = 125
+DEFAULT_VOLUME = 100
+LIVE_RATE = 48000
+LIVE_CHANNELS = 2
+LIVE_BLOCK_FRAMES = 2048  # ~43 ms at 48 kHz
+
 # Subagent (TaskCompleted) gets a longer window so a cluster of
 # subagents finishing within a couple of seconds collapses to a single
 # voice line instead of overlapping into cacophony.
@@ -104,7 +112,19 @@ def load_config() -> dict:
             return json.loads(TTS_CONFIG.read_text())
     except Exception:
         pass
-    return {"sound_pack": "r2d2", "volume": 200}
+    return {"sound_pack": "r2d2", "volume": DEFAULT_VOLUME}
+
+
+def _level(config: dict, voice: bool) -> int:
+    """Slider level in 0..MAX_VOLUME; voices follow the sound volume until set on their own.
+    Older configs may hold up to 300 from the previous range: clamped here."""
+    level = config.get("volume", DEFAULT_VOLUME)
+    if voice:
+        level = config.get("voice_volume", level)
+    try:
+        return max(0, min(MAX_VOLUME, int(level)))
+    except (TypeError, ValueError):
+        return DEFAULT_VOLUME
 
 
 def get_voice() -> dict:
@@ -113,13 +133,12 @@ def get_voice() -> dict:
 
 
 def get_volume() -> int:
-    return load_config().get("volume", 200)
+    return _level(load_config(), voice=False)
 
 
 def get_voice_volume() -> int:
     """Spoken announcements have their own level; older configs fall back to the sound volume."""
-    config = load_config()
-    return config.get("voice_volume", config.get("volume", 200))
+    return _level(load_config(), voice=True)
 
 
 def get_muted() -> bool:
@@ -333,20 +352,115 @@ def play_mp3_sync(filepath: str) -> None:
         pass
 
 
-def play_mp3(filepath: str, volume: int | None = None) -> None:
-    volume = get_volume() if volume is None else volume
-    if not os.path.isfile(filepath) or get_muted() or volume <= 0:
-        return
+def _play_ffplay(filepath: str, volume: int) -> None:
+    """Fixed level for the whole clip: the fallback when live playback is unavailable."""
     try:
-        CREATE_NO_WINDOW = 0x08000000
         subprocess.Popen(
             ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
              "-af", f"volume={volume}/100", filepath],
-            creationflags=CREATE_NO_WINDOW,
+            creationflags=_CREATE_NO_WINDOW,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except Exception:
         pass
+
+
+def play_mp3(filepath: str, voice: bool = False) -> None:
+    """Start playback and return at once. Decision tree:
+    1. detached player (--play): follows the sliders while the clip plays
+    2. ffplay at the level read now, if the player cannot be spawned"""
+    volume = get_voice_volume() if voice else get_volume()
+    if not os.path.isfile(filepath) or get_muted() or volume <= 0:
+        return
+    if not _spawn_hidden([PLAY_FLAG, "voice" if voice else "sound", filepath]):
+        _play_ffplay(filepath, volume)
+
+
+class _LiveLevel:
+    """Slider gain, re-read from tts_config.json only when the file changes."""
+
+    def __init__(self, voice: bool):
+        self.voice = voice
+        self.mtime = None
+        self.gain = None
+
+    def read(self) -> float:
+        try:
+            mtime = TTS_CONFIG.stat().st_mtime_ns
+        except OSError:
+            mtime = None
+        if self.gain is None or mtime != self.mtime:
+            self.mtime = mtime
+            config = load_config()
+            self.gain = 0.0 if config.get("muted") else _level(config, self.voice) / 100
+        return self.gain
+
+
+def play_live(filepath: str, voice: bool) -> bool:
+    """Decode with ffmpeg and play through PyAudio, re-reading the level every
+    block (~43 ms) so a slider change reaches the clip already playing.
+    False = live playback unavailable (numpy, PyAudio, ffmpeg or the output
+    device missing) before any audio was played: the caller uses ffplay."""
+    try:
+        import numpy as np
+        import pyaudio
+    except ImportError:
+        return False
+    try:
+        decoder = subprocess.Popen(
+            ["ffmpeg", "-nostdin", "-loglevel", "quiet", "-i", filepath,
+             "-f", "s16le", "-ac", str(LIVE_CHANNELS), "-ar", str(LIVE_RATE), "-"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            creationflags=_CREATE_NO_WINDOW,
+        )
+    except OSError:
+        return False
+    audio = stream = None
+    try:
+        try:
+            audio = pyaudio.PyAudio()
+            stream = audio.open(format=pyaudio.paInt16, channels=LIVE_CHANNELS,
+                                rate=LIVE_RATE, output=True)
+        except Exception:
+            return False
+        level = _LiveLevel(voice)
+        gain = level.read()
+        frame_bytes = 2 * LIVE_CHANNELS
+        while True:
+            data = decoder.stdout.read(LIVE_BLOCK_FRAMES * frame_bytes)
+            data = data[:len(data) - len(data) % frame_bytes]
+            if not data:
+                break
+            target = level.read()
+            samples = np.frombuffer(data, dtype=np.int16).reshape(-1, LIVE_CHANNELS)
+            # Ramp across the block: a jump in gain would click.
+            ramp = np.linspace(gain, target, len(samples), dtype=np.float32)[:, None]
+            out = np.clip(samples * ramp, -32768, 32767).astype(np.int16)
+            stream.write(out.tobytes())
+            gain = target
+        return True
+    finally:
+        if decoder.poll() is None:
+            decoder.kill()
+        if stream is not None:
+            try:
+                stream.stop_stream()
+                stream.close()
+            except Exception:
+                pass
+        if audio is not None:
+            audio.terminate()
+
+
+def play_command(args: list[str]) -> None:
+    """Entry of the detached player: --play voice|sound <file>."""
+    if len(args) != 2:
+        return
+    voice = args[0] == "voice"
+    if not play_live(args[1], voice):
+        volume = get_voice_volume() if voice else get_volume()
+        if not get_muted() and volume > 0:
+            _play_ffplay(args[1], volume)
 
 
 # ══════════════════════════════════════════════════
@@ -921,7 +1035,7 @@ def maybe_play_easter_egg(tts_mode: str) -> None:
     audio_path = resolve_audio(quote_text, profile)
     if audio_path:
         time.sleep(0.8)
-        play_mp3(audio_path, get_voice_volume())
+        play_mp3(audio_path, voice=True)
 
 
 def play_subagent_voice() -> None:
@@ -937,7 +1051,7 @@ def play_subagent_voice() -> None:
     profile = {"voice": voice_id, "rate": "+0%", "pitch": "+0Hz"}
     audio_path = resolve_audio(SUBAGENT_PHRASE, profile)
     if audio_path:
-        play_mp3(audio_path, get_voice_volume())
+        play_mp3(audio_path, voice=True)
 
 
 # ══════════════════════════════════════════════════
@@ -1133,6 +1247,7 @@ def read_event(argv: list[str], read_stdin) -> tuple[str, dict] | None:
 # turn is not held for synthesis + playback and `codex exec` shutting down
 # cannot kill the voice line.
 WORKER_FLAG = "--worker"
+PLAY_FLAG = "--play"
 _CREATE_NO_WINDOW = 0x08000000
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
@@ -1157,15 +1272,15 @@ def _worker_python() -> tuple[str, dict[str, str]]:
     return sys.executable, env
 
 
-def spawn_detached_worker(argv: list[str], raw: str | None) -> bool:
-    """Re-run this script without a console, payload on its stdin.
+def _spawn_hidden(args: list[str], raw: str | None = None) -> bool:
+    """Re-run this script without a console, optional payload on its stdin.
     Breakaway from the caller's job first (Codex's job allows it); if refused,
     plain no-window (Codex preserves descendants of a hook that completed).
     Never combine DETACHED_PROCESS with CREATE_NO_WINDOW: Windows ignores the
     no-window flag in that combination, and a uv child can create a console.
-    False = could not spawn: the caller handles the event inline."""
+    False = could not spawn."""
     python, env = _worker_python()
-    cmd = [python, os.path.abspath(__file__), *argv, WORKER_FLAG]
+    cmd = [python, os.path.abspath(__file__), *args]
     base = _CREATE_NO_WINDOW | _CREATE_NEW_PROCESS_GROUP
     for flags in (base | _CREATE_BREAKAWAY_FROM_JOB, base):
         try:
@@ -1183,10 +1298,19 @@ def spawn_detached_worker(argv: list[str], raw: str | None) -> bool:
     return False
 
 
+def spawn_detached_worker(argv: list[str], raw: str | None) -> bool:
+    """Hand a Codex event to a detached worker. False = could not spawn: the
+    caller handles the event inline."""
+    return _spawn_hidden([*argv, WORKER_FLAG], raw)
+
+
 def main(argv: list[str] | None = None, read_stdin=None, detach=None) -> None:
     """detach: callable(argv, raw) -> bool, used for Codex events only (the
     __main__ entry passes spawn_detached_worker; tests leave it None)."""
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == [PLAY_FLAG]:
+        play_command(argv[1:])
+        return
     if read_stdin is None:
         read_stdin = (lambda: sys.stdin.read()) if sys.stdin is not None else (lambda: "")
     captured: dict[str, str] = {}
@@ -1286,7 +1410,7 @@ def main(argv: list[str] | None = None, read_stdin=None, detach=None) -> None:
         return
 
     time.sleep(CHIME_GAP_MS / 1000)
-    play_mp3(audio_path, get_voice_volume())
+    play_mp3(audio_path, voice=True)
 
     # Easter egg: ~7% chance of Frisco appreciation in a random language
     maybe_play_easter_egg(tts_mode)

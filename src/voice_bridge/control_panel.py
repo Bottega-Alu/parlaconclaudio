@@ -376,7 +376,7 @@ class ControlPanel:
         keys = tk.Frame(hero, bg=c["card"])
         keys.pack(fill="x", pady=(self._p(16), 0))
         self._keycaps(keys, c["card"])
-        from .tray_icon import auto_paste_enabled
+        from .tray_icon import auto_paste_enabled, sound_volume
         tk.Label(keys, text="  in qualsiasi app: detta, poi il testo viene "
                  + ("incollato dove stai scrivendo." if auto_paste_enabled(self.config) else "copiato negli appunti."),
                  font=(self.font, 8), fg=c["muted"], bg=c["card"]).pack(side="left")
@@ -389,7 +389,7 @@ class ControlPanel:
         pack = config.get("sound_pack", "r2d2")
         mode = next((label for label, value in TTS_MODES.items() if value == config.get("tts_mode", "full")), "")
         sound = "Casuale" if pack == "random" else fluent.pretty_pack(pack)
-        volume = "audio disattivato" if config.get("muted") else f"volume {config.get('volume', 200)}%"
+        volume = "audio disattivato" if config.get("muted") else f"volume {sound_volume(config)}%"
         self._card("bell", "Avvisi vocali", f"{mode} · {sound} · {volume}", on_click=lambda: self._go("alerts"))
         from ..core import voice_hooks
         linked = [voice_hooks.AGENT_LABEL[a] for a, on in self.hooks.items() if on]
@@ -565,10 +565,10 @@ class ControlPanel:
         self._switch(self._card("speaker", "Suoni e voce", "Disattiva tutti gli avvisi senza perdere le impostazioni."),
                      not muted, lambda on: self._work(lambda: self.tray._make_toggle_mute()(None, None)),
                      "Attivi" if not muted else "Disattivati")
-        from .tray_icon import voice_volume
+        from .tray_icon import MAX_VOLUME, sound_volume, voice_volume
         levels = (
             ("music", "Volume suoni", "Il pacchetto suoni. Oltre il 100% amplifica i suoni più deboli.",
-             int(config.get("volume", 200)), self.tray._make_set_volume),
+             sound_volume(config), self.tray._make_set_volume),
             ("chat", "Volume voci", "Gli annunci parlati, regolabili a parte rispetto ai suoni.",
              voice_volume(config), self.tray._make_set_voice_volume),
         )
@@ -578,7 +578,8 @@ class ControlPanel:
                              fg=c["muted"], bg=c["card"], anchor="e")
             value.pack(side="right")
             slider = fluent.Slider(control, c, self.scale, level,
-                                   lambda new, make=make_handler: self._work(lambda: make(new)(None, None)))
+                                   lambda new, make=make_handler: self._work(lambda: make(new)(None, None)),
+                                   maximum=MAX_VOLUME)
             slider.disabled = muted
             slider.listeners.append(lambda new, label=value: label.configure(text=f"{new}%"))
             slider.canvas.configure(width=self._p(220))

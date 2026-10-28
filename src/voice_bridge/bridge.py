@@ -416,7 +416,7 @@ class VoiceBridge:
                 self.config.mic_device_id = int(mic_id) if mic_id is not None else None
 
                 # Volume & Mute
-                self.config.volume = int(shared.get("volume", 200))
+                self.config.volume = int(shared.get("volume", 100))
                 self.config.muted = bool(shared.get("muted", False))
 
                 # STT Language
