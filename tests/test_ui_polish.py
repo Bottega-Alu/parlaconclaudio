@@ -306,11 +306,16 @@ def test_theme_and_language_tiles_repaint_behind_a_curtain_that_survives(monkeyp
                     real_update()
                 flyout._update_main = update_main
                 flyout._curtain.top.withdraw()
+                old_page = flyout._pages["main"]
                 action()
                 flyout._update_main = real_update
                 assert covered == [True]  # rebuilt pages were hidden behind the curtain
                 assert destroyed == [] and top.winfo_exists()
                 assert flyout._curtain.top is top and not top.winfo_ismapped()
+                assert not old_page.winfo_exists()  # old pages go once the curtain is lifted
+                assert flyout._pages["packs"].winfo_manager() == ""  # laid out when first opened
             assert config["ui_theme"] != "light" and config["ui_language"] != "it"
+            flyout._open_page("packs")
+            assert flyout._pages["packs"].winfo_manager() == "place" and flyout._page == "packs"
         finally:
             flyout.root.destroy()  # conftest restores the Italian interface and system theme
