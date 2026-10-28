@@ -80,7 +80,7 @@ SUBAGENT_BURST_WAIT_MS = 1500
 QUESTION_MARK_FILE = CACHE_DIR / "notify_question.json"
 QUESTION_DEDUP_S = 20
 ASK_USER_QUESTION = "AskUserQuestion"
-QUESTION_PHRASE = "ha bisogno di una tua scelta."
+QUESTION_PHRASE = "ha bisogno di una tua scelta."  # Italian; see PHRASES for every language
 SUBAGENT_PHRASE = "Subagente terminato."
 
 # Cache cleanup settings
@@ -127,9 +127,52 @@ def _level(config: dict, voice: bool) -> int:
         return DEFAULT_VOLUME
 
 
-def get_voice() -> dict:
-    config = load_config()
-    return config.get("voice", _FALLBACK_VOICE)
+def get_voice(lang: str = "it") -> dict:
+    """The chosen voice, if it can speak `lang`: same locale, or a Multilingual voice.
+    Otherwise the default voice of that language (an Italian voice reading English
+    sounds wrong)."""
+    voice = load_config().get("voice", _FALLBACK_VOICE)
+    name = str(voice.get("voice", ""))
+    if name.lower().startswith(VOICE_LOCALE_PREFIX[lang]) or "Multilingual" in name:
+        return voice
+    return LANGUAGE_VOICES[lang]
+
+
+# ══════════════════════════════════════════════════
+# ANNOUNCEMENT LANGUAGE
+# ══════════════════════════════════════════════════
+
+# Announcements speak the interface language (ui_language in tts_config.json).
+# Decision tree, the same as src/voice_bridge/i18n.py (repeated: the hook runs standalone):
+#   1. a supported code -> that language
+#   2. "system"         -> the Windows display language, if supported
+#   3. otherwise (or never set) -> Italian
+ANNOUNCE_LANGUAGES = ("it", "en", "pt-BR")
+_WINDOWS_PRIMARY = {0x10: "it", 0x09: "en", 0x16: "pt-BR"}
+VOICE_LOCALE_PREFIX = {"it": "it-", "en": "en-", "pt-BR": "pt-br-"}
+LANGUAGE_VOICES = {
+    "it": _FALLBACK_VOICE,
+    "en": {"voice": "en-US-EmmaMultilingualNeural", "rate": "+0%", "pitch": "+0Hz"},
+    "pt-BR": {"voice": "pt-BR-ThalitaMultilingualNeural", "rate": "-2%", "pitch": "-4Hz"},
+}
+
+
+def windows_language() -> str | None:
+    try:
+        import ctypes
+        langid = ctypes.windll.kernel32.GetUserDefaultUILanguage()
+    except (AttributeError, OSError):
+        return None
+    return _WINDOWS_PRIMARY.get(langid & 0x3FF)
+
+
+def announce_language(config: dict | None = None) -> str:
+    setting = (config if config is not None else load_config()).get("ui_language")
+    if setting in ANNOUNCE_LANGUAGES:
+        return setting
+    if setting == "system":
+        return windows_language() or "it"
+    return "it"
 
 
 def get_volume() -> int:
@@ -674,10 +717,10 @@ def extract_notification_detail(data: dict) -> str:
     return ""
 
 
-def extract_plan_info(data: dict) -> str:
+def extract_plan_info(data: dict, lang: str = "it") -> str:
     plan = data.get("plan_title") or data.get("plan_name") or data.get("plan")
     if plan and isinstance(plan, str):
-        return f" Piano: {plan}."
+        return PHRASES[lang]["plan"].format(plan=plan)
     return ""
 
 
@@ -766,33 +809,93 @@ def _is_project_name(repo: str) -> bool:
     return bool(name) and name not in _NOT_A_PROJECT
 
 
-def announce(repo: str, who: str, phrase: str, extra: str = "") -> str:
-    lead = f"Progetto {repo}, {who}" if _is_project_name(repo) else who
+# Every spoken sentence, per announcement language. The agent names (Claudio, Codex)
+# and the project name stay as they are.
+PHRASES = {
+    "it": {
+        "lead": "Progetto {repo}, {who}",
+        "stop": "ha finito.",
+        "stop_hook": "ha finito un ciclo.",
+        "question": "ha bisogno di una tua scelta.",
+        "subagent": "Subagente terminato.",
+        "plan": " Piano: {plan}.",
+        "notif": {
+            "permission_prompt": "ha bisogno del tuo permesso.",
+            "idle_prompt": "ha bisogno del tuo aiuto.",
+            "elicitation_dialog": "ha bisogno di una tua scelta.",
+            "auth_success": "ha completato l'autenticazione.",
+            None: "ti manda una notifica.",
+        },
+        "stop_labels": {
+            "testing": "Test completati.",
+            "fixing": "Bug risolto.",
+            "deploying": "Deploy eseguito.",
+            "refactoring": "Refactoring concluso.",
+            "creating": "Implementazione completata.",
+            "researching": "Analisi completata.",
+        },
+    },
+    "en": {
+        "lead": "Project {repo}, {who}",
+        "stop": "has finished.",
+        "stop_hook": "has finished a cycle.",
+        "question": "needs you to make a choice.",
+        "subagent": "Subagent finished.",
+        "plan": " Plan: {plan}.",
+        "notif": {
+            "permission_prompt": "needs your permission.",
+            "idle_prompt": "needs your help.",
+            "elicitation_dialog": "needs you to make a choice.",
+            "auth_success": "has completed authentication.",
+            None: "sends you a notification.",
+        },
+        "stop_labels": {
+            "testing": "Tests completed.",
+            "fixing": "Bug fixed.",
+            "deploying": "Deploy done.",
+            "refactoring": "Refactoring finished.",
+            "creating": "Implementation complete.",
+            "researching": "Analysis complete.",
+        },
+    },
+    "pt-BR": {
+        "lead": "Projeto {repo}, {who}",
+        "stop": "terminou.",
+        "stop_hook": "terminou um ciclo.",
+        "question": "precisa que você faça uma escolha.",
+        "subagent": "Subagente concluído.",
+        "plan": " Plano: {plan}.",
+        "notif": {
+            "permission_prompt": "precisa da sua permissão.",
+            "idle_prompt": "precisa da sua ajuda.",
+            "elicitation_dialog": "precisa que você faça uma escolha.",
+            "auth_success": "concluiu a autenticação.",
+            None: "te enviou uma notificação.",
+        },
+        "stop_labels": {
+            "testing": "Testes concluídos.",
+            "fixing": "Bug corrigido.",
+            "deploying": "Deploy feito.",
+            "refactoring": "Refatoração concluída.",
+            "creating": "Implementação concluída.",
+            "researching": "Análise concluída.",
+        },
+    },
+}
+# Notifications that read their detail aloud after the phrase.
+_NOTIF_KEEPS_DETAIL = {"permission_prompt", "elicitation_dialog", None}
+
+# Italian names kept for existing callers.
+_STOP_ACTIVITY_LABEL = PHRASES["it"]["stop_labels"]
+STOP_PHRASE = PHRASES["it"]["stop"]
+STOP_HOOK_PHRASE = PHRASES["it"]["stop_hook"]
+
+
+def announce(repo: str, who: str, phrase: str, extra: str = "", lang: str = "it") -> str:
+    lead = PHRASES[lang]["lead"].format(repo=repo, who=who) if _is_project_name(repo) else who
     text = f"{lead} {phrase}"
     extra = (extra or "").strip()
     return f"{text} {extra}" if extra else text
-
-
-# Stop: "<who> ha finito." + (activity label + task detail, when the payload has one)
-_STOP_ACTIVITY_LABEL = {
-    "testing": "Test completati.",
-    "fixing": "Bug risolto.",
-    "deploying": "Deploy eseguito.",
-    "refactoring": "Refactoring concluso.",
-    "creating": "Implementazione completata.",
-    "researching": "Analisi completata.",
-}
-STOP_PHRASE = "ha finito."
-STOP_HOOK_PHRASE = "ha finito un ciclo."
-
-# Notification: (phrase, keeps the detail?)
-_NOTIF_PHRASES = {
-    "permission_prompt": ("ha bisogno del tuo permesso.", True),
-    "idle_prompt": ("ha bisogno del tuo aiuto.", False),
-    "elicitation_dialog": ("ha bisogno di una tua scelta.", True),
-    "auth_success": ("ha completato l'autenticazione.", False),
-    None: ("ti manda una notifica.", True),
-}
 
 
 def build_task_message(completed: int, total: int, detail: str) -> str:
@@ -812,19 +915,21 @@ def build_task_message(completed: int, total: int, detail: str) -> str:
 
 
 def build_stop_message(sub_type: str | None, repo: str, plan_info: str,
-                       detail: str, who: str = SPEAKER_CLAUDE) -> str:
-    phrase = STOP_HOOK_PHRASE if sub_type == "hook_active" else STOP_PHRASE
+                       detail: str, who: str = SPEAKER_CLAUDE, lang: str = "it") -> str:
+    phrases = PHRASES[lang]
+    phrase = phrases["stop_hook"] if sub_type == "hook_active" else phrases["stop"]
     extra = ""
     if detail:
-        label = _STOP_ACTIVITY_LABEL.get(_detect_activity_type(detail), "")
+        label = phrases["stop_labels"].get(_detect_activity_type(detail), "")
         extra = f"{label} {detail}".strip()
-    return announce(repo, who, phrase, extra) + (plan_info or "")
+    return announce(repo, who, phrase, extra, lang) + (plan_info or "")
 
 
 def build_notif_message(sub_type: str | None, repo: str, detail: str,
-                        who: str = SPEAKER_CLAUDE) -> str:
-    phrase, keeps_detail = _NOTIF_PHRASES.get(sub_type, _NOTIF_PHRASES[None])
-    return announce(repo, who, phrase, detail if keeps_detail else "")
+                        who: str = SPEAKER_CLAUDE, lang: str = "it") -> str:
+    notif = PHRASES[lang]["notif"]
+    key = sub_type if sub_type in notif else None
+    return announce(repo, who, notif[key], detail if key in _NOTIF_KEEPS_DETAIL else "", lang)
 
 
 # ══════════════════════════════════════════════════
@@ -1038,7 +1143,7 @@ def maybe_play_easter_egg(tts_mode: str) -> None:
         play_mp3(audio_path, voice=True)
 
 
-def play_subagent_voice() -> None:
+def play_subagent_voice(lang: str = "it") -> None:
     """Speak the fixed SUBAGENT_PHRASE with a randomly-picked voice from
     the multilingual pool.
 
@@ -1047,9 +1152,11 @@ def play_subagent_voice() -> None:
     easter-egg fanfara that would overlap when several subagents finish
     close together.
     """
-    voice_id = random.choice(_ALL_VOICES)
+    # Italian keeps the polyglot mix; other languages need a voice that speaks them.
+    pool = _ALL_VOICES if lang == "it" else _NATIVE_VOICES["pt" if lang == "pt-BR" else lang]
+    voice_id = random.choice(pool)
     profile = {"voice": voice_id, "rate": "+0%", "pitch": "+0Hz"}
-    audio_path = resolve_audio(SUBAGENT_PHRASE, profile)
+    audio_path = resolve_audio(PHRASES[lang]["subagent"], profile)
     if audio_path:
         play_mp3(audio_path, voice=True)
 
@@ -1359,30 +1466,31 @@ def main(argv: list[str] | None = None, read_stdin=None, detach=None) -> None:
         tts_mode = load_config().get("tts_mode", "full")
         if tts_mode in ("silent", "semi-silent"):
             return
-        play_subagent_voice()
+        play_subagent_voice(announce_language())
         return
 
     sub_type = data.get("notification_type") or data.get("type") or data.get("sub_type")
     repo = extract_repo_name(data)
     who = SPEAKER_CODEX if source == SOURCE_CODEX else SPEAKER_CLAUDE
-    voice = get_voice()
+    lang = announce_language()
+    voice = get_voice(lang)
     progress = 0.0
 
     if event_name == "Stop":
-        plan_info = extract_plan_info(data)
+        plan_info = extract_plan_info(data, lang)
         detail = extract_task_detail(data)
         stop_type = "hook_active" if data.get("stop_hook_active") else None
-        message = build_stop_message(stop_type, repo, plan_info, detail, who)
+        message = build_stop_message(stop_type, repo, plan_info, detail, who, lang)
         chime_key = "stop"
         progress = 1.0  # Stop = end of session = max intensity
 
     elif event_name == "PreToolUse":  # AskUserQuestion (filtered above)
-        message = announce(repo, who, QUESTION_PHRASE)
+        message = announce(repo, who, PHRASES[lang]["question"], lang=lang)
         chime_key = "question"
 
     elif event_name == "Notification":
         detail = extract_notification_detail(data)
-        message = build_notif_message(sub_type, repo, detail, who)
+        message = build_notif_message(sub_type, repo, detail, who, lang)
         chime_map = {
             "permission_prompt": "permission",
             "elicitation_dialog": "question",
