@@ -647,6 +647,16 @@ class TrayIcon:
         _save_config(config)
         logger.info(f"STT cleanup set to: {enabled}")
 
+    def _set_keep_history(self, enabled: bool) -> None:
+        """Dictation history on/off; off also erases what was kept."""
+        from . import history
+        config = _load_config()
+        config["keep_history"] = bool(enabled)
+        _save_config(config)
+        if not enabled:
+            history.clear()
+        logger.info(f"Dictation history set to: {enabled}")
+
     def _set_ui_theme(self, choice: str) -> None:
         from . import fluent
         fluent.set_theme(choice)

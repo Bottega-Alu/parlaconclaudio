@@ -88,6 +88,11 @@ Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; \
   Flags: nowait postinstall skipifsilent; Check: BootstrapSucceeded
 
 [UninstallRun]
+; Remove the Claude Code / Codex voice hooks that run from {app} (venv python or
+; scripts\notify-tts.py): left behind they fail on every agent event. Hooks that
+; run from elsewhere stay. Runs before [UninstallDelete], while the exe exists.
+Filename: "{app}\{#BootstrapExe}"; Parameters: "--root ""{app}"" --disconnect-hooks --no-pause"; \
+  Flags: runhidden waituntilterminated; RunOnceId: "DisconnectVoiceHooks"
 ; Remove the logon task. schtasks directly, not the venv: it may already be gone.
 ; Exit code 1 (task absent, e.g. autostart was off) is harmless here.
 Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""{#AutostartTask}"" /F"; \
@@ -108,6 +113,9 @@ Type: files;          Name: "{app}\install-state.json"
 Type: files;          Name: "{app}\bootstrap.log"
 Type: files;          Name: "{app}\voicebridge.log"
 Type: files;          Name: "{app}\voicebridge_debug.log"
+; Dictated text (history.py): private, so it does not outlive the app.
+Type: files;          Name: "{localappdata}\ParlaConClaudio\history.jsonl"
+Type: dirifempty;     Name: "{localappdata}\ParlaConClaudio"
 
 [Messages]
 en.WelcomeLabel2=Dictate into the active application: press Ctrl+Alt+Space to start, then press it again to transcribe and paste.%n%nOpen the control panel from the tray icon to check status, microphone and engine. Use a supported NVIDIA GPU for local dictation or configure a cloud provider.%n%nOptional voice hooks announce when Claude Code or Codex finishes or needs your attention. Choose each integration separately on the next pages.%n%nNew in 1.0.19: voice announcements speak the interface language; Theme and Language tiles switch faster and without flicker. Since 1.0.18: interface in Italian, English or Brazilian Portuguese, light/dark theme choice, dictation history on the Home page, keys and/or mouse button to dictate, your own OpenRouter key for text correction. Since 1.0.17: the volume sliders change the voice already speaking. Since 1.0.16: quick controls and app window switch pages without flicker. Since 1.0.15: light/dark theme follows Windows while the app runs. Since 1.0.14: Settings-style app window (right click on the tray icon), your choice of dictation key combination or mouse button, clipboard-only option and separate voice volume. Close any running version before upgrading. This installer updates the normal application; TEST installations stay separate.

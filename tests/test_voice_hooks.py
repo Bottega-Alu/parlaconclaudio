@@ -239,3 +239,51 @@ def test_bootstrap_reuses_the_shared_parser():
     spec.loader.exec_module(mod)
     assert mod.parse_hook_command is vh.parse_hook_command
     assert mod.find_hook_commands is vh.find_hook_commands
+
+
+# --------------------------------------------------------------------------- uninstall
+
+
+def test_uninstall_removes_only_hooks_that_run_from_the_app_folder(env, tmp_path):
+    app = tmp_path / "Programs" / "VoiceBridge"
+    installed = f'"{app / "venv" / "Scripts" / "python.exe"}" "{app / "scripts" / "notify-tts.py"}"'
+    doc = json.loads(json.dumps(OTHER_SETTINGS))
+    doc["hooks"]["Stop"][0]["hooks"].append({"type": "command", "command": installed})
+    doc["hooks"]["Notification"] = [{"hooks": [{"type": "command", "command": VOICE}]}]  # a dev copy elsewhere
+    _claude(env).write_text(json.dumps(doc), encoding="utf-8")
+    res = vh.disconnect(vh.CLAUDE, env=env, now=NOW, under=app)
+    assert res.ok and res.changed
+    left = _read(_claude(env))
+    assert vh.find_hook_commands(left) == [VOICE]
+    assert left["hooks"]["Stop"] == OTHER_SETTINGS["hooks"]["Stop"]
+
+
+def test_uninstall_also_removes_a_hook_whose_python_is_the_app_venv(env, tmp_path):
+    app = tmp_path / "VoiceBridge"
+    # The script lives elsewhere, but the interpreter dies with the app folder.
+    cmd = f'"{app / "venv" / "Scripts" / "python.exe"}" C:/Users/x/.claude/scripts/notify-tts.py'
+    _claude(env).write_text(json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": cmd}]}]}}),
+                            encoding="utf-8")
+    assert vh.disconnect(vh.CLAUDE, env=env, now=NOW, under=app).changed
+    assert vh.find_hook_commands(_read(_claude(env))) == []
+
+
+def test_bootstrap_disconnect_hooks_flag_cleans_both_agents(env, tmp_path, monkeypatch):
+    import importlib.util
+    import sys
+    app = tmp_path / "VoiceBridge"
+    installed = f'"{app / "venv" / "Scripts" / "python.exe"}" "{app / "scripts" / "notify-tts.py"}"'
+    for path in (_claude(env), _codex(env)):
+        path.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": installed}]}]}}),
+                        encoding="utf-8")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    repo = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("vb_bootstrap_uninstall", repo / "installer" / "vb_bootstrap.py")
+    mod = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "vb_bootstrap_uninstall", mod)
+    spec.loader.exec_module(mod)
+    assert mod.main(["--root", str(app), "--disconnect-hooks"]) == 0
+    assert vh.find_hook_commands(_read(_claude(env))) == []
+    assert vh.find_hook_commands(_read(_codex(env))) == []
+    assert not app.exists()  # no run log written into a folder being removed

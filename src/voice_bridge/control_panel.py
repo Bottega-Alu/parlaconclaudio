@@ -468,11 +468,18 @@ class ControlPanel:
         head.pack(fill="x", pady=(self._p(14), self._p(6)))
         tk.Label(head, text=_("Ultime trascrizioni"), font=(self.font, 10, "bold"), fg=c["text"],
                  bg=c["surface"], anchor="w").pack(side="left")
+        keep = history.keep(self.config)
+        self._switch(head, keep, lambda on: self._work(lambda: self.tray._set_keep_history(on)),
+                     _("Salva") if keep else _("Non salvare"))
+        if not keep:
+            self._card("file", _("Storico disattivato"),
+                       _("Le dettature non vengono salvate su questo PC."))
+            return
         if not saved:
             self._card("file", _("Ancora nessuna trascrizione"),
                        _("Quello che detti compare qui, anche se non è stato incollato."))
             return
-        self._button(head, _("Cancella storico"), self._clear_history).pack(side="right")
+        self._button(head, _("Cancella storico"), self._clear_history).pack(side="right", padx=(0, self._p(12)))
         for item in saved if self._history_all else saved[:HISTORY_SHOWN]:
             self._history_row(item)
         if len(saved) > HISTORY_SHOWN:

@@ -100,6 +100,45 @@ def _send_enter() -> None:
     _send_key(VK_RETURN, up=True)
 
 
+# Registered clipboard formats Windows reads before keeping a copy: a DWORD 0 keeps
+# the dictated text out of Win+V history and out of cross-device clipboard sync.
+_PRIVATE_FORMATS = ("CanIncludeInClipboardHistory", "CanUploadToCloudClipboard")
+_OPEN_ATTEMPTS = 10
+
+
+def _win32clipboard():
+    import win32clipboard
+    return win32clipboard
+
+
+def _copy(text: str) -> None:
+    """Put text on the clipboard for the paste, without leaving it in clipboard history.
+
+    Another app can hold the clipboard open for a few ms: retry, then fall back to a
+    plain copy so the paste still works (history exclusion is lost only in that case).
+    """
+    try:
+        clip = _win32clipboard()
+        for attempt in range(_OPEN_ATTEMPTS):
+            try:
+                clip.OpenClipboard(None)
+                break
+            except Exception:
+                if attempt == _OPEN_ATTEMPTS - 1:
+                    raise
+                time.sleep(0.01)
+        try:
+            clip.EmptyClipboard()
+            clip.SetClipboardData(clip.CF_UNICODETEXT, text)
+            for name in _PRIVATE_FORMATS:
+                clip.SetClipboardData(clip.RegisterClipboardFormat(name), b"\0\0\0\0")
+        finally:
+            clip.CloseClipboard()
+    except Exception as e:
+        logger.warning(f"Private clipboard copy failed ({type(e).__name__}): plain copy, may appear in Win+V history")
+        pyperclip.copy(text)
+
+
 class OutputHandler:
     """Delivers transcription text to the active window."""
 
@@ -130,12 +169,12 @@ class OutputHandler:
 
         try:
             if self._mode == "clipboard_only":
-                pyperclip.copy(text)
+                _copy(text)
                 logger.info(f"Text copied to clipboard ({len(text)} chars)")
                 return True
 
             elif self._mode == "clipboard_paste":
-                pyperclip.copy(text)
+                _copy(text)
                 time.sleep(0.3)  # Wait for clipboard + window focus to settle
                 # Release any lingering modifier keys before pasting
                 _send_key(0x11, up=True)  # VK_CONTROL up
@@ -151,7 +190,7 @@ class OutputHandler:
                 return True
 
             elif self._mode == "type_keys":
-                pyperclip.copy(text)
+                _copy(text)
                 time.sleep(0.05)
                 _send_ctrl_v()
                 logger.info(f"Text typed via paste ({len(text)} chars)")

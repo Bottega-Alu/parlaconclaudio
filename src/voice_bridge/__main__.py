@@ -32,6 +32,9 @@ for _name in ("stdout", "stderr"):
 # Consumed at interpreter start-up (gui_python.py): left in the environment it
 # would make any CPython the bridge spawns believe it is this venv.
 os.environ.pop("__PYVENV_LAUNCHER__", None)
+# Bare-name launches (ffmpeg, schtasks, nvidia-smi...) never pick a program from the
+# current directory; inherited by the child bridge and everything it spawns.
+os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"
 
 from .single_instance import ensure_single_instance  # noqa: E402
 from .supervisor import CHILD_FLAG, supervise  # noqa: E402

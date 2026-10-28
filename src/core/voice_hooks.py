@@ -334,8 +334,20 @@ def add_voice_hooks(doc: dict, agent: str, command: str) -> tuple[dict, bool]:
     return out, changed
 
 
-def remove_voice_hooks(doc: dict) -> tuple[dict, bool]:
-    """Drop ONLY notify-tts handlers; prune groups/events this emptied."""
+def runs_from(entry: object, folder: Path) -> bool:
+    """A notify-tts handler whose interpreter or script lives inside `folder`."""
+    target = parse_hook_command(entry.get("command", "")) if isinstance(entry, dict) else None
+    if target is None:
+        return False
+    inside = os.path.normcase(os.path.abspath(folder)).rstrip("\\/") + os.sep
+    # Bare tokens ("python", "py -3") are PATH lookups, never inside the folder.
+    return any(os.path.isabs(p) and os.path.normcase(os.path.normpath(p)).startswith(inside)
+               for p in (*target.interpreter, str(target.script)))
+
+
+def remove_voice_hooks(doc: dict, under: Path | None = None) -> tuple[dict, bool]:
+    """Drop ONLY notify-tts handlers (with `under`: only those running from that
+    folder, e.g. the app being uninstalled); prune groups/events this emptied."""
     out = json.loads(json.dumps(doc))
     hooks = out.get("hooks")
     if not isinstance(hooks, dict):
@@ -351,7 +363,8 @@ def remove_voice_hooks(doc: dict) -> tuple[dict, bool]:
             if not isinstance(entries, list):
                 kept_groups.append(group)
                 continue
-            kept = [e for e in entries if not is_voice_handler(e)]
+            kept = [e for e in entries
+                    if not (is_voice_handler(e) and (under is None or runs_from(e, under)))]
             if len(kept) == len(entries):
                 kept_groups.append(group)
                 continue
@@ -444,13 +457,13 @@ def connect(agent: str, root: Path | None = None, env: dict[str, str] | None = N
 
 
 def disconnect(agent: str, env: dict[str, str] | None = None,
-               now: _dt.datetime | None = None) -> HookResult:
+               now: _dt.datetime | None = None, under: Path | None = None) -> HookResult:
     path = config_path(agent, env)
     try:
         if not path.exists():
             return HookResult(agent, "disconnect", True, False, path)
         doc = load_doc(path)
-        new_doc, changed = remove_voice_hooks(doc)
+        new_doc, changed = remove_voice_hooks(doc, under)
         backup = write_doc_atomic(path, new_doc, now) if changed else None
     except HookConfigError as exc:
         return HookResult(agent, "disconnect", False, path=path, error_kind=exc.kind, message=exc.detail)

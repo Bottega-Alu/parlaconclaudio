@@ -37,6 +37,9 @@ nvidia-cudnn-cu12 = {version = "^9.20", optional = true}
 # Windows paste simulation
 pywin32 = {version = "^306", markers = "sys_platform == 'win32'"}
 
+# API keys in the Windows Credential Manager (src/core/stt_engine/key_manager.py)
+keyring = "^25.0"
+
 # TTS (for notify-tts.py hook)
 edge-tts = ">=7.3.1"
 

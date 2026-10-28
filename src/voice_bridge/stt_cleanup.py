@@ -65,7 +65,9 @@ def _remaining_timeout() -> float:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("Live cleanup deadline exceeded")
-    return min(OPENROUTER_TIMEOUT_S, remaining)
+    # After days of uptime monotonic() is ~1e6 s and deadline - now can exceed the
+    # budget by float rounding (0.1 -> 0.10000000009): never hand out more than it.
+    return min(OPENROUTER_TIMEOUT_S, remaining, _request_context.budget)
 
 
 def _retry_wait(seconds: float) -> None:
@@ -638,12 +640,13 @@ def cleanup_text(
 
     def work():
         _request_context.deadline = deadline
+        _request_context.budget = timeout_s
         try:
             result.append(_cleanup_text_unbounded(text, **kwargs))
         except Exception:
             logger.warning("Live STT cleanup skipped", exc_info=True)
         finally:
-            del _request_context.deadline
+            del _request_context.deadline, _request_context.budget
             _live_worker_lock.release()
             done.set()
 

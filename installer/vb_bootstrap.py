@@ -101,6 +101,7 @@ BASE_DEPS = [
     "faster-whisper>=1.2",
     "ctranslate2>=4.0,<5",
     "pywin32>=306",
+    "keyring>=25",  # API keys in the Windows Credential Manager, not in plaintext JSON
     EDGE_TTS_REQ,
 ]
 
@@ -760,8 +761,21 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="on failure exit at once instead of waiting for Enter",
     )
+    ap.add_argument(
+        "--disconnect-hooks",
+        action="store_true",
+        help="uninstall: remove the Claude Code / Codex voice hooks that run from --root, then exit",
+    )
     raw_argv = sys.argv[1:] if argv is None else argv
     args = ap.parse_args(raw_argv)
+
+    if args.disconnect_hooks:
+        # Run by the uninstaller before {app} is deleted: hooks left pointing at it
+        # would fail on every agent event. No run log: the folder is going away.
+        for agent in voice_hooks.AGENTS:
+            res = voice_hooks.disconnect(agent, under=args.root.resolve())
+            print(f"{agent}: ok={res.ok} changed={res.changed} {res.message}".rstrip())
+        return EXIT_OK  # never block the uninstall
 
     if args.probe_json is not None:
         # Silent mode for the Inno Setup wizard: no banner, no log, machine-readable only.

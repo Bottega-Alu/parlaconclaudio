@@ -32,6 +32,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# The hook runs inside the user's project: without this, Windows launches a git.exe,
+# ffmpeg.exe or ffplay.exe planted in that folder before the real one on PATH.
+os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"
+
 # === CONFIG ===
 CHIME_GAP_MS = 250
 CACHE_DIR = Path.home() / ".claude" / "cache" / "tts"
