@@ -51,7 +51,7 @@ def test_volume_change_reaches_the_clip_already_playing(monkeypatch, tmp_path):
 
     def slider_moves(written):
         if written == 2:  # the user drags the voices slider mid-sentence
-            config.write_text(json.dumps({"volume": 100, "voice_volume": 250}))
+            config.write_text(json.dumps({"volume": 100, "voice_volume": 125}))
             stat = config.stat()
             os.utime(config, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
 
@@ -63,17 +63,17 @@ def test_volume_change_reaches_the_clip_already_playing(monkeypatch, tmp_path):
     assert hook.play_live("clip.mp3", voice=True) is True
     first, _, ramp, after = stream.blocks
     assert (first == 1000).all()
-    assert ramp[0, 0] == 1000 and ramp[-1, 0] == 2500  # ramped, no click
-    assert (after == 2500).all()
+    assert ramp[0, 0] == 1000 and ramp[-1, 0] == 1250  # ramped, no click
+    assert (after == 1250).all()
 
 
 def test_mute_and_clipping(monkeypatch, tmp_path):
     hook = load_hook()
     config = tmp_path / "tts_config.json"
-    config.write_text(json.dumps({"volume": 300}))
+    config.write_text(json.dumps({"volume": 300}))  # saved by the old 0..300 range
     monkeypatch.setattr(hook, "TTS_CONFIG", config)
     level = hook._LiveLevel(voice=False)
-    assert level.read() == 3.0
+    assert level.read() == 1.25
     config.write_text(json.dumps({"volume": 300, "muted": True}))
     os.utime(config, ns=(0, config.stat().st_mtime_ns + 10**9))
     assert level.read() == 0.0

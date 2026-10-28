@@ -42,7 +42,7 @@ class VoiceBridgeConfig:
     sound_on_start: bool = True
     sound_on_stop: bool = True
     sound_on_output: bool = True
-    volume: int = 200
+    volume: int = 100
     muted: bool = False
 
     # STT engine orchestration

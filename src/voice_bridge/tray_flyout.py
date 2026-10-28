@@ -56,8 +56,8 @@ class TrayFlyout:
         self._expanded = None
         self._config = {}
         self._muted = False
-        self.volume = 200
-        self.voice_volume = 200
+        self.volume = 100
+        self.voice_volume = 100
         self._focus_key = None
         self.mics = {}
         self.packs = []
@@ -215,6 +215,7 @@ class TrayFlyout:
 
     def _main_page(self):
         import tkinter as tk
+        from .tray_icon import MAX_VOLUME
         c = self.colors
         body = tk.Frame(self.page, bg=c["surface"], padx=self._p(PAD), pady=self._p(PAD))
         body.pack(fill="both", expand=True)
@@ -260,7 +261,8 @@ class TrayFlyout:
         self.volume_text = tk.StringVar(value=f"{self.volume}%")
         tk.Label(volume, textvariable=self.volume_text, width=5, font=(self.font, 9),
                  bg=c["surface"], fg=c["muted"], anchor="e").pack(side="right")
-        self.slider = fluent.Slider(volume, c, self.scale, self.volume, self._save_volume)
+        self.slider = fluent.Slider(volume, c, self.scale, self.volume, self._save_volume,
+                                    maximum=MAX_VOLUME)
         self.slider.listeners.append(lambda value: self.volume_text.set(f"{value}%"))
         self.slider.canvas.pack(side="left", fill="x", expand=True, padx=(self._p(4), 0))
         voices = tk.Frame(body, bg=c["surface"])
@@ -270,7 +272,8 @@ class TrayFlyout:
         self.voice_text = tk.StringVar(value=f"{self.voice_volume}%")
         tk.Label(voices, textvariable=self.voice_text, width=5, font=(self.font, 9),
                  bg=c["surface"], fg=c["muted"], anchor="e").pack(side="right")
-        self.voice_slider = fluent.Slider(voices, c, self.scale, self.voice_volume, self._save_voice_volume)
+        self.voice_slider = fluent.Slider(voices, c, self.scale, self.voice_volume,
+                                          self._save_voice_volume, maximum=MAX_VOLUME)
         self.voice_slider.listeners.append(lambda value: self.voice_text.set(f"{value}%"))
         self.voice_slider.canvas.pack(side="left", fill="x", expand=True, padx=(self._p(4), 0))
         self.engine = tk.StringVar()
@@ -661,12 +664,12 @@ class TrayFlyout:
     # ── state and actions ───────────────────────────────────────────
 
     def _load(self):
-        from .tray_icon import _load_config, list_sound_packs, voice_volume
+        from .tray_icon import _load_config, list_sound_packs, sound_volume, voice_volume
         config = _load_config()
         self._config = config
         self._muted = bool(config.get("muted", False))
-        self.volume = max(0, min(300, int(config.get("volume", 200))))
-        self.voice_volume = max(0, min(300, voice_volume(config)))
+        self.volume = sound_volume(config)
+        self.voice_volume = voice_volume(config)
         self.mics = {"Predefinito di Windows": None}
         self.mics.update({f"{d.name} [{d.device_id}]": d.device_id for d in self.tray._list_mics()})
         self.packs = list_sound_packs()

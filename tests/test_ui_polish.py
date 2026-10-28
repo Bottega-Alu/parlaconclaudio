@@ -122,7 +122,7 @@ def test_hook_plays_voices_at_voice_volume(monkeypatch, tmp_path):
         "notify_tts_under_test", Path(__file__).resolve().parents[1] / "scripts" / "notify-tts.py")
     hook = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(hook)
-    monkeypatch.setattr(hook, "load_config", lambda: {"volume": 30, "voice_volume": 150})
+    monkeypatch.setattr(hook, "load_config", lambda: {"volume": 30, "voice_volume": 110})
     spawned = []
     monkeypatch.setattr(hook, "_spawn_hidden", lambda args: spawned.append(args) or True)
     clip = tmp_path / "voice.mp3"
@@ -137,7 +137,7 @@ def test_hook_plays_voices_at_voice_volume(monkeypatch, tmp_path):
     monkeypatch.setattr(hook.subprocess, "Popen", lambda args, **kw: calls.append(args))
     hook.play_mp3(str(clip), voice=True)
     hook.play_mp3(str(clip))
-    assert [args[args.index("-af") + 1] for args in calls] == ["volume=150/100", "volume=30/100"]
+    assert [args[args.index("-af") + 1] for args in calls] == ["volume=110/100", "volume=30/100"]
 
 
 def test_main_page_actions_update_in_place_without_rebuilding(monkeypatch):
@@ -225,3 +225,11 @@ def test_open_app_window_follows_app_mode_switch(monkeypatch):
             assert panel.nav["bg"] == fluent.colors(False)["surface"]
         finally:
             panel.root.destroy()
+
+
+def test_volume_range_is_0_to_125_and_clamps_old_configs():
+    assert tray_icon.MAX_VOLUME == 125
+    assert tray_icon.sound_volume({"volume": 300}) == 125
+    assert tray_icon.voice_volume({"volume": 200}) == 125
+    assert tray_icon.voice_volume({"volume": 40, "voice_volume": 12}) == 12
+    assert tray_icon.sound_volume({}) == tray_icon.DEFAULT_VOLUME == 100

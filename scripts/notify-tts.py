@@ -60,7 +60,8 @@ BURST_WAIT_MS = 300
 
 # Live playback: the detached player re-reads the sliders every block, so a
 # volume change reaches the voice already speaking. ffplay is the fallback.
-MAX_VOLUME = 300
+MAX_VOLUME = 125
+DEFAULT_VOLUME = 100
 LIVE_RATE = 48000
 LIVE_CHANNELS = 2
 LIVE_BLOCK_FRAMES = 2048  # ~43 ms at 48 kHz
@@ -111,7 +112,19 @@ def load_config() -> dict:
             return json.loads(TTS_CONFIG.read_text())
     except Exception:
         pass
-    return {"sound_pack": "r2d2", "volume": 200}
+    return {"sound_pack": "r2d2", "volume": DEFAULT_VOLUME}
+
+
+def _level(config: dict, voice: bool) -> int:
+    """Slider level in 0..MAX_VOLUME; voices follow the sound volume until set on their own.
+    Older configs may hold up to 300 from the previous range: clamped here."""
+    level = config.get("volume", DEFAULT_VOLUME)
+    if voice:
+        level = config.get("voice_volume", level)
+    try:
+        return max(0, min(MAX_VOLUME, int(level)))
+    except (TypeError, ValueError):
+        return DEFAULT_VOLUME
 
 
 def get_voice() -> dict:
@@ -120,13 +133,12 @@ def get_voice() -> dict:
 
 
 def get_volume() -> int:
-    return load_config().get("volume", 200)
+    return _level(load_config(), voice=False)
 
 
 def get_voice_volume() -> int:
     """Spoken announcements have their own level; older configs fall back to the sound volume."""
-    config = load_config()
-    return config.get("voice_volume", config.get("volume", 200))
+    return _level(load_config(), voice=True)
 
 
 def get_muted() -> bool:
@@ -380,9 +392,7 @@ class _LiveLevel:
         if self.gain is None or mtime != self.mtime:
             self.mtime = mtime
             config = load_config()
-            level = (config.get("voice_volume", config.get("volume", 200)) if self.voice
-                     else config.get("volume", 200))
-            self.gain = 0.0 if config.get("muted") else max(0, min(MAX_VOLUME, int(level))) / 100
+            self.gain = 0.0 if config.get("muted") else _level(config, self.voice) / 100
         return self.gain
 
 
