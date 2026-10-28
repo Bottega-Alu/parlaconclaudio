@@ -44,7 +44,9 @@ def windows_language() -> str | None:
 def resolve(setting: str | None) -> str:
     if setting in LANGUAGES:
         return setting
-    return windows_language() or SOURCE
+    if setting == SYSTEM:
+        return windows_language() or SOURCE
+    return SOURCE
 
 
 def catalog(code: str) -> dict[str, str]:

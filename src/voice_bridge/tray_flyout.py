@@ -157,7 +157,8 @@ class TrayFlyout:
         """
         import tkinter as tk
         for child in self.root.winfo_children():
-            child.destroy()
+            if child is not self._curtain.top:  # it covers this very rebuild (theme/language tiles)
+                child.destroy()
         self._tile_images = {}
         self._pages, self._lists = {}, {}
         self.list_canvas, self.rows = None, []
