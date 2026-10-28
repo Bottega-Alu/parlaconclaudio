@@ -25,6 +25,17 @@ def _never_truncate_live_log(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _italian_interface_default_theme():
+    """Tests assert Italian labels: never the language or theme of the machine running them."""
+    from src.voice_bridge import fluent, i18n
+    i18n.set_language(i18n.SOURCE)
+    fluent.set_theme("system")
+    yield
+    i18n.set_language(i18n.SOURCE)
+    fluent.set_theme("system")
+
+
 class FakeRunKey:
     """In-memory HKCU Run value (see src/voice_bridge/autostart.RunKey)."""
 

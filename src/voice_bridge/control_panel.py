@@ -9,21 +9,48 @@ import logging
 import queue
 import threading
 
-from . import fluent
+from . import fluent, i18n
 from .fluent import ICON
+from .i18n import APP_NAME, N_, _
 
 logger = logging.getLogger(__name__)
 
 PAGES = (
-    ("home", "home", "Home"),
-    ("dictation", "mic", "Dettatura"),
-    ("alerts", "bell", "Avvisi vocali"),
-    ("links", "link", "Collegamenti"),
-    ("about", "info", "Informazioni"),
+    ("home", "home", N_("Home")),
+    ("dictation", "mic", N_("Dettatura")),
+    ("alerts", "bell", N_("Avvisi vocali")),
+    ("links", "link", N_("Collegamenti")),
+    ("about", "info", N_("Informazioni")),
 )
-STATE_LABELS = {"idle": "Pronto per dettare", "recording": "Registrazione in corso",
-                "transcribing": "Trascrizione in corso", "loading": "Caricamento del motore",
-                "output": "Invio del testo"}
+STATE_LABELS = {"idle": N_("Pronto per dettare"), "recording": N_("Registrazione in corso"),
+                "transcribing": N_("Trascrizione in corso"), "loading": N_("Caricamento del motore"),
+                "output": N_("Invio del testo")}
+
+
+HISTORY_SHOWN = 5
+OUTCOME_LABELS = {"pasted": N_("Incollata"), "clipboard": N_("Negli appunti"), "failed": N_("Non inviata")}
+
+
+def _when(timestamp):
+    """'14:32' today, '27/10 14:32' on other days."""
+    from datetime import datetime
+    try:
+        moment = datetime.fromisoformat(timestamp)
+    except (TypeError, ValueError):
+        return ""
+    return moment.strftime("%H:%M" if moment.date() == datetime.now().date() else "%d/%m %H:%M")
+
+
+def _clip(text, limit):
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def _join_and(items):
+    """'A', 'A e B', 'A, B e C' in the interface language."""
+    if len(items) < 2:
+        return "".join(items)
+    return _("{first} e {second}").format(first=", ".join(items[:-1]), second=items[-1])
 
 
 class ControlPanel:
@@ -42,6 +69,8 @@ class ControlPanel:
         self._testing = False
         self._test_events = []
         self._autostart = None  # unknown until a worker has asked Windows
+        self._history_all = False
+        self._history_mtime = None
 
     def show(self):
         with self._lock:
@@ -71,7 +100,7 @@ class ControlPanel:
                 self.root.mainloop()
         except Exception:
             logger.exception("Impossibile aprire il pannello")
-            self.tray._notify("Finestra non disponibile. Riavvia parlaconclaudio.")
+            self.tray._notify(_("Finestra non disponibile. Riavvia {app}.").format(app=APP_NAME))
 
     def _p(self, value):
         return round(value * self.scale)
@@ -87,7 +116,7 @@ class ControlPanel:
         self.root = root = tk.Tk()
         root.withdraw()
         self._curtain = flyout_window.Curtain(root)
-        root.title(f"parlaconclaudio • {VERSION}")
+        root.title(f"{APP_NAME} • {VERSION}")
         app_icon = Path(__file__).resolve().parents[2] / "assets" / "voicebridge.ico"
         if app_icon.is_file():
             root.iconbitmap(str(app_icon))
@@ -149,7 +178,7 @@ class ControlPanel:
         from .tray_icon import _load_config, list_sound_packs
         from ..core import voice_hooks
         self.config = _load_config()
-        self.mics = {"Predefinito di Windows": None}
+        self.mics = {_("Predefinito di Windows"): None}
         self.mics.update({f"{dev.name} [{dev.device_id}]": dev.device_id for dev in self.tray._list_mics()})
         self.packs = list_sound_packs()
         self.hooks = {agent: voice_hooks.status(agent) is True for agent in voice_hooks.AGENTS}
@@ -192,7 +221,7 @@ class ControlPanel:
         window = self.canvas.create_window(0, 0, window=self.body, anchor="nw")
         self.body.bind("<Configure>", lambda event: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.bind("<Configure>", lambda event: self.canvas.itemconfigure(window, width=event.width))
-        title = dict((key, label) for key, _, label in PAGES)[self._page]
+        title = _(dict((key, label) for key, _icon, label in PAGES)[self._page])
         tk.Label(self.body, text=title, font=(self.font, 20, "bold"), fg=c["text"],
                  bg=c["surface"], anchor="w").pack(fill="x", pady=(0, self._p(16)))
         getattr(self, f"_page_{self._page}")()
@@ -204,9 +233,9 @@ class ControlPanel:
         c = self.colors
         brand = tk.Frame(self.nav, bg=c["surface"], padx=self._p(8))
         brand.pack(fill="x", pady=(0, self._p(18)))
-        tk.Label(brand, text="parlaconclaudio", font=(self.font, 12, "bold"), fg=c["text"],
+        tk.Label(brand, text=APP_NAME, font=(self.font, 12, "bold"), fg=c["text"],
                  bg=c["surface"], anchor="w").pack(fill="x")
-        tk.Label(brand, text=f"Versione {VERSION}", font=(self.font, 8), fg=c["subtle"],
+        tk.Label(brand, text=_("Versione {version}").format(version=VERSION), font=(self.font, 8), fg=c["subtle"],
                  bg=c["surface"], anchor="w").pack(fill="x")
         for key, icon, label in PAGES:
             selected = key == self._page
@@ -218,7 +247,7 @@ class ControlPanel:
             bar.pack(side="left", fill="y", pady=self._p(9))
             glyph = self._glyph(item, icon, 11, c["text"], bg)
             glyph.pack(side="left", padx=(self._p(10), self._p(12)), pady=self._p(8))
-            text = tk.Label(item, text=label, font=(self.font, 10), fg=c["text"], bg=bg, anchor="w")
+            text = tk.Label(item, text=_(label), font=(self.font, 10), fg=c["text"], bg=bg, anchor="w")
             text.pack(side="left", fill="x")
             widgets = (item, glyph, text)
             for widget in widgets:
@@ -228,7 +257,7 @@ class ControlPanel:
                     widget.bind("<Leave>", lambda event, w=widgets, b=bg: [x.configure(bg=b) for x in w])
             item.bind("<Return>", lambda event, k=key: self._go(k))
             item.bind("<space>", lambda event, k=key: self._go(k))
-        tk.Label(self.nav, text="Chiudendo la finestra l'app\nresta nell'area di notifica.",
+        tk.Label(self.nav, text=_("Chiudendo la finestra l'app\nresta nell'area di notifica."),
                  font=(self.font, 8), fg=c["subtle"], bg=c["surface"], justify="left",
                  anchor="w").pack(side="bottom", fill="x", padx=self._p(8))
 
@@ -304,15 +333,24 @@ class ControlPanel:
                 widget.bind("<Leave>", lambda event: [w.configure(bg=c["card"]) for w in widgets + [control]])
         return control
 
-    def _keycaps(self, parent, bg, caps=None):
+    def _keycaps(self, parent, bg, caps=None, with_mouse=True):
         import tkinter as tk
-        from .dictation_trigger import key_caps
+        from .dictation_trigger import MOUSE_BUTTONS, key_caps
         c = self.colors
-        for index, key in enumerate(caps or key_caps(self.tray.dictation_trigger())):
+        trigger = self.tray.dictation_trigger()
+
+        def cap(text):
+            tk.Label(parent, text=text, font=(self.font, 8), fg=c["text"], bg=c["raised"], padx=self._p(7),
+                     pady=self._p(2), highlightthickness=1, highlightbackground=c["line"]).pack(side="left")
+
+        for index, key in enumerate(caps or key_caps(trigger)):
             if index:
                 tk.Label(parent, text="+", font=(self.font, 8), fg=c["subtle"], bg=bg).pack(side="left", padx=self._p(3))
-            tk.Label(parent, text=key, font=(self.font, 8), fg=c["text"], bg=c["raised"], padx=self._p(7),
-                     pady=self._p(2), highlightthickness=1, highlightbackground=c["line"]).pack(side="left")
+            cap(_(key))
+        if caps is None and with_mouse and trigger.kind == "both":
+            tk.Label(parent, text=_("oppure"), font=(self.font, 8), fg=c["subtle"], bg=bg).pack(
+                side="left", padx=self._p(6))
+            cap(_(MOUSE_BUTTONS[trigger.button]))
 
     def _button(self, parent, text, command, primary=False, enabled=True):
         import tkinter as tk
@@ -332,12 +370,32 @@ class ControlPanel:
     def _combo(self, parent, values, current, on_select, width=30):
         import tkinter as tk
         from tkinter import ttk
-        variable = tk.StringVar(value=current)
+        variable = tk.StringVar(master=parent, value=current)
         box = ttk.Combobox(parent, textvariable=variable, values=list(values), state="readonly",
                            font=(self.font, 9), style="Card.TCombobox", width=width)
         box.pack(side="right")
         box.bind("<<ComboboxSelected>>", lambda event: on_select(variable.get()))
         return box
+
+    def _segmented(self, parent, options, current, on_select):
+        """Every choice visible at once, the current one filled with the accent."""
+        import tkinter as tk
+        c = self.colors
+        row = tk.Frame(parent, bg=c["line"], padx=1, pady=1)
+        row.pack(side="right")
+        for index, (value, label) in enumerate(options):
+            selected = value == current
+            bg, fg = (c["accent"], c["on"]) if selected else (c["raised"], c["text"])
+            button = tk.Button(row, text=label, font=(self.font, 9, "bold" if selected else "normal"),
+                               bg=bg, fg=fg, activebackground=bg if selected else c["hover"],
+                               activeforeground=fg, relief="flat", bd=0, cursor="hand2",
+                               padx=self._p(12), pady=self._p(6), highlightthickness=0,
+                               command=(lambda v=value: on_select(v)) if not selected else None)
+            button.pack(side="left", padx=(1 if index else 0, 0))
+            if not selected:
+                button.bind("<Enter>", lambda event, b=button: b.configure(bg=c["hover"]))
+                button.bind("<Leave>", lambda event, b=button, color=bg: b.configure(bg=color))
+        return row
 
     def _switch(self, parent, value, on_toggle, label=None):
         import tkinter as tk
@@ -368,63 +426,149 @@ class ControlPanel:
         self.engine_label.pack(fill="x", pady=(self._p(4), self._p(14)))
         actions = tk.Frame(hero, bg=c["card"])
         actions.pack(fill="x")
-        self.record_button = self._button(actions, "Avvia dettatura", self._toggle_recording, primary=True)
+        self.record_button = self._button(actions, _("Avvia dettatura"), self._toggle_recording, primary=True)
         self.record_button.pack(side="left", padx=(0, self._p(8)))
-        self.files_button = self._button(actions, "Trascrivi file audio…",
+        self.files_button = self._button(actions, _("Trascrivi file audio…"),
                                          lambda: self.tray._transcribe_files_clicked(None, None))
         self.files_button.pack(side="left")
         keys = tk.Frame(hero, bg=c["card"])
         keys.pack(fill="x", pady=(self._p(16), 0))
         self._keycaps(keys, c["card"])
         from .tray_icon import auto_paste_enabled, sound_volume
-        tk.Label(keys, text="  in qualsiasi app: detta, poi il testo viene "
-                 + ("incollato dove stai scrivendo." if auto_paste_enabled(self.config) else "copiato negli appunti."),
-                 font=(self.font, 8), fg=c["muted"], bg=c["card"]).pack(side="left")
+        # Own line: next to long keycaps ("Ctrl + Alt + Spazio oppure Tasto laterale…") it was cut.
+        tk.Label(hero, text=(_("in qualsiasi app: detta, poi il testo viene incollato dove stai scrivendo.")
+                             if auto_paste_enabled(self.config) else
+                             _("in qualsiasi app: detta, poi il testo viene copiato negli appunti.")),
+                 font=(self.font, 8), fg=c["muted"], bg=c["card"], anchor="w").pack(fill="x", pady=(self._p(6), 0))
 
-        config = self.config
-        self._section("Impostazioni rapide")
-        mic = next((name for name, value in self.mics.items() if value == config.get("mic_device_id")),
-                   "Predefinito di Windows")
-        self._card("mic", "Microfono", mic.split(" [")[0], on_click=lambda: self._go("dictation"))
-        pack = config.get("sound_pack", "r2d2")
-        mode = next((label for label, value in TTS_MODES.items() if value == config.get("tts_mode", "full")), "")
-        sound = "Casuale" if pack == "random" else fluent.pretty_pack(pack)
-        volume = "audio disattivato" if config.get("muted") else f"volume {sound_volume(config)}%"
-        self._card("bell", "Avvisi vocali", f"{mode} · {sound} · {volume}", on_click=lambda: self._go("alerts"))
+        self._appearance_section()
+        self._history_section()
+        self._quick_line()
+
+    def _appearance_section(self):
+        self._section(_("Aspetto"))
+        self._segmented(self._card("settings", _("Tema"), _("Chiaro, scuro o come Windows.")),
+                        [("system", _("Sistema")), ("light", _("Chiaro")), ("dark", _("Scuro"))],
+                        fluent.theme(), self._apply_theme)
+        # Language names stay in their own language: findable whatever is shown now.
+        self._segmented(self._card("globe", _("Lingua"), _("Menu, finestre e notifiche.")),
+                        [(i18n.SYSTEM, _("Sistema"))] + list(i18n.LANGUAGES.items()),
+                        self.config.get("ui_language", i18n.SOURCE), self._apply_ui_language)
+
+    def _history_section(self):
+        import tkinter as tk
+        from . import history
+        c = self.colors
+        try:
+            self._history_mtime = history.history_file().stat().st_mtime_ns
+        except OSError:
+            self._history_mtime = None
+        saved = list(reversed(history.entries()))
+        head = tk.Frame(self.body, bg=c["surface"])
+        head.pack(fill="x", pady=(self._p(14), self._p(6)))
+        tk.Label(head, text=_("Ultime trascrizioni"), font=(self.font, 10, "bold"), fg=c["text"],
+                 bg=c["surface"], anchor="w").pack(side="left")
+        if not saved:
+            self._card("file", _("Ancora nessuna trascrizione"),
+                       _("Quello che detti compare qui, anche se non è stato incollato."))
+            return
+        self._button(head, _("Cancella storico"), self._clear_history).pack(side="right")
+        for item in saved if self._history_all else saved[:HISTORY_SHOWN]:
+            self._history_row(item)
+        if len(saved) > HISTORY_SHOWN:
+            more = tk.Label(self.body, text=_("Mostra meno") if self._history_all
+                            else _("Mostra tutte ({count})").format(count=len(saved)),
+                            font=(self.font, 9), fg=c["accent"], bg=c["surface"], cursor="hand2", anchor="w")
+            more.pack(fill="x", pady=(self._p(2), 0))
+            more.bind("<Button-1>", lambda event: self._toggle_history())
+
+    def _history_row(self, item):
+        import tkinter as tk
+        c = self.colors
+        card = tk.Frame(self.body, bg=c["card"], highlightthickness=1, highlightbackground=c["line"],
+                        padx=self._p(16), pady=self._p(10))
+        card.pack(fill="x", pady=(0, self._p(4)))
+        copy = self._button(card, _("Copia"), None)
+        copy.configure(command=lambda: self._copy_text(item["text"], copy))
+        copy.pack(side="right", padx=(self._p(16), 0))
+        texts = tk.Frame(card, bg=c["card"])
+        texts.pack(side="left", fill="x", expand=True)
+        outcome = item.get("outcome", "failed")
+        meta = f"{_when(item.get('ts'))} · {_(OUTCOME_LABELS.get(outcome, OUTCOME_LABELS['failed']))}"
+        tk.Label(texts, text=meta, font=(self.font, 8), fg=c["rec"] if outcome == "failed" else c["muted"],
+                 bg=c["card"], anchor="w").pack(fill="x")
+        body = tk.Label(texts, text=_clip(item["text"], 220), font=(self.font, 10), fg=c["text"],
+                        bg=c["card"], anchor="w", justify="left", wraplength=self._p(420))
+        body.pack(fill="x")
+        texts.bind("<Configure>", lambda event: body.configure(
+            wraplength=max(self._p(120), event.width - self._p(4))))
+
+    def _quick_line(self):
+        """Quick settings on one line: each part opens its page."""
+        import tkinter as tk
+        from .tray_icon import TTS_MODES, sound_volume
         from ..core import voice_hooks
+        c = self.colors
+        config = self.config
+        mic = next((name for name, value in self.mics.items() if value == config.get("mic_device_id")),
+                   _("Predefinito di Windows"))
+        mode = _(next((label for label, value in TTS_MODES.items() if value == config.get("tts_mode", "full")), ""))
+        pack = config.get("sound_pack", "r2d2")
+        sound = _("Casuale") if pack == "random" else fluent.pretty_pack(pack)
+        volume = _("audio disattivato") if config.get("muted") else f"{sound_volume(config)}%"
         linked = [voice_hooks.AGENT_LABEL[a] for a, on in self.hooks.items() if on]
-        self._card("link", "Collegamenti", ("Avvisi attivi per " + " e ".join(linked)) if linked
-                   else "Nessun agente collegato agli avvisi vocali", on_click=lambda: self._go("links"))
+        parts = (
+            ("mic", _clip(mic.split(" [")[0], 26), "dictation"),
+            ("bell", _clip(f"{mode} · {sound} · {volume}", 40), "alerts"),
+            ("link", _clip(_join_and(linked), 26) if linked else _("Nessun agente"), "links"),
+        )
+        self._section(_("Impostazioni rapide"))
+        line = tk.Frame(self.body, bg=c["card"], highlightthickness=1, highlightbackground=c["line"],
+                        padx=self._p(12), pady=self._p(8))
+        line.pack(fill="x")
+        for icon, text, page in parts:
+            chip = tk.Frame(line, bg=c["card"], cursor="hand2", padx=self._p(6), pady=self._p(3))
+            chip.pack(side="left", padx=(0, self._p(8)))
+            glyph = self._glyph(chip, icon, 10, c["muted"], c["card"])
+            glyph.pack(side="left", padx=(0, self._p(6)))
+            label = tk.Label(chip, text=text, font=(self.font, 9), fg=c["text"], bg=c["card"], cursor="hand2")
+            label.pack(side="left")
+            widgets = (chip, glyph, label)
+            for widget in widgets:
+                widget.bind("<Button-1>", lambda event, p=page: self._go(p))
+                widget.bind("<Enter>", lambda event, w=widgets: [x.configure(bg=c["hover"]) for x in w])
+                widget.bind("<Leave>", lambda event, w=widgets: [x.configure(bg=c["card"]) for x in w])
 
     def _page_dictation(self):
         from .tray_icon import STT_MODES, WHISPER_LANGUAGES
         config = self.config
         self._trigger_section()
-        self._section("Ingresso")
+        self._section(_("Ingresso"))
         mic = next((name for name, value in self.mics.items() if value == config.get("mic_device_id")),
-                   "Predefinito di Windows")
-        self._combo(self._card("mic", "Microfono", "Il dispositivo usato per la dettatura."),
+                   _("Predefinito di Windows"))
+        self._combo(self._card("mic", _("Microfono"), _("Il dispositivo usato per la dettatura.")),
                     self.mics, mic, self._apply_mic)
-        self._section("Trascrizione")
-        self._combo(self._card("chip", "Riconoscimento", self._engine_summary()),
-                    STT_MODES.values(), STT_MODES.get(config.get("stt_mode", "auto"), STT_MODES["auto"]),
+        self._section(_("Trascrizione"))
+        self._combo(self._card("chip", _("Riconoscimento"), self._engine_summary()),
+                    [_(v) for v in STT_MODES.values()],
+                    _(STT_MODES.get(config.get("stt_mode", "auto"), STT_MODES["auto"])),
                     self._apply_mode)
-        language = next((label for label, code in WHISPER_LANGUAGES.items()
-                         if code == config.get("whisper_language")), "Rilevamento automatico")
-        self._combo(self._card("globe", "Lingua", "Fissarla evita errori di riconoscimento su frasi brevi."),
-                    WHISPER_LANGUAGES, language, self._apply_language)
-        self._section("Testo dettato")
+        language = _(next((label for label, code in WHISPER_LANGUAGES.items()
+                           if code == config.get("whisper_language")), "Rilevamento automatico"))
+        self._combo(self._card("globe", _("Lingua"), _("Fissarla evita errori di riconoscimento su frasi brevi.")),
+                    [_(label) for label in WHISPER_LANGUAGES], language, self._apply_language)
+        self._section(_("Testo dettato"))
         from .tray_icon import auto_paste_enabled
         paste = auto_paste_enabled(config)
-        self._switch(self._card("file", "Incolla automaticamente",
-                                "Spento: il testo resta solo negli appunti e lo incolli tu con Ctrl+V."),
+        self._switch(self._card("file", _("Incolla automaticamente"),
+                                _("Spento: il testo resta solo negli appunti e lo incolli tu con Ctrl+V.")),
                      paste, lambda on: self._work(self.tray._toggle_auto_paste_clicked),
-                     "Attivo" if paste else "Solo appunti")
-        self._section("Memoria GPU")
-        control = self._card("pulse", "Modello locale",
-                             "Libera la VRAM quando ti serve per altro: il modello si ricarica al prossimo uso.")
-        self._button(control, "Ricarica modello", lambda: self.tray._purge_vram_clicked(None, None)).pack(side="right")
-        self._button(control, "Libera memoria", lambda: self.tray._unload_vram_clicked(),
+                     _("Attivo") if paste else _("Solo appunti"))
+        self._section(_("Memoria GPU"))
+        control = self._card("pulse", _("Modello locale"),
+                             _("Libera la VRAM quando ti serve per altro: il modello si ricarica al prossimo uso."))
+        self._button(control, _("Ricarica modello"), lambda: self.tray._purge_vram_clicked(None, None)).pack(side="right")
+        self._button(control, _("Libera memoria"), lambda: self.tray._unload_vram_clicked(),
                      enabled=bool(self.tray._on_unload_vram)).pack(side="right", padx=(0, self._p(8)))
 
     def _trigger_section(self):
@@ -432,43 +576,47 @@ class ControlPanel:
         from .dictation_trigger import MODES, MOUSE_BUTTONS
         c = self.colors
         trigger = self.tray.dictation_trigger()
-        self._section("Comando di dettatura")
-        kinds = {"Combinazione di tasti": ("keys", None)}
-        kinds.update({label: ("mouse", button) for button, label in MOUSE_BUTTONS.items()})
-        current = next(label for label, (kind, button) in kinds.items()
-                       if kind == trigger.kind and (kind == "keys" or button == trigger.button))
-        self._combo(self._card("settings", "Comando",
-                               "Un tasto del mouse assegnato alla dettatura non arriva più alle altre app."),
-                    kinds, current, lambda label: self._save_trigger(kind=kinds[label][0],
-                                                                   button=kinds[label][1] or trigger.button))
-        if trigger.kind == "keys":
-            control = self._card("list", "Combinazione",
-                                 self._trigger_error or ("Premi la combinazione da usare. Esc per annullare."
-                                                         if self._capturing else
-                                                         "Funziona in qualsiasi app, anche a finestra chiusa."))
+        self._section(_("Comando di dettatura"))
+        kinds = {_("Combinazione di tasti"): "keys", _("Tasto del mouse"): "mouse",
+                 _("Tasti oppure mouse"): "both"}
+        current = next(label for label, kind in kinds.items() if kind == trigger.kind)
+        self._combo(self._card("settings", _("Comando"),
+                               _("Un tasto del mouse assegnato alla dettatura non arriva più alle altre app.")),
+                    kinds, current, lambda label: self._save_trigger(kind=kinds[label]))
+        if trigger.kind in ("mouse", "both"):
+            buttons = {_(label): button for button, label in MOUSE_BUTTONS.items()}
+            self._combo(self._card("settings", _("Tasto del mouse"), _("Il tasto centrale o uno dei laterali.")),
+                        buttons, _(MOUSE_BUTTONS[trigger.button]),
+                        lambda label: self._save_trigger(button=buttons[label]))
+        if trigger.kind in ("keys", "both"):
+            control = self._card("list", _("Combinazione"),
+                                 _(self._trigger_error) if self._trigger_error else
+                                 (_("Premi la combinazione da usare. Esc per annullare.")
+                                  if self._capturing else
+                                  _("Funziona in qualsiasi app, anche a finestra chiusa.")))
             if self._capturing:
-                tk.Label(control, text="In ascolto…", font=(self.font, 9, "bold"), fg=c["accent"],
+                tk.Label(control, text=_("In ascolto…"), font=(self.font, 9, "bold"), fg=c["accent"],
                          bg=c["card"]).pack(side="right")
             else:
-                self._button(control, "Cambia…", self._start_capture).pack(side="right", padx=(self._p(12), 0))
+                self._button(control, _("Cambia…"), self._start_capture).pack(side="right", padx=(self._p(12), 0))
                 caps = tk.Frame(control, bg=c["card"])
                 caps.pack(side="right")
-                self._keycaps(caps, c["card"])
-        self._combo(self._card("refresh", "Modalità", "Come si comporta il comando."),
-                    MODES.values(), MODES[trigger.mode],
-                    lambda label: self._save_trigger(mode=next(k for k, v in MODES.items() if v == label)))
-        control = self._card("pulse", "Prova il comando",
+                self._keycaps(caps, c["card"], with_mouse=False)  # the mouse button has its own card
+        self._combo(self._card("refresh", _("Modalità"), _("Come si comporta il comando.")),
+                    [_(v) for v in MODES.values()], _(MODES[trigger.mode]),
+                    lambda label: self._save_trigger(mode=next(k for k, v in MODES.items() if _(v) == label)))
+        control = self._card("pulse", _("Prova il comando"),
                              self._test_summary() if self._testing else
-                             "Usa il comando qui senza avviare una dettatura vera.")
-        self._button(control, "Termina prova" if self._testing else "Avvia prova",
+                             _("Usa il comando qui senza avviare una dettatura vera."))
+        self._button(control, _("Termina prova") if self._testing else _("Avvia prova"),
                      self._toggle_test, primary=self._testing).pack(side="right")
 
     def _test_summary(self):
         if not self._test_events:
-            return "In attesa: usa il comando adesso, in qualsiasi finestra."
-        labels = {"press": "avvio", "release": "fine"}
+            return _("In attesa: usa il comando adesso, in qualsiasi finestra.")
+        labels = {"press": _("avvio"), "release": _("fine")}
         recent = " → ".join(labels[event] for event in self._test_events[-6:])
-        return f"Ricevuto: {recent}. Funziona."
+        return _("Ricevuto: {events}. Funziona.").format(events=recent)
 
     def _save_trigger(self, **changes):
         from dataclasses import replace
@@ -501,7 +649,9 @@ class ControlPanel:
             return "break"
         if combo:
             self._end_trigger_editing()
-            self._save_trigger(kind="keys", keys=combo)
+            # A new combination keeps "keys or mouse" if that was the choice.
+            self._save_trigger(kind="both" if self.tray.dictation_trigger().kind == "both" else "keys",
+                               keys=combo)
         return "break"
 
     def _capture_release(self, event):
@@ -518,7 +668,7 @@ class ControlPanel:
             self._end_trigger_editing()
             listener = self.tray._dictation_trigger
             if listener is None:
-                self._trigger_error = "La prova funziona solo con la dettatura avviata."
+                self._trigger_error = N_("La prova funziona solo con la dettatura avviata.")
             else:
                 self._testing, self._test_events = True, []
                 listener.reset_toggle()
@@ -546,13 +696,16 @@ class ControlPanel:
 
     def _engine_summary(self):
         status = self.tray._get_stt_status(self.config)
-        gpu = {"loaded": "caricata", "not_loaded": "non ancora caricata", "not_detected": "non rilevata",
-               "cloud": "presente, non in uso"}.get(status["gpu_state"], "non disponibile")
-        summary = f"In uso: {status['active_label']} · GPU {gpu}"
+        gpu = _({"loaded": N_("caricata"), "not_loaded": N_("non ancora caricata"),
+                 "not_detected": N_("non rilevata"), "cloud": N_("presente, non in uso")}.get(
+            status["gpu_state"], N_("non disponibile")))
+        engine = _(status["active_label"])
         if status["gpu"] not in ("Unknown", "Not detected"):
-            summary += f" ({status['gpu']})"
+            summary = _("In uso: {engine} · GPU {state} ({name})").format(engine=engine, state=gpu, name=status["gpu"])
+        else:
+            summary = _("In uso: {engine} · GPU {state}").format(engine=engine, state=gpu)
         if status["active"] == "disabled":
-            summary += ". Configura un provider cloud per dettare."
+            summary += ". " + _("Configura un provider cloud per dettare.")
         return summary
 
     def _page_alerts(self):
@@ -561,15 +714,15 @@ class ControlPanel:
         c = self.colors
         config = self.config
         muted = bool(config.get("muted", False))
-        self._section("Audio")
-        self._switch(self._card("speaker", "Suoni e voce", "Disattiva tutti gli avvisi senza perdere le impostazioni."),
+        self._section(_("Audio"))
+        self._switch(self._card("speaker", _("Suoni e voce"), _("Disattiva tutti gli avvisi senza perdere le impostazioni.")),
                      not muted, lambda on: self._work(lambda: self.tray._make_toggle_mute()(None, None)),
-                     "Attivi" if not muted else "Disattivati")
+                     _("Attivi") if not muted else _("Disattivati"))
         from .tray_icon import MAX_VOLUME, sound_volume, voice_volume
         levels = (
-            ("music", "Volume suoni", "Il pacchetto suoni. Oltre il 100% amplifica i suoni più deboli.",
+            ("music", _("Volume suoni"), _("Il pacchetto suoni. Oltre il 100% amplifica i suoni più deboli."),
              sound_volume(config), self.tray._make_set_volume),
-            ("chat", "Volume voci", "Gli annunci parlati, regolabili a parte rispetto ai suoni.",
+            ("chat", _("Volume voci"), _("Gli annunci parlati, regolabili a parte rispetto ai suoni."),
              voice_volume(config), self.tray._make_set_voice_volume),
         )
         for icon, title, description, level, make_handler in levels:
@@ -584,27 +737,29 @@ class ControlPanel:
             slider.listeners.append(lambda new, label=value: label.configure(text=f"{new}%"))
             slider.canvas.configure(width=self._p(220))
             slider.canvas.pack(side="right")
-        self._section("Annunci")
-        mode = next((label for label, v in TTS_MODES.items() if v == config.get("tts_mode", "full")), "Voce e suoni")
-        self._combo(self._card("chat", "Modalità", "Quando parlare e quando usare solo un suono."),
-                    TTS_MODES, mode,
-                    lambda label: self._work(lambda: self.tray._make_set_tts_mode(TTS_MODES[label])(None, None)))
+        self._section(_("Annunci"))
+        modes = {_(label): value for label, value in TTS_MODES.items()}
+        mode = _(next((label for label, v in TTS_MODES.items() if v == config.get("tts_mode", "full")), "Voce e suoni"))
+        self._combo(self._card("chat", _("Modalità"), _("Quando parlare e quando usare solo un suono.")),
+                    modes, mode,
+                    lambda label: self._work(lambda: self.tray._make_set_tts_mode(modes[label])(None, None)))
         voice_id = config.get("voice", {}).get("voice", "it-IT-IsabellaNeural")
         presets = dict(VOICE_PRESETS)
-        current = next((name for name, data in presets.items() if data["voice"] == voice_id),
+        shown = {_(name): name for name in presets}  # label shown -> preset name
+        current = next((_(name) for name, data in presets.items() if data["voice"] == voice_id),
                        self.tray._voice_display_name(voice_id))
-        self._combo(self._card("chat", "Voce rapida", "Le voci più usate."),
-                    list(presets) if current in presets else [current] + list(presets), current,
-                    lambda name: name in presets and self._work(
-                        lambda: self.tray._make_set_voice_preset(name)(None, None)))
+        self._combo(self._card("chat", _("Voce rapida"), _("Le voci più usate.")),
+                    list(shown) if current in shown else [current] + list(shown), current,
+                    lambda label: label in shown and self._work(
+                        lambda: self.tray._make_set_voice_preset(shown[label])(None, None)))
         self._all_voices(voice_id)
-        self._section("Suoni")
-        names = {"Casuale": "random"}
+        self._section(_("Suoni"))
+        names = {_("Casuale"): "random"}
         names.update({f"{fluent.pretty_pack(name)} ({count})": name for name, count in self.packs})
         pack = config.get("sound_pack", "r2d2")
         current = next((label for label, name in names.items() if name == pack), pack)
-        control = self._card("music", "Pacchetto suoni", "Il suono che accompagna ogni avviso.")
-        self._button(control, "Ascolta", lambda: self._preview(names.get(box.get(), pack))).pack(
+        control = self._card("music", _("Pacchetto suoni"), _("Il suono che accompagna ogni avviso."))
+        self._button(control, _("Ascolta"), lambda: self._preview(names.get(box.get(), pack))).pack(
             side="right", padx=(self._p(8), 0))
         box = self._combo(control, names, current,
                           lambda label: self._work(lambda: self.tray._make_set_sound_pack(names[label])(None, None)),
@@ -615,14 +770,16 @@ class ControlPanel:
         language = self._voice_language or next(
             (lang for lang, voices in EDGE_VOICES.items() if any(v["id"] == voice_id for v in voices)),
             next(iter(EDGE_VOICES)))
-        voices = {f"{v['name']} ({'femminile' if v['gender'] == 'F' else 'maschile'})": v["id"]
-                  for v in EDGE_VOICES[language]}
-        current = next((label for label, vid in voices.items() if vid == voice_id), "Scegli…")
-        control = self._card("globe", "Tutte le voci", "Scegli la lingua, poi la voce.")
+        voices = {(_("{name} (femminile)") if v["gender"] == "F" else _("{name} (maschile)")).format(name=v["name"]):
+                  v["id"] for v in EDGE_VOICES[language]}
+        current = next((label for label, vid in voices.items() if vid == voice_id), _("Scegli…"))
+        languages = {_(lang): lang for lang in EDGE_VOICES}  # label shown -> language key
+        control = self._card("globe", _("Tutte le voci"), _("Scegli la lingua, poi la voce."))
         self._combo(control, voices, current,
                     lambda label: self._work(lambda: self.tray._make_set_voice(voices[label])(None, None)),
                     width=22)
-        self._combo(control, EDGE_VOICES, language, self._pick_voice_language, width=14).pack_configure(
+        self._combo(control, list(languages), _(language),
+                    lambda label: self._pick_voice_language(languages[label]), width=14).pack_configure(
             padx=(0, self._p(8)))
 
     def _pick_voice_language(self, language):
@@ -632,45 +789,91 @@ class ControlPanel:
 
     def _page_links(self):
         from ..core import voice_hooks
-        self._section("Avvisi vocali degli agenti")
+        self._section(_("Avvisi vocali degli agenti"))
         for agent in voice_hooks.AGENTS:
             label = voice_hooks.AGENT_LABEL[agent]
-            self._switch(self._card("chat", label, f"{label} annuncia la fine delle attività e le richieste di permesso."),
+            self._switch(self._card("chat", label, _("{agent} annuncia la fine delle attività e le richieste di permesso.").format(agent=label)),
                          self.hooks.get(agent, False), lambda on, a=agent: self._set_hook(a, on))
-        self._section("Sistema")
-        control = self._card("power", "Avvia all'accesso a Windows", "L'app parte nell'area di notifica.")
+        self._section(_("Sistema"))
+        control = self._card("power", _("Avvia all'accesso a Windows"), _("L'app parte nell'area di notifica."))
         if self._autostart is None:
             import tkinter as tk
-            tk.Label(control, text="Verifica…", font=(self.font, 9), fg=self.colors["muted"],
+            tk.Label(control, text=_("Verifica…"), font=(self.font, 9), fg=self.colors["muted"],
                      bg=self.colors["card"]).pack(side="right")
         else:
             self._switch(control, self._autostart, lambda on: self._toggle_autostart())
-        self._section("Riconoscimento cloud")
+        self._section(_("Riconoscimento cloud"))
         from ..core.stt_engine.key_manager import KeyManager
         for provider, label, ask, get in (
                 ("groq", "Groq", self.tray._ask_api_key_groq, self.tray._open_groq_console),
                 ("deepgram", "Deepgram", self.tray._ask_api_key_deepgram, self.tray._open_deepgram_console)):
             configured = bool(KeyManager.get_key(provider))
-            control = self._card("cloud", f"Chiave {label}",
-                                 ("Configurata" if configured else "Non configurata")
-                                 + ". Resta nel portachiavi di Windows.")
-            self._button(control, "Imposta…", lambda ask=ask: ask(None, None)).pack(side="right")
-            self._button(control, "Ottieni chiave", lambda get=get: get(None, None)).pack(
+            control = self._card("cloud", _("Chiave {provider}").format(provider=label),
+                                 _("Configurata. Resta nel portachiavi di Windows.") if configured
+                                 else _("Non configurata. Resta nel portachiavi di Windows."))
+            self._button(control, _("Imposta…"), lambda ask=ask: ask(None, None)).pack(side="right")
+            self._button(control, _("Ottieni chiave"), lambda get=get: get(None, None)).pack(
                 side="right", padx=(0, self._p(8)))
-        control = self._card("refresh", "Verifica connessione", "Prova i provider cloud configurati.")
-        self._button(control, "Verifica", lambda: self.tray._test_cloud_connection(None, None)).pack(side="right")
+        control = self._card("refresh", _("Verifica connessione"), _("Prova i provider cloud configurati."))
+        self._button(control, _("Verifica"), lambda: self.tray._test_cloud_connection(None, None)).pack(side="right")
+        self._section(_("Correzione del testo"))
+        self._switch(self._card("chat", _("Correggi la trascrizione con un LLM"),
+                                _("Sistema punteggiatura e parole fraintese tramite OpenRouter, "
+                                  "con la tua chiave. Senza chiave il testo resta com'è.")),
+                     bool(self.config.get("enable_stt_cleanup", True)),
+                     lambda on: self._work(lambda: self.tray._set_text_cleanup(on)))
+        configured = bool(KeyManager.get_key("openrouter"))
+        control = self._card("cloud", _("Chiave {provider}").format(provider="OpenRouter"),
+                             _("Configurata. Resta nel portachiavi di Windows.") if configured
+                             else _("Non configurata. Resta nel portachiavi di Windows."))
+        self._button(control, _("Imposta…"),
+                     lambda: self.tray._ask_api_key_openrouter(None, None, on_done=self._refresh_soon)).pack(side="right")
+        self._button(control, _("Ottieni chiave"), lambda: self.tray._open_openrouter_console(None, None)).pack(
+            side="right", padx=(0, self._p(8)))
 
     def _page_about(self):
         from .build_info import VERSION, IS_TEST_BUILD
-        self._section("Applicazione")
-        self._card("info", f"parlaconclaudio {VERSION}",
-                   "Build di test" if IS_TEST_BUILD else "Dettatura vocale per Windows con avvisi per Claude Code e Codex.")
-        control = self._card("link", "Progetto e guida", "Documentazione, novità e segnalazioni.")
-        self._button(control, "Apri", lambda: self.tray._open_repo(None, None)).pack(side="right")
-        control = self._card("power", "Esci", "Chiude l'app: dettatura e avvisi si fermano fino al prossimo avvio.")
-        self._button(control, "Esci", self._exit).pack(side="right")
+        self._section(_("Applicazione"))
+        self._card("info", f"{APP_NAME} {VERSION}",
+                   _("Build di test") if IS_TEST_BUILD else _("Dettatura vocale per Windows con avvisi per Claude Code e Codex."))
+        control = self._card("link", _("Progetto e guida"), _("Documentazione, novità e segnalazioni."))
+        self._button(control, _("Apri"), lambda: self.tray._open_repo(None, None)).pack(side="right")
+        control = self._card("power", _("Esci"), _("Chiude l'app: dettatura e avvisi si fermano fino al prossimo avvio."))
+        self._button(control, _("Esci"), self._exit).pack(side="right")
 
     # ── actions ─────────────────────────────────────────────────────
+
+    def _refresh_soon(self):
+        """From any thread: reload settings and redraw the page."""
+        self._commands.put("refresh")
+        self._wake()
+
+    def _apply_theme(self, choice):
+        self.tray._set_ui_theme(choice)
+        self._load()
+        if not self._follow_theme():
+            self._render()  # same colours (e.g. Sistema -> Scuro on a dark Windows): show the choice
+
+    def _apply_ui_language(self, setting):
+        self.tray._set_ui_language(setting)
+        self._load()
+        self._render()
+
+    def _toggle_history(self):
+        self._history_all = not self._history_all
+        self._render()
+
+    def _clear_history(self):
+        from . import history
+        history.clear()
+        self._history_all = False
+        self._render()
+
+    def _copy_text(self, text, button):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        button.configure(text=_("Copiato"))
+        self.root.after(1500, lambda: button.winfo_exists() and button.configure(text=_("Copia")))
 
     def _work(self, callback):
         if callback:
@@ -679,7 +882,7 @@ class ControlPanel:
                     callback()
                 except Exception:
                     logger.exception("Azione del pannello non riuscita")
-                    self.tray._notify("Operazione non riuscita. Riprova.")
+                    self.tray._notify(_("Operazione non riuscita. Riprova."))
                 finally:
                     self._commands.put("refresh")
             threading.Thread(target=run, daemon=True).start()
@@ -715,12 +918,12 @@ class ControlPanel:
 
     def _apply_mode(self, label):
         from .tray_icon import STT_MODES
-        mode = next(key for key, value in STT_MODES.items() if value == label)
+        mode = next(key for key, value in STT_MODES.items() if _(value) == label)
         self._work(lambda: self.tray._make_set_stt_mode(mode)(None, None))
 
     def _apply_language(self, label):
         from .tray_icon import WHISPER_LANGUAGES
-        code = WHISPER_LANGUAGES[label]
+        code = next(code for name, code in WHISPER_LANGUAGES.items() if _(name) == label)
         self._work(lambda: self.tray._make_set_language(code)(None, None))
 
     # ── live state ──────────────────────────────────────────────────
@@ -731,14 +934,15 @@ class ControlPanel:
         c = self.colors
         state = self.tray._state
         batch = self.tray._batch_lock.locked()
-        self.state_label.configure(text="Trascrizione file in corso" if batch else STATE_LABELS.get(state, state))
+        self.state_label.configure(text=_("Trascrizione file in corso") if batch else _(STATE_LABELS.get(state, state)))
         color = {"recording": c["rec"], "transcribing": c["busy"], "loading": c["busy"],
                  "output": c["busy"]}.get(state, c["ok"])
         size = self._p(11)
         self.status_dot.delete("all")
         self.status_dot.create_oval(1, 1, size, size, fill=c["busy"] if batch else color, outline="")
-        self.engine_label.configure(text="Motore attivo: " + self.tray._get_stt_status({})["active_label"])
-        self.record_button.configure(text="Ferma dettatura" if state == "recording" else "Avvia dettatura",
+        self.engine_label.configure(
+            text=_("Motore attivo: {engine}").format(engine=_(self.tray._get_stt_status({})["active_label"])))
+        self.record_button.configure(text=_("Ferma dettatura") if state == "recording" else _("Avvia dettatura"),
                                      state="normal" if self.tray._on_toggle_recording and state in ("idle", "recording") and not batch else "disabled")
         self.files_button.configure(state="normal" if state == "idle" and not batch else "disabled")
 
@@ -752,13 +956,27 @@ class ControlPanel:
         self._theme_ticks += 1
         if self._theme_ticks % 4 == 0:  # ~3 s: an open window follows a light/dark switch
             self._follow_theme()
+        if self._page == "home" and self._history_changed():
+            y = self.canvas.yview()[0]
+            self._render()
+            self.root.update_idletasks()
+            self.canvas.yview_moveto(y)
         self._update_state()
         self.root.after(750, self._tick)
 
+    def _history_changed(self):
+        from . import history
+        try:
+            mtime = history.history_file().stat().st_mtime_ns
+        except OSError:
+            mtime = None
+        return mtime != self._history_mtime
+
     def _follow_theme(self):
+        """Repaint if light/dark or the accent changed; True when it did."""
         dark = fluent.dark_mode()
         if (dark, fluent.accent(dark)) == self._theme:
-            return
+            return False
         self.dark = dark
         self.colors = c = fluent.colors(dark)
         self._theme = (dark, c["accent"])
@@ -768,6 +986,7 @@ class ControlPanel:
         self._style()
         fluent.dark_title_bar(self.root, dark)
         self._render()
+        return True
 
     def _drain(self):
         """Run queued commands; False once the window is destroyed."""

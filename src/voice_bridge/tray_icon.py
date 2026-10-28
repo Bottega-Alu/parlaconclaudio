@@ -27,6 +27,8 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from . import i18n
+from .i18n import APP_NAME, N_, _
 from .menu_dpi import native_menu_dpi
 
 logger = logging.getLogger(__name__)
@@ -59,13 +61,13 @@ VOICE_PRESETS = {
 # === EDGE-TTS VOICES BY LANGUAGE ===
 # Organized for individual voice selection in tray menu
 EDGE_VOICES = {
-    "Italiano": [
+    N_("Italiano"): [
         {"name": "Isabella", "id": "it-IT-IsabellaNeural", "gender": "F"},
         {"name": "Elsa", "id": "it-IT-ElsaNeural", "gender": "F"},
         {"name": "Diego", "id": "it-IT-DiegoNeural", "gender": "M"},
         {"name": "Giuseppe ML", "id": "it-IT-GiuseppeMultilingualNeural", "gender": "M"},
     ],
-    "English US": [
+    N_("English US"): [
         {"name": "Ava ML", "id": "en-US-AvaMultilingualNeural", "gender": "F"},
         {"name": "Emma ML", "id": "en-US-EmmaMultilingualNeural", "gender": "F"},
         {"name": "Aria", "id": "en-US-AriaNeural", "gender": "F"},
@@ -81,33 +83,33 @@ EDGE_VOICES = {
         {"name": "Steffan", "id": "en-US-SteffanNeural", "gender": "M"},
         {"name": "Christopher", "id": "en-US-ChristopherNeural", "gender": "M"},
     ],
-    "English GB": [
+    N_("English GB"): [
         {"name": "Sonia", "id": "en-GB-SoniaNeural", "gender": "F"},
         {"name": "Libby", "id": "en-GB-LibbyNeural", "gender": "F"},
         {"name": "Maisie", "id": "en-GB-MaisieNeural", "gender": "F"},
         {"name": "Ryan", "id": "en-GB-RyanNeural", "gender": "M"},
         {"name": "Thomas", "id": "en-GB-ThomasNeural", "gender": "M"},
     ],
-    "Portugues BR": [
+    N_("Portugues BR"): [
         {"name": "Thalita ML", "id": "pt-BR-ThalitaMultilingualNeural", "gender": "F"},
         {"name": "Francisca", "id": "pt-BR-FranciscaNeural", "gender": "F"},
         {"name": "Antonio", "id": "pt-BR-AntonioNeural", "gender": "M"},
     ],
-    "Espanol": [
+    N_("Espanol"): [
         {"name": "Elvira (ES)", "id": "es-ES-ElviraNeural", "gender": "F"},
         {"name": "Ximena (ES)", "id": "es-ES-XimenaNeural", "gender": "F"},
         {"name": "Dalia (MX)", "id": "es-MX-DaliaNeural", "gender": "F"},
         {"name": "Alvaro (ES)", "id": "es-ES-AlvaroNeural", "gender": "M"},
         {"name": "Jorge (MX)", "id": "es-MX-JorgeNeural", "gender": "M"},
     ],
-    "Francais": [
+    N_("Francais"): [
         {"name": "Vivienne ML", "id": "fr-FR-VivienneMultilingualNeural", "gender": "F"},
         {"name": "Denise", "id": "fr-FR-DeniseNeural", "gender": "F"},
         {"name": "Eloise", "id": "fr-FR-EloiseNeural", "gender": "F"},
         {"name": "Remy ML", "id": "fr-FR-RemyMultilingualNeural", "gender": "M"},
         {"name": "Henri", "id": "fr-FR-HenriNeural", "gender": "M"},
     ],
-    "Deutsch": [
+    N_("Deutsch"): [
         {"name": "Seraphina ML", "id": "de-DE-SeraphinaMultilingualNeural", "gender": "F"},
         {"name": "Amala", "id": "de-DE-AmalaNeural", "gender": "F"},
         {"name": "Katja", "id": "de-DE-KatjaNeural", "gender": "F"},
@@ -115,7 +117,7 @@ EDGE_VOICES = {
         {"name": "Conrad", "id": "de-DE-ConradNeural", "gender": "M"},
         {"name": "Killian", "id": "de-DE-KillianNeural", "gender": "M"},
     ],
-    "Japanese": [
+    N_("Japanese"): [
         {"name": "Nanami", "id": "ja-JP-NanamiNeural", "gender": "F"},
         {"name": "Keita", "id": "ja-JP-KeitaNeural", "gender": "M"},
     ],
@@ -128,20 +130,20 @@ VOLUME_LEVELS = [0, 25, 50, 75, 100, 125]
 _VOICE_HOOKS_LOCK = threading.Lock()
 
 TTS_MODES = {
-    "Voce e suoni": "full",              # Chime + voice always
-    "Voce solo al termine": "semi-silent", # Chime always, voice only on Stop
-    "Solo suoni": "silent",           # Chime only, no voice
+    N_("Voce e suoni"): "full",              # Chime + voice always
+    N_("Voce solo al termine"): "semi-silent", # Chime always, voice only on Stop
+    N_("Solo suoni"): "silent",           # Chime only, no voice
 }
 
 WHISPER_LANGUAGES = {
-    "Rilevamento automatico": None,
-    "Italiano": "it",
-    "English": "en",
-    "Portugues": "pt",
-    "Espanol": "es",
-    "Francais": "fr",
-    "Deutsch": "de",
-    "Japanese": "ja",
+    N_("Rilevamento automatico"): None,
+    N_("Italiano"): "it",
+    N_("English"): "en",
+    N_("Portugues"): "pt",
+    N_("Espanol"): "es",
+    N_("Francais"): "fr",
+    N_("Deutsch"): "de",
+    N_("Japanese"): "ja",
 }
 
 # === MENU EMOJI ===
@@ -151,8 +153,8 @@ REPO_URL = "https://github.com/fra-itc/parlaconclaudio"
 
 # STT mode labels for menu display
 STT_MODES = {
-    "auto": "Automatico (consigliato)",
-    "local": "GPU locale (NVIDIA CUDA)",
+    "auto": N_("Automatico (consigliato)"),
+    "local": N_("GPU locale (NVIDIA CUDA)"),
     "cloud_groq": "Cloud: Groq",
     "cloud_deepgram": "Cloud: Deepgram",
 }
@@ -506,6 +508,12 @@ class TrayIcon:
         is_busy=None,
         dictation_trigger=None,
     ):
+        # Interface language and theme first: every surface built from here on uses them.
+        # Never chosen = Italian, as before the setting existed ("system" is an explicit choice).
+        config = _load_config()
+        i18n.set_language(config.get("ui_language", i18n.SOURCE))
+        from . import fluent
+        fluent.set_theme(config.get("ui_theme", "system"))
         self._on_toggle_recording = on_toggle_recording
         self._dictation_trigger = dictation_trigger
         self._on_unload_vram = on_unload_vram
@@ -558,7 +566,7 @@ class TrayIcon:
     def _make_set_mic(self, device_id: int):
         def handler(icon, item):
             if self._on_mic_changed and self._on_mic_changed(device_id) is False:
-                self._notify("Microfono invariato: termina la registrazione prima di cambiarlo.")
+                self._notify(_("Microfono invariato: termina la registrazione prima di cambiarlo."))
                 return
             config = _load_config()
             config["mic_device_id"] = device_id
@@ -588,11 +596,11 @@ class TrayIcon:
 
         # Determine display label for active backend
         _labels = {
-            "whisper_local": "GPU locale",
+            "whisper_local": _("GPU locale"),
             "groq": "Groq",
             "deepgram": "Deepgram",
-            "disabled": "Disabilitato",
-            "not_loaded": "In attesa del primo utilizzo",
+            "disabled": _("Disabilitato"),
+            "not_loaded": _("In attesa del primo utilizzo"),
         }
         active_label = _labels.get(active, active)
 
@@ -608,7 +616,7 @@ class TrayIcon:
         def handler(icon, item):
             if self._on_stt_mode_changed:
                 if self._on_stt_mode_changed(mode) is False:
-                    self._notify("Motore invariato: attendi la fine del lavoro in corso.")
+                    self._notify(_("Motore invariato: attendi la fine del lavoro in corso."))
                     return
             else:
                 # Direct config write if no callback
@@ -619,12 +627,42 @@ class TrayIcon:
         return handler
 
     def _ask_api_key_groq(self, icon, item):
-        self._ask_api_key("groq", "Groq API Key", "Enter your Groq API key:\n(Get one free at console.groq.com)")
+        self._ask_api_key("groq", _("Groq API Key"), _("Enter your Groq API key:\n(Get one free at console.groq.com)"))
 
     def _ask_api_key_deepgram(self, icon, item):
-        self._ask_api_key("deepgram", "Deepgram API Key", "Enter your Deepgram API key:\n(Get $200 free at console.deepgram.com)")
+        self._ask_api_key("deepgram", _("Deepgram API Key"), _("Enter your Deepgram API key:\n(Get $200 free at console.deepgram.com)"))
 
-    def _ask_api_key(self, provider: str, title: str, prompt: str):
+    def _ask_api_key_openrouter(self, icon, item, on_done=None):
+        self._ask_api_key("openrouter", _("Chiave API OpenRouter"),
+                          _("Incolla la chiave API di OpenRouter:\n(la crei su openrouter.ai/keys)"), on_done)
+
+    def _open_openrouter_console(self, icon, item):
+        import webbrowser
+        webbrowser.open("https://openrouter.ai/keys")
+
+    def _set_text_cleanup(self, enabled: bool) -> None:
+        """LLM correction of the transcript (OpenRouter); read at every dictation."""
+        config = _load_config()
+        config["enable_stt_cleanup"] = bool(enabled)
+        _save_config(config)
+        logger.info(f"STT cleanup set to: {enabled}")
+
+    def _set_ui_theme(self, choice: str) -> None:
+        from . import fluent
+        fluent.set_theme(choice)
+        config = _load_config()
+        config["ui_theme"] = fluent.theme()
+        _save_config(config)
+        logger.info(f"Interface theme set to: {fluent.theme()}")
+
+    def _set_ui_language(self, setting: str) -> None:
+        shown = i18n.set_language(setting)
+        config = _load_config()
+        config["ui_language"] = setting if setting in i18n.LANGUAGES else i18n.SYSTEM
+        _save_config(config)
+        logger.info(f"Interface language set to: {config['ui_language']} (showing {shown})")
+
+    def _ask_api_key(self, provider: str, title: str, prompt: str, on_done=None):
         def _run():
             try:
                 import tkinter as tk
@@ -638,6 +676,8 @@ class TrayIcon:
                     from ..core.stt_engine.key_manager import KeyManager
                     store = KeyManager.set_key(provider, key.strip())
                     logger.info(f"{provider} API key saved ({store})")
+                    if on_done:
+                        on_done()
             except Exception as e:
                 logger.error(f"API key dialog failed: {e}")
         threading.Thread(target=_run, daemon=True).start()
@@ -658,13 +698,13 @@ class TrayIcon:
                         headers={"Authorization": f"Bearer {groq_key}", "User-Agent": "parlaconclaudio/1.0"},
                     )
                     with urllib.request.urlopen(req, timeout=5):
-                        results.append("Groq: ✓ Connected")
+                        results.append(_("Groq: ✓ Connected"))
                 except urllib.error.HTTPError as e:
-                    results.append(f"Groq: ✗ HTTP {e.code}")
+                    results.append(_("Groq: ✗ HTTP {code}").format(code=e.code))
                 except Exception as e:
-                    results.append(f"Groq: ✗ {e}")
+                    results.append(_("Groq: ✗ {error}").format(error=e))
             else:
-                results.append("Groq: no key")
+                results.append(_("Groq: no key"))
 
             deepgram_key = KeyManager.get_key("deepgram")
             if deepgram_key:
@@ -674,13 +714,13 @@ class TrayIcon:
                         headers={"Authorization": f"Token {deepgram_key}", "User-Agent": "parlaconclaudio/1.0"},
                     )
                     with urllib.request.urlopen(req, timeout=5):
-                        results.append("Deepgram: ✓ Connected")
+                        results.append(_("Deepgram: ✓ Connected"))
                 except urllib.error.HTTPError as e:
-                    results.append(f"Deepgram: ✗ HTTP {e.code}")
+                    results.append(_("Deepgram: ✗ HTTP {code}").format(code=e.code))
                 except Exception as e:
-                    results.append(f"Deepgram: ✗ {e}")
+                    results.append(_("Deepgram: ✗ {error}").format(error=e))
             else:
-                results.append("Deepgram: no key")
+                results.append(_("Deepgram: no key"))
 
             msg = "\n".join(results)
             logger.info(f"Cloud connection test:\n{msg}")
@@ -691,7 +731,7 @@ class TrayIcon:
                 root = tk.Tk()
                 root.withdraw()
                 root.attributes("-topmost", True)
-                messagebox.showinfo("STT Cloud Connection Test", msg, parent=root)
+                messagebox.showinfo(_("STT Cloud Connection Test"), msg, parent=root)
                 root.destroy()
             except Exception:
                 pass
@@ -799,7 +839,7 @@ class TrayIcon:
         """Balloon notification; logged too, so a failure is never silent."""
         if self._icon:
             try:
-                self._icon.notify(message, "parlaconclaudio")
+                self._icon.notify(message, APP_NAME)
             except Exception as e:
                 logger.debug(f"tray notify failed: {e}")
 
@@ -846,7 +886,7 @@ class TrayIcon:
         self._icon = FlyoutIcon(
             "voice_bridge",
             initial_img,
-            "parlaconclaudio - Pronto",
+            _("{app} - Pronto").format(app=APP_NAME),
             on_quick_controls=self._open_flyout,
             on_open_panel=self._open_panel,
         )
@@ -905,13 +945,13 @@ class TrayIcon:
         if not self._icon:
             return
         title_map = {
-            "loading": "parlaconclaudio - Caricamento motore…",
-            "idle": "parlaconclaudio - Pronto",
-            "recording": "parlaconclaudio - Registrazione…",
-            "transcribing": "parlaconclaudio - Trascrizione…",
+            "loading": _("{app} - Caricamento motore…").format(app=APP_NAME),
+            "idle": _("{app} - Pronto").format(app=APP_NAME),
+            "recording": _("{app} - Registrazione…").format(app=APP_NAME),
+            "transcribing": _("{app} - Trascrizione…").format(app=APP_NAME),
         }
         self._animator.set_state(state)
-        self._icon.title = title_map.get(state, f"parlaconclaudio - {state}")
+        self._icon.title = title_map.get(state, f"{APP_NAME} - {state}")
 
     def _open_repo(self, icon, item):
         """Open the GitHub repo in the default browser."""
@@ -942,10 +982,10 @@ class TrayIcon:
             logger.warning("Transcribe-files: no transcriber available")
             return
         if self._is_busy and self._is_busy():
-            self._notify("Termina la dettatura prima di trascrivere un file.")
+            self._notify(_("Termina la dettatura prima di trascrivere un file."))
             return
         if not self._batch_lock.acquire(blocking=False):
-            self._notify("Una trascrizione file è già aperta o in corso.")
+            self._notify(_("Una trascrizione file è già aperta o in corso."))
             return
         def run():
             try:
@@ -970,10 +1010,10 @@ class TrayIcon:
             root.attributes("-topmost", True)
             patterns = " ".join(f"*{e}" for e in SUPPORTED_EXTENSIONS)
             picked = filedialog.askopenfilenames(
-                title="Seleziona file audio da trascrivere",
+                title=_("Seleziona file audio da trascrivere"),
                 filetypes=[
-                    ("Audio files", patterns),
-                    ("All files", "*.*"),
+                    (_("Audio files"), patterns),
+                    (_("All files"), "*.*"),
                 ],
                 parent=root,
             )
@@ -997,7 +1037,7 @@ class TrayIcon:
 
         def on_progress(idx: int, total: int, p):
             if self._icon:
-                self._icon.title = f"Trascrivendo {idx}/{total}: {p.name[:40]}"
+                self._icon.title = _("Trascrivendo {index}/{total}: {name}").format(index=idx, total=total, name=p.name[:40])
 
         # 3) Run the pipeline
         processor = AudioFileProcessor(self._transcriber)
@@ -1006,7 +1046,7 @@ class TrayIcon:
                 batch = processor.process_files(paths, on_progress=on_progress)
         except Exception as e:
             logger.error(f"Transcribe batch failed: {e}")
-            self._notify("Trascrizione file non riuscita. Verifica il motore e riprova.")
+            self._notify(_("Trascrizione file non riuscita. Verifica il motore e riprova."))
             if self._icon and original_title is not None:
                 self._icon.title = original_title
             return
@@ -1024,15 +1064,15 @@ class TrayIcon:
         saved_total = sum(len(f.saved_files) for f in batch.files)
         dub_total = sum(len(f.dub_files) for f in batch.files)
         summary = (
-            f"Trascrizione: {batch.ok_count}/{batch.total} file, "
-            f"{saved_total} .txt + {dub_total} .mp3 salvati"
+            _("Trascrizione: {ok}/{total} file, {txt} .txt + {mp3} .mp3 salvati").format(
+                ok=batch.ok_count, total=batch.total, txt=saved_total, mp3=dub_total)
         )
         logger.info(summary)
         if self._icon:
             if original_title is not None:
                 self._icon.title = original_title
             try:
-                self._icon.notify(summary, "parlaconclaudio")
+                self._icon.notify(summary, APP_NAME)
             except Exception:
                 pass
 

@@ -1,8 +1,8 @@
-"""What starts dictation: a keyboard combination or a mouse button, toggle or hold.
+"""What starts dictation: a keyboard combination, a mouse button or either, toggle or hold.
 
 Stored in tts_config.json as::
 
-    "dictation_trigger": {"kind": "keys" | "mouse",
+    "dictation_trigger": {"kind": "keys" | "mouse" | "both",
                           "keys": "<ctrl>+<alt>+<space>",
                           "button": "middle" | "x1" | "x2",
                           "mode": "toggle" | "hold"}
@@ -20,23 +20,32 @@ from dataclasses import asdict, dataclass
 from typing import Callable
 
 from .hotkey_listener import HotkeyListener
+from .i18n import N_, _
 
 logger = logging.getLogger(__name__)
 
+KINDS = ("keys", "mouse", "both")
 MOUSE_BUTTONS = {
-    "middle": "Tasto centrale del mouse",
-    "x1": "Tasto laterale Indietro",
-    "x2": "Tasto laterale Avanti",
+    "middle": N_("Tasto centrale del mouse"),
+    "x1": N_("Tasto laterale Indietro"),
+    "x2": N_("Tasto laterale Avanti"),
+}
+# Short forms for narrow surfaces (quick controls keycaps).
+SHORT_MOUSE_BUTTONS = {
+    "middle": N_("Centrale mouse"),
+    "x1": N_("Laterale Indietro"),
+    "x2": N_("Laterale Avanti"),
 }
 MODES = {
-    "toggle": "Premi per avviare e per fermare",
-    "hold": "Tieni premuto mentre parli",
+    "toggle": N_("Premi per avviare e per fermare"),
+    "hold": N_("Tieni premuto mentre parli"),
 }
 MODIFIERS = ("<ctrl>", "<alt>", "<shift>", "<cmd>")
-_KEY_LABELS = {"<ctrl>": "Ctrl", "<alt>": "Alt", "<shift>": "Maiusc", "<cmd>": "Win",
-               "<space>": "Spazio", "<enter>": "Invio", "<esc>": "Esc", "<pause>": "Pausa",
-               "<insert>": "Ins", "<delete>": "Canc", "<page_up>": "Pag su", "<page_down>": "Pag giù",
-               "<print_screen>": "Stamp", "<scroll_lock>": "Bloc scorr", "<backspace>": "Backspace"}
+_KEY_LABELS = {"<ctrl>": "Ctrl", "<alt>": "Alt", "<shift>": N_("Maiusc"), "<cmd>": "Win",
+               "<space>": N_("Spazio"), "<enter>": N_("Invio"), "<esc>": "Esc", "<pause>": N_("Pausa"),
+               "<insert>": N_("Ins"), "<delete>": N_("Canc"), "<page_up>": N_("Pag su"),
+               "<page_down>": N_("Pag giù"), "<print_screen>": N_("Stamp"),
+               "<scroll_lock>": N_("Bloc scorr"), "<backspace>": "Backspace"}
 # Tk and pynput name a few keys differently; every other Tk keysym lowercased is the pynput name.
 _TK_TO_PYNPUT = {"return": "enter", "prior": "page_up", "next": "page_down", "escape": "esc",
                  "print": "print_screen", "win_l": "cmd", "win_r": "cmd"}
@@ -68,30 +77,38 @@ def trigger_from_config(config: dict, default_keys: str = "<ctrl>+<alt>+<space>"
         button=saved.get("button", "middle"),
         mode=saved.get("mode", default_mode),
     )
-    if trigger.kind not in ("keys", "mouse") or trigger.button not in MOUSE_BUTTONS \
+    if trigger.kind not in KINDS or trigger.button not in MOUSE_BUTTONS \
             or trigger.mode not in MODES:
         logger.warning("Invalid dictation_trigger %s, using the default", saved)
         return Trigger(keys=default_keys, mode=default_mode)
     return trigger
 
 
-def key_caps(trigger: Trigger) -> list[str]:
-    """Labels for keycaps: ['Ctrl', 'Alt', 'Spazio'] or ['Tasto centrale del mouse']."""
-    if trigger.kind == "mouse":
-        return [MOUSE_BUTTONS[trigger.button]]
+def combo_caps(keys: str) -> list[str]:
+    """Labels for keycaps: ['Ctrl', 'Alt', 'Spazio']."""
     caps = []
-    for part in trigger.keys.split("+"):
+    for part in keys.split("+"):
         part = part.strip().lower()
         label = _KEY_LABELS.get(part)
         if label is None:
             name = part.strip("<>")
             label = name.upper() if len(name) <= 3 else name.replace("_", " ").capitalize()
-        caps.append(label)
+        caps.append(_(label))
     return caps
 
 
+def key_caps(trigger: Trigger) -> list[str]:
+    """Keycaps of the keyboard part, or the mouse button alone: ['Tasto centrale del mouse']."""
+    if trigger.kind == "mouse":
+        return [_(MOUSE_BUTTONS[trigger.button])]
+    return combo_caps(trigger.keys)
+
+
 def describe(trigger: Trigger) -> str:
-    return " + ".join(key_caps(trigger))
+    keys = " + ".join(key_caps(trigger))
+    if trigger.kind == "both":
+        return _("{keys} oppure {button}").format(keys=keys, button=_(MOUSE_BUTTONS[trigger.button]))
+    return keys
 
 
 def combo_from_tk(modifiers: set[str], keysym: str) -> tuple[str | None, str | None]:
@@ -102,12 +119,12 @@ def combo_from_tk(modifiers: set[str], keysym: str) -> tuple[str | None, str | N
     if len(name) == 1 and name.isalnum():
         key = name
         if not modifiers:
-            return None, "Aggiungi Ctrl, Alt o Maiusc: una lettera da sola scriverebbe nel testo."
+            return None, _("Aggiungi Ctrl, Alt o Maiusc: una lettera da sola scriverebbe nel testo.")
     else:
         key = f"<{_TK_TO_PYNPUT.get(name, name)}>"
         from pynput import keyboard
         if key.strip("<>") not in keyboard.Key.__members__:
-            return None, f"Il tasto {keysym} non si può usare per la dettatura."
+            return None, _("Il tasto {key} non si può usare per la dettatura.").format(key=keysym)
     ordered = [m for m in MODIFIERS if m in modifiers]
     return "+".join(ordered + [key]), None
 
@@ -191,6 +208,66 @@ class MouseButtonListener:
         return self._active
 
 
+class EitherListener:
+    """Keyboard combination or mouse button with one dictation state: either can
+    start it and either can stop it. Both listeners report raw press/release;
+    toggle and hold are decided here, so a start from the mouse is stopped by the
+    keys without the two disagreeing."""
+
+    def __init__(self, keys: str, button: str, on_press: Callable[[], None],
+                 on_release: Callable[[], None], mode: str = "toggle"):
+        self._on_press = on_press
+        self._on_release = on_release
+        self._mode = mode
+        self._lock = threading.Lock()
+        self._active = False
+        self._last_toggle = 0.0
+        self._debounce = 0.3
+        press, release = (lambda: self.handle(True)), (lambda: self.handle(False))
+        self._keys = HotkeyListener(hotkey_str=keys, on_press=press, on_release=release,
+                                    mode="push_to_talk")
+        self._mouse = MouseButtonListener(button, press, release, mode="hold")
+
+    def handle(self, pressed: bool) -> None:
+        with self._lock:
+            if self._mode == "toggle":
+                if not pressed:
+                    return
+                now = time.monotonic()
+                if now - self._last_toggle < self._debounce:
+                    return
+                self._last_toggle = now
+                self._active = not self._active
+                callback = self._on_press if self._active else self._on_release
+            elif pressed and not self._active:
+                self._active = True
+                callback = self._on_press
+            elif not pressed and self._active:
+                self._active = False
+                callback = self._on_release
+            else:
+                return
+        callback()
+
+    def start(self) -> None:
+        self._keys.start()
+        self._mouse.start()
+
+    def stop(self) -> None:
+        self._keys.stop()
+        self._mouse.stop()
+
+    def reset_toggle(self) -> None:
+        with self._lock:
+            self._active = False
+        self._keys.reset_toggle()
+        self._mouse.reset_toggle()
+
+    @property
+    def is_active(self) -> bool:
+        return self._active
+
+
 class DictationTrigger:
     """The bridge's dictation listener, reconfigurable live from the app window."""
 
@@ -207,6 +284,8 @@ class DictationTrigger:
         press, release = (lambda: self._fire("press")), (lambda: self._fire("release"))
         if trigger.kind == "mouse":
             return MouseButtonListener(trigger.button, press, release, trigger.mode)
+        if trigger.kind == "both":
+            return EitherListener(trigger.keys, trigger.button, press, release, trigger.mode)
         mode = "toggle" if trigger.mode == "toggle" else "push_to_talk"
         return HotkeyListener(hotkey_str=trigger.keys, on_press=press, on_release=release, mode=mode)
 
