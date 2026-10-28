@@ -332,7 +332,7 @@ class ControlPanel:
     def _combo(self, parent, values, current, on_select, width=30):
         import tkinter as tk
         from tkinter import ttk
-        variable = tk.StringVar(value=current)
+        variable = tk.StringVar(master=parent, value=current)
         box = ttk.Combobox(parent, textvariable=variable, values=list(values), state="readonly",
                            font=(self.font, 9), style="Card.TCombobox", width=width)
         box.pack(side="right")

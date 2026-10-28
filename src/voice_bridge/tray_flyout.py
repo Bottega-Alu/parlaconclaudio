@@ -228,7 +228,7 @@ class TrayFlyout:
         self.status_dot = tk.Canvas(status, width=self._p(10), height=self._p(10),
                                     bg=c["surface"], highlightthickness=0)
         self.status_dot.pack(side="left", padx=(0, self._p(7)))
-        self.state = tk.StringVar(value=STATE_LABELS["idle"])
+        self.state = tk.StringVar(master=status, value=STATE_LABELS["idle"])
         tk.Label(status, textvariable=self.state, font=(self.font, 9), fg=c["muted"],
                  bg=c["surface"], anchor="w").pack(side="left")
 
@@ -258,7 +258,7 @@ class TrayFlyout:
         self.volume_icon = self._icon_button(volume, "mute" if self._muted else "speaker",
                                              "Attiva o disattiva l'audio", self._mute)
         self.volume_icon.pack(side="left")
-        self.volume_text = tk.StringVar(value=f"{self.volume}%")
+        self.volume_text = tk.StringVar(master=volume, value=f"{self.volume}%")
         tk.Label(volume, textvariable=self.volume_text, width=5, font=(self.font, 9),
                  bg=c["surface"], fg=c["muted"], anchor="e").pack(side="right")
         self.slider = fluent.Slider(volume, c, self.scale, self.volume, self._save_volume,
@@ -269,21 +269,21 @@ class TrayFlyout:
         voices.pack(fill="x")
         # Same widget as the mute button so both sliders start at the same x.
         self._icon_button(voices, "chat", "Volume delle voci", lambda: None).pack(side="left")
-        self.voice_text = tk.StringVar(value=f"{self.voice_volume}%")
+        self.voice_text = tk.StringVar(master=voices, value=f"{self.voice_volume}%")
         tk.Label(voices, textvariable=self.voice_text, width=5, font=(self.font, 9),
                  bg=c["surface"], fg=c["muted"], anchor="e").pack(side="right")
         self.voice_slider = fluent.Slider(voices, c, self.scale, self.voice_volume,
                                           self._save_voice_volume, maximum=MAX_VOLUME)
         self.voice_slider.listeners.append(lambda value: self.voice_text.set(f"{value}%"))
         self.voice_slider.canvas.pack(side="left", fill="x", expand=True, padx=(self._p(4), 0))
-        self.engine = tk.StringVar()
+        self.engine = tk.StringVar(master=body)
         tk.Label(body, textvariable=self.engine, font=(self.font, 8), fg=c["subtle"],
                  bg=c["surface"], anchor="w").pack(fill="x", pady=(self._p(6), 0))
 
         footer = tk.Frame(self.page, bg=c["footer"], padx=self._p(PAD - 4), pady=self._p(8))
         footer.pack(fill="x", side="bottom")
         tk.Frame(self.page, bg=c["line"], height=1).pack(fill="x", side="bottom")
-        self.hint = tk.StringVar()
+        self.hint = tk.StringVar(master=footer)
         self.keys = tk.Frame(footer, bg=c["footer"])
         self.keys.pack(side="left", padx=(self._p(4), 0))
         self.hint_label = tk.Label(footer, textvariable=self.hint, font=(self.font, 9),

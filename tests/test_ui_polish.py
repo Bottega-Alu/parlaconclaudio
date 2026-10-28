@@ -233,3 +233,45 @@ def test_volume_range_is_0_to_125_and_clamps_old_configs():
     assert tray_icon.voice_volume({"volume": 200}) == 125
     assert tray_icon.voice_volume({"volume": 40, "voice_volume": 12}) == 12
     assert tray_icon.sound_volume({}) == tray_icon.DEFAULT_VOLUME == 100
+
+
+def test_controls_show_their_value_when_another_tk_root_exists_first(monkeypatch):
+    """The quick controls and the app window are two Tk roots: a Tk variable
+    without a master lands in the first one, and a widget of the other shows
+    nothing (empty drop-downs in the app window)."""
+    import tkinter as tk
+    from tkinter import ttk
+    from src.voice_bridge import control_panel, fluent, autostart
+    from src.core import voice_hooks
+    monkeypatch.setattr(fluent, "dark_mode", lambda surface="apps": True)
+    monkeypatch.setattr(tray_icon, "_load_config",
+                        lambda: {"volume": 40, "voice_volume": 60, "tts_mode": "full", "sound_pack": "r2d2"})
+    monkeypatch.setattr(voice_hooks, "status", lambda agent: False)
+    monkeypatch.setattr(autostart, "is_enabled", lambda *a, **k: False)
+
+    def walk(widget):
+        for child in widget.winfo_children():
+            yield child
+            yield from walk(child)
+
+    with native_menu_dpi():
+        first = tk.Tk()
+        first.withdraw()
+        panel = control_panel.ControlPanel(tray_icon.TrayIcon())
+        panel._build()
+        try:
+            panel._go("alerts")
+            boxes = [w for w in walk(panel.body) if isinstance(w, ttk.Combobox)]
+            assert boxes and all(box.get() for box in boxes)
+        finally:
+            panel.root.destroy()
+
+        flyout = TrayFlyout(tray_icon.TrayIcon())
+        flyout._build()
+        try:
+            flyout._show()
+            assert flyout.volume_text.get() == "40%" and flyout.voice_text.get() == "60%"
+            assert flyout.state.get()
+        finally:
+            flyout.root.destroy()
+            first.destroy()
