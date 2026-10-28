@@ -26,6 +26,15 @@ def _never_truncate_live_log(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _never_touch_the_real_config(monkeypatch, tmp_path):
+    """Tests read and write a throwaway tts_config.json, never the user's settings."""
+    from src.voice_bridge import audio_file_processor, transcriber, tray_icon
+    for module in (tray_icon, transcriber, audio_file_processor):
+        monkeypatch.setattr(module, "TTS_CONFIG", tmp_path / "tts_config.json")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _italian_interface_default_theme():
     """Tests assert Italian labels: never the language or theme of the machine running them."""
     from src.voice_bridge import fluent, i18n

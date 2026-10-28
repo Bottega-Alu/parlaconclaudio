@@ -156,14 +156,22 @@ class TrayFlyout:
         and colours in place.
         """
         import tkinter as tk
-        for child in self.root.winfo_children():
-            child.destroy()
+        # The curtain covers this very rebuild (theme/language tiles): keep it.
+        old = [child for child in self.root.winfo_children() if child is not self._curtain.top]
+        for child in old:
+            child.place_forget()
+        # Destroying ~300 native windows takes ~150 ms and shows nothing: after the curtain lifts.
+        self._curtain.after_lift(lambda: [child.destroy() for child in old])
+        # Behind a curtain only the page on screen is laid out now (each one costs ~50-100 ms
+        # of painting); the others are placed when first raised, behind the curtain too.
+        visible_only = self._curtain.active
         self._tile_images = {}
         self._pages, self._lists = {}, {}
         self.list_canvas, self.rows = None, []
         for page in ("main",) + ("packs", "voice", "mic", "engine"):
             frame = tk.Frame(self.root, bg=self.colors["surface"])
-            frame.place(x=0, y=0, relwidth=1, relheight=1)
+            if not visible_only or page == self._page:
+                frame.place(x=0, y=0, relwidth=1, relheight=1)
             self.page = frame
             if page == "main":
                 self._main_page()
@@ -180,6 +188,8 @@ class TrayFlyout:
     def _raise_page(self, page):
         self._page = page
         self.page = self._pages[page]
+        if not self.page.winfo_manager():  # left unplaced by a rebuild behind the curtain
+            self.page.place(x=0, y=0, relwidth=1, relheight=1)
         self.page.tkraise()
         self.list_canvas, self.rows = self._lists.get(page, (None, []))
 

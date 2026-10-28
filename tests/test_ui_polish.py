@@ -275,3 +275,47 @@ def test_controls_show_their_value_when_another_tk_root_exists_first(monkeypatch
         finally:
             flyout.root.destroy()
             first.destroy()
+
+
+def test_theme_and_language_tiles_repaint_behind_a_curtain_that_survives(monkeypatch):
+    """The tiles rebuild every page; the curtain must cover that rebuild and outlive it.
+
+    The picture is synthetic (no screen grab in tests): this checks the curtain's
+    lifecycle, not what reaches the screen; flicker_probe measures that.
+    """
+    from PIL import Image
+    config = {"volume": 100, "sound_pack": "random", "ui_language": "it", "ui_theme": "light"}
+    monkeypatch.setattr(tray_icon, "_load_config", lambda: dict(config))
+    monkeypatch.setattr(tray_icon, "_save_config", lambda value: (config.clear(), config.update(value)))
+    monkeypatch.setattr(flyout_window, "_grab", lambda x, y, w, h: Image.new("RGB", (w, h), "#304050"))
+    tray = tray_icon.TrayIcon()
+    with native_menu_dpi():
+        flyout = TrayFlyout(tray)
+        flyout._build()
+        try:
+            flyout._show()
+            for action in (flyout._next_theme, flyout._next_language):
+                flyout._curtain._drop()  # the curtain exists before the rebuild
+                top = flyout._curtain.top
+                destroyed = []
+                top.bind("<Destroy>", lambda event: destroyed.append(event.widget), add="+")
+                covered = []
+                real_update = flyout._update_main
+                def update_main():
+                    covered.append(flyout._curtain.active and top.winfo_exists() and top.winfo_ismapped())
+                    real_update()
+                flyout._update_main = update_main
+                flyout._curtain.top.withdraw()
+                old_page = flyout._pages["main"]
+                action()
+                flyout._update_main = real_update
+                assert covered == [True]  # rebuilt pages were hidden behind the curtain
+                assert destroyed == [] and top.winfo_exists()
+                assert flyout._curtain.top is top and not top.winfo_ismapped()
+                assert not old_page.winfo_exists()  # old pages go once the curtain is lifted
+                assert flyout._pages["packs"].winfo_manager() == ""  # laid out when first opened
+            assert config["ui_theme"] != "light" and config["ui_language"] != "it"
+            flyout._open_page("packs")
+            assert flyout._pages["packs"].winfo_manager() == "place" and flyout._page == "packs"
+        finally:
+            flyout.root.destroy()  # conftest restores the Italian interface and system theme

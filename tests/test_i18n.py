@@ -43,6 +43,9 @@ def test_language_decision_tree(monkeypatch):
     monkeypatch.setattr(i18n, "windows_language", lambda: "pt-BR")
     assert i18n.resolve("en") == "en"
     assert i18n.resolve("system") == "pt-BR"
+    # Unknown or empty is "never chose": Italian, as the announcements hook decides.
+    assert i18n.resolve("xx") == "it"
+    assert i18n.resolve(None) == "it"
     monkeypatch.setattr(i18n, "windows_language", lambda: None)
     assert i18n.resolve("system") == "it"
     assert i18n.resolve("xx") == "it"

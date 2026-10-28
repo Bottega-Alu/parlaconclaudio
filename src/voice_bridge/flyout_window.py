@@ -69,6 +69,14 @@ class Curtain:
         self.label = None
         self.image = None
         self.active = False
+        self._after_lift = []
+
+    def after_lift(self, action):
+        """Run slow work that changes nothing visible once the curtain is lifted (now, if none is down)."""
+        if self.active:
+            self._after_lift.append(action)
+        else:
+            action()
 
     @contextmanager
     def held(self):
@@ -91,6 +99,9 @@ class Curtain:
             finally:
                 self.active = False
                 self.top.withdraw()
+                pending, self._after_lift = self._after_lift, []
+                for action in pending:
+                    action()
                 if focus is not None:
                     # Showing the curtain activated it: give the keyboard back.
                     self.root.focus_force()
@@ -123,8 +134,23 @@ class Curtain:
         except (AttributeError, OSError):
             pass
         self.top.update()
+        try:
+            # Tk may still owe part of the picture (black band, or the previous picture):
+            # paint it all now and let the desktop take it while still transparent.
+            user = _user32()
+            user.RedrawWindow.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.HANDLE, wintypes.UINT]
+            user.RedrawWindow(window_handle(self.top), None, None, 0x0001 | 0x0080 | 0x0100)  # INVALIDATE|ALLCHILDREN|UPDATENOW
+            ctypes.WinDLL("dwmapi").DwmFlush()
+        except (AttributeError, OSError):
+            pass
         self.top.attributes("-alpha", 1.0)
         self.top.update_idletasks()
+        try:
+            # The desktop shows the curtain only at its next composition; wait for it,
+            # or the change behind starts painting before it is covered.
+            ctypes.WinDLL("dwmapi").DwmFlush()
+        except (AttributeError, OSError):
+            pass
 
 
 def window_dpi(root):
