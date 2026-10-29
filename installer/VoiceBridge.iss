@@ -1,6 +1,6 @@
 ; VoiceBridge installer - Inno Setup 6
 ;
-; Ships ONLY the app payload (~20 MB). Python, the venv, every dependency and the
+; Ships ONLY the app payload, the pinned uv and the dependency locks (~38 MB). Python, the venv, every dependency and the
 ; Whisper model are fetched on the target host by vb_bootstrap.exe, which picks a
 ; GPU or CPU profile from what the machine actually has. That keeps one installer
 ; valid for an RTX box and a GPU-less laptop alike.
@@ -9,7 +9,7 @@
 ; Output: installer\Output\parlaconclaudio-voice-bridge-Setup-<version>.exe
 
 #define AppName        "parlaconclaudio - voice-bridge"
-#define AppVersion     "1.0.19"
+#define AppVersion     "1.0.20"
 #define AppPublisher   "Frisco"
 #define AppExeName     "VoiceBridge.exe"
 #define BootstrapExe   "vb_bootstrap.exe"
@@ -23,7 +23,7 @@ AppName={#AppName}
 UninstallDisplayName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-VersionInfoVersion=1.0.19.0
+VersionInfoVersion=1.0.20.0
 
 ; Per-user install: no UAC prompt, and - crucially - the venv created after the
 ; install stays writable, so repair and upgrade never need elevation.
@@ -68,7 +68,7 @@ Source: "..\sounds\r2d2\*";  DestDir: "{app}\sounds\r2d2"; Flags: ignoreversion
 Source: "..\assets\*";       DestDir: "{app}\assets";  Flags: ignoreversion
 Source: "..\README.md";      DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE";        DestDir: "{app}"; Flags: ignoreversion
-Source: "..\docs\releases\1.0.19.md"; DestDir: "{app}\docs\releases"; Flags: ignoreversion
+Source: "..\docs\releases\1.0.20.md"; DestDir: "{app}\docs\releases"; Flags: ignoreversion
 ; Required: the pinned uv (scripts\build_exe.ps1 fetches it into installer\bin\ and
 ; checks its SHA-256). The bootstrapper never downloads uv, so ISCC must fail
 ; without it rather than produce an installer that cannot build the runtime.
@@ -125,8 +125,8 @@ Type: files;          Name: "{localappdata}\ParlaConClaudio\history.jsonl"
 Type: dirifempty;     Name: "{localappdata}\ParlaConClaudio"
 
 [Messages]
-en.WelcomeLabel2=Dictate into the active application: press Ctrl+Alt+Space to start, then press it again to transcribe and paste.%n%nOpen the control panel from the tray icon to check status, microphone and engine. Use a supported NVIDIA GPU for local dictation or configure a cloud provider.%n%nOptional voice hooks announce when Claude Code or Codex finishes or needs your attention. Choose each integration separately on the next pages.%n%nNew in 1.0.19: voice announcements speak the interface language; Theme and Language tiles switch faster and without flicker. Since 1.0.18: interface in Italian, English or Brazilian Portuguese, light/dark theme choice, dictation history on the Home page, keys and/or mouse button to dictate, your own OpenRouter key for text correction. Since 1.0.17: the volume sliders change the voice already speaking. Since 1.0.16: quick controls and app window switch pages without flicker. Since 1.0.15: light/dark theme follows Windows while the app runs. Since 1.0.14: Settings-style app window (right click on the tray icon), your choice of dictation key combination or mouse button, clipboard-only option and separate voice volume. Close any running version before upgrading. This installer updates the normal application; TEST installations stay separate.
-it.WelcomeLabel2=Detta nell'applicazione attiva: premi Ctrl+Alt+Spazio per iniziare, poi di nuovo per trascrivere e incollare.%n%nApri il pannello dall'icona nella tray per controllare stato, microfono e motore. Usa una GPU NVIDIA compatibile per dettare in locale oppure configura un provider cloud.%n%nGli hook vocali opzionali avvisano quando Claude Code o Codex termina o richiede attenzione. Puoi scegliere separatamente i due collegamenti nelle prossime pagine.%n%nNovita' 1.0.19: gli annunci vocali parlano la lingua dell'interfaccia; i riquadri Tema e Lingua cambiano piu' in fretta e senza sfarfallio. Dalla 1.0.18: interfaccia in italiano, inglese o portoghese brasiliano, scelta del tema chiaro/scuro, storico delle dettature nella Home, tasti e/o tasto del mouse per dettare, la tua chiave OpenRouter per la correzione del testo. Dalla 1.0.17: gli slider del volume cambiano anche la voce che sta parlando. Dalla 1.0.16: comandi rapidi e finestra cambiano pagina senza sfarfallio. Dalla 1.0.15: tema chiaro/scuro che segue Windows anche con l'app aperta. Dalla 1.0.14: finestra in stile Impostazioni (clic destro sull'icona), combinazione di tasti o tasto del mouse a scelta per dettare, opzione solo appunti e volume voci separato. Chiudi ogni versione in esecuzione prima di aggiornare. Il setup aggiorna l'app normale; le installazioni TEST restano separate.
+en.WelcomeLabel2=Dictate into the active application: press Ctrl+Alt+Space to start, then press it again to transcribe and paste.%n%nOpen the control panel from the tray icon to check status, microphone and engine. Dictation works on any PC: local Whisper on an NVIDIA GPU, on the processor without one, or a cloud provider.%n%nOptional voice hooks announce when Claude Code or Codex finishes or needs your attention. Choose each integration separately on the next pages.%n%nNew in 1.0.20: dictation without an NVIDIA GPU, faster text correction, API keys in Windows Credential Manager, dictated text kept out of clipboard history, extra sound packs as add-ons downloaded on demand. Since 1.0.19: voice announcements speak the interface language; Theme and Language tiles switch faster and without flicker. Since 1.0.18: interface in Italian, English or Brazilian Portuguese, light/dark theme choice, dictation history on the Home page, keys and/or mouse button to dictate, your own OpenRouter key for text correction. Since 1.0.17: the volume sliders change the voice already speaking. Since 1.0.16: quick controls and app window switch pages without flicker. Since 1.0.15: light/dark theme follows Windows while the app runs. Since 1.0.14: Settings-style app window (right click on the tray icon), your choice of dictation key combination or mouse button, clipboard-only option and separate voice volume. Close any running version before upgrading. This installer updates the normal application; TEST installations stay separate.
+it.WelcomeLabel2=Detta nell'applicazione attiva: premi Ctrl+Alt+Spazio per iniziare, poi di nuovo per trascrivere e incollare.%n%nApri il pannello dall'icona nella tray per controllare stato, microfono e motore. La dettatura funziona su qualsiasi PC: Whisper in locale su GPU NVIDIA, sul processore se manca, oppure un provider cloud.%n%nGli hook vocali opzionali avvisano quando Claude Code o Codex termina o richiede attenzione. Puoi scegliere separatamente i due collegamenti nelle prossime pagine.%n%nNovita' 1.0.20: dettatura anche senza GPU NVIDIA, correzione del testo piu' rapida, chiavi API in Gestione credenziali di Windows, testo dettato fuori dalla cronologia degli appunti, pacchetti suoni aggiuntivi scaricabili a richiesta. Dalla 1.0.19: gli annunci vocali parlano la lingua dell'interfaccia; i riquadri Tema e Lingua cambiano piu' in fretta e senza sfarfallio. Dalla 1.0.18: interfaccia in italiano, inglese o portoghese brasiliano, scelta del tema chiaro/scuro, storico delle dettature nella Home, tasti e/o tasto del mouse per dettare, la tua chiave OpenRouter per la correzione del testo. Dalla 1.0.17: gli slider del volume cambiano anche la voce che sta parlando. Dalla 1.0.16: comandi rapidi e finestra cambiano pagina senza sfarfallio. Dalla 1.0.15: tema chiaro/scuro che segue Windows anche con l'app aperta. Dalla 1.0.14: finestra in stile Impostazioni (clic destro sull'icona), combinazione di tasti o tasto del mouse a scelta per dettare, opzione solo appunti e volume voci separato. Chiudi ogni versione in esecuzione prima di aggiornare. Il setup aggiorna l'app normale; le installazioni TEST restano separate.
 
 [CustomMessages]
 en.StartupGroup=Windows sign-in
