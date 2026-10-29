@@ -130,6 +130,9 @@ def test_setup_prefetches_the_local_model_except_for_cloud(tmp_path, monkeypatch
     payload = tmp_path / "src" / "voice_bridge" / "__main__.py"
     payload.parent.mkdir(parents=True)
     payload.write_text("")
+    (tmp_path / boot.LOCK_DIR).mkdir()
+    for name in boot.LOCK_FILES.values():
+        (tmp_path / boot.LOCK_DIR / name).write_text("")
     gpu = SimpleNamespace(name="test", vram_mb=8000, driver_version="test")
     profile = SimpleNamespace(device="cuda", model="small", compute_type="float16", reason="test")
     commands = []

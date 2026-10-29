@@ -26,7 +26,6 @@ import errno
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -56,7 +55,10 @@ find_hook_commands = voice_hooks.find_hook_commands
 parse_hook_command = voice_hooks.parse_hook_command
 
 PYTHON_VERSION = "3.11"
-UV_INSTALL_URL = "https://astral.sh/uv/install.ps1"
+# uv is ALWAYS shipped in the payload (<root>/bin/uv.exe; build_exe.ps1 fetches a
+# pinned, checksum-verified release). There is no download fallback: running a
+# script piped from the network at install time is neither reproducible nor safe.
+UV_RELATIVE_PATHS = (Path("bin") / "uv.exe", Path("installer") / "bin" / "uv.exe")
 STATE_FILE = "install-state.json"
 LOG_FILE = "bootstrap.log"
 FALLBACK_LOG_FILE = "vb_bootstrap.log"  # in %TEMP%, used when <root> is not writable
@@ -89,6 +91,11 @@ TAIL_CHARS = 4000  # child output kept in memory for classification
 # upgrade over an existing venv only a raised floor makes it fetch the new one.
 EDGE_TTS_MIN = "7.3.1"
 EDGE_TTS_REQ = f"edge-tts>={EDGE_TTS_MIN}"
+# The app venv itself is installed from the hashed lock (below), which pins an
+# exact edge-tts: an exact pin is never "already satisfied" by an older install,
+# so upgrades follow the lock. The floor still drives the lock (it is a BASE_DEPS
+# input, and tests/test_dependency_locks.py checks the pin honours it) and the
+# foreign hook interpreters, which are upgraded with pip and do not use the lock.
 
 # Base runtime: everything that works with or without a GPU.
 BASE_DEPS = [
@@ -114,6 +121,16 @@ GPU_DEPS = [
     "nvidia-cublas-cu12>=12.9",
     "nvidia-cudnn-cu12>=9.20",
 ]
+
+# BASE_DEPS / GPU_DEPS are the human-edited inputs; what actually gets installed
+# is the hashed lock compiled from them (scripts/lock_deps.py, win_amd64 +
+# Python 3.11). Shipped under <root>/installer/ - the same relative path as in a
+# source checkout, so `--root .` from the repo finds them too.
+LOCK_DIR = Path("installer")
+LOCK_FILES = {
+    "base": "requirements-base.lock",  # cpu / cloud profiles
+    "gpu": "requirements-gpu.lock",  # BASE_DEPS + GPU_DEPS
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -227,6 +244,26 @@ HINT_BY_KIND = {
 }
 
 
+class PayloadMissing(RuntimeError):
+    """A file the installer must ship is absent from <root> (uv.exe, a lock).
+
+    Repair cannot fix it: only re-running the installer puts it back, so it maps
+    to EXIT_NO_PAYLOAD (VoiceBridge.iss: "Run this setup again").
+    """
+
+    def __init__(self, what: str, expected: list[Path]) -> None:
+        listed = ", ".join(str(p) for p in expected)
+        super().__init__(f"{what} not found in the installation (looked for: {listed})")
+        self.what = what
+        self.expected = expected
+
+
+PAYLOAD_MISSING_HINT = (
+    "A file the installer ships is missing from the install folder (antivirus "
+    "quarantine, or an incomplete copy). Run the installer again."
+)
+
+
 class CommandFailed(RuntimeError):
     """A child process exited non-zero; carries the tail of its output."""
 
@@ -333,33 +370,36 @@ class Reporter:
 
 
 def find_uv(root: Path, rep: Reporter) -> str:
-    """Prefer the uv shipped next to the installer, else PATH, else fetch it."""
-    bundled = root / "bin" / "uv.exe"
-    if bundled.is_file():
-        rep.info(f"uv: bundled ({bundled})")
-        return str(bundled)
+    """The uv shipped in the payload; never downloaded, never taken from PATH.
 
-    on_path = shutil.which("uv")
-    if on_path:
-        rep.info(f"uv: found on PATH ({on_path})")
-        return on_path
+    Decision tree:
+      <root>/bin/uv.exe            -> installed layout (VoiceBridge.iss [Files])
+      <root>/installer/bin/uv.exe  -> source checkout (`--root .`; build_exe.ps1
+                                      fetches it there)
+      neither                      -> PayloadMissing (exit 2: re-run the installer)
+    A uv on PATH is deliberately ignored: an arbitrary version would make the
+    install depend on the host again.
+    """
+    candidates = [root / rel for rel in UV_RELATIVE_PATHS]
+    for path in candidates:
+        if path.is_file():
+            rep.info(f"uv: bundled ({path})")
+            return str(path)
+    raise PayloadMissing("uv.exe", candidates)
 
-    rep.info("uv: not found, downloading from astral.sh ...")
-    run_streamed(
-        [
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            f"irm {UV_INSTALL_URL} | iex",
-        ],
-        rep,
-    )
-    fetched = shutil.which("uv") or str(Path.home() / ".local" / "bin" / "uv.exe")
-    if not Path(fetched).is_file():
-        raise RuntimeError("uv install completed but uv.exe was not found")
-    return fetched
+
+def find_lock(root: Path, kind: str) -> Path:
+    """The hashed lock for a profile kind: 'gpu' -> GPU lock, anything else -> base."""
+    lock = root / LOCK_DIR / LOCK_FILES["gpu" if kind == "gpu" else "base"]
+    if not lock.is_file():
+        raise PayloadMissing(f"dependency lock {lock.name}", [lock])
+    return lock
+
+
+def build_install_cmd(uv: str, env_python: Path, lock: Path) -> list[str]:
+    """Exact versions, verified bytes: every package (transitive ones too) must be
+    pinned in the lock with a matching sha256, or uv refuses to install it."""
+    return [uv, "pip", "install", "--python", str(env_python), "--require-hashes", "-r", str(lock)]
 
 
 def _load_probe():
@@ -664,11 +704,11 @@ def configure_voice_hooks(root: Path, rep: Reporter, choices: dict[str, bool | N
 #
 # Installing over an existing version runs this bootstrap again. uv >= 0.8
 # refuses `uv venv` on an existing venv ("Use --clear to replace it", exit 2),
-# older uv replaced it silently - and the uv we get is whatever is on PATH or
-# freshly downloaded. Never ask uv: decide here, the same way for every uv.
+# older uv replaced it silently - and the bundled uv changes with each release.
+# Never ask uv: decide here, the same way for every uv.
 #   no venv dir                      -> create
-#   venv python runs                 -> reuse (uv pip install upgrades what the
-#                                       new requirement floors no longer satisfy)
+#   venv python runs                 -> reuse (uv pip install moves every locked
+#                                       package to the exact pinned version)
 #   dir present, python missing/dead -> recreate (rmtree, then create)
 
 VENV_CREATE = "create"
@@ -854,15 +894,18 @@ def setup(args: argparse.Namespace, root: Path, log_path: Path | None) -> int:
             deps = BASE_DEPS + GPU_DEPS if wants_gpu else BASE_DEPS
             kind = "gpu" if wants_gpu else "cpu"
 
-        rep.info(f"profile selected: {kind} ({len(deps)} packages)")
+        rep.info(f"profile selected: {kind} ({len(deps)} requirements)")
         if kind == "gpu":
             rep.info("includes ~1.6 GB of CUDA kernels (cuBLAS + cuDNN)")
+        lock = find_lock(root, kind)
+        rep.info(f"lock: {lock}")
 
         if args.dry_run:
             rep.step("DRY RUN - nothing will be installed")
             for dep in deps:
                 print(f"          - {dep}")
-            print(f"\n          venv    : {venv}")
+            print(f"\n          lock    : {lock}")
+            print(f"          venv    : {venv}")
             print(f"          model   : {profile.model} ({profile.compute_type})")
             return EXIT_OK
 
@@ -882,9 +925,9 @@ def setup(args: argparse.Namespace, root: Path, log_path: Path | None) -> int:
                 shutil.rmtree(venv)
             run_streamed([uv, "venv", str(venv), "--python", PYTHON_VERSION], rep)
 
-        rep.step(f"Installing {len(deps)} packages")
+        rep.step(f"Installing packages from {lock.name} (hash-verified)")
         env_python = venv / "Scripts" / "python.exe"
-        run_streamed([uv, "pip", "install", "--python", str(env_python), *deps], rep)
+        run_streamed(build_install_cmd(uv, env_python, lock), rep)
 
         # Without a usable GPU the app dictates with Whisper small on CPU
         # (transcriber decision tree), so the CPU profile pre-fetches it too.
@@ -927,6 +970,10 @@ def setup(args: argparse.Namespace, root: Path, log_path: Path | None) -> int:
         print(f"  Launch it with {root / 'VoiceBridge.exe'}\n")
         return EXIT_OK
 
+    except PayloadMissing as exc:
+        report_failure(root, log_path, f"{type(exc).__name__}: {exc}", PAYLOAD_MISSING_HINT)
+        rep.info(f"error class: payload -> exit {EXIT_NO_PAYLOAD}")
+        return EXIT_NO_PAYLOAD
     except Exception as exc:
         failure = describe_failure(exc)
         report_failure(root, log_path, failure.reason, failure.hint)
