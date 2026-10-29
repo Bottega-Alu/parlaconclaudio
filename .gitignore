@@ -266,3 +266,12 @@ orkey.md
 # VoiceBridge branding asset: deterministic (scripts/make_icon.py) but versioned
 # so the installer icon cannot drift when the tray renderer changes.
 !assets/voicebridge.ico
+
+# Curated, reviewed screenshots used by the public README.
+!assets/readme/*.png
+
+# Generated installers and the pinned uv fetched by scripts/build_exe.ps1:
+# build outputs, never versioned (CI uploads the setup as an artifact).
+installer/Output/
+installer/bin/
+.work/pyinstaller/

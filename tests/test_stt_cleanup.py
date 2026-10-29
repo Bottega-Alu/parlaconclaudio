@@ -283,6 +283,77 @@ def test_circuit_breaker_opens_after_threshold(monkeypatch):
     assert calls["n"] == before
 
 
+def test_open_breaker_lets_one_call_through_after_the_cooldown(monkeypatch):
+    """A short Wi-Fi drop must not switch the correction off until restart."""
+    monkeypatch.setattr(stt_cleanup.time, "sleep", lambda *a, **k: None)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(stt_cleanup.time, "monotonic", lambda: clock["now"])
+    mode = {"fail": True}
+    calls = {"n": 0}
+
+    def fake_http(url, body, headers, timeout):
+        calls["n"] += 1
+        if mode["fail"]:
+            raise stt_cleanup._HttpError(status=None)
+        return {"choices": [{"message": {"content": "pulito"}, "finish_reason": "stop"}]}
+
+    monkeypatch.setattr(stt_cleanup, "_http_post_json", fake_http)
+    for _ in range(stt_cleanup._CIRCUIT_BREAKER_THRESHOLD):
+        stt_cleanup.cleanup_text("raw", model="qwen", fallback=None, api_key="KEY")
+    before = calls["n"]
+    clock["now"] += stt_cleanup._CIRCUIT_BREAKER_COOLDOWN_S - 1
+    assert stt_cleanup.cleanup_text("raw", model="qwen", fallback=None, api_key="KEY") is None
+    assert calls["n"] == before                      # still open: no network
+    clock["now"] += 2
+    mode["fail"] = False                             # network is back
+    assert stt_cleanup.cleanup_text("raw", model="qwen", fallback=None, api_key="KEY") == "pulito"
+    assert not stt_cleanup._breaker_open()
+
+
+def test_requests_reuse_one_pooled_connection(monkeypatch):
+    """Each dictation used to pay a fresh TLS handshake (~300 ms measured to openrouter.ai)."""
+    import sys
+    import types
+    made = []
+
+    class Response:
+        status_code, headers = 200, {}
+
+        def json(self):
+            return {"ok": True}
+
+    class Session:
+        def __init__(self):
+            made.append(self)
+
+        def post(self, url, data, headers, timeout):
+            return Response()
+
+    fake = types.ModuleType("requests")
+    fake.Session = Session
+    fake.exceptions = types.SimpleNamespace(RequestException=Exception)
+    monkeypatch.setitem(sys.modules, "requests", fake)
+    monkeypatch.setattr(stt_cleanup, "_http_session", None)
+    for _ in range(3):
+        assert stt_cleanup._http_post_json("https://x", b"{}", {}, 1.0) == {"ok": True}
+    assert len(made) == 1
+
+
+def test_bootstrap_installs_requests_for_the_pooled_connection():
+    import importlib.util
+    import sys
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / "installer" / "vb_bootstrap.py"
+    spec = importlib.util.spec_from_file_location("vb_bootstrap_requests", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["vb_bootstrap_requests"] = mod
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        del sys.modules["vb_bootstrap_requests"]
+    assert any(dep.startswith("requests") for dep in mod.BASE_DEPS)
+
+
 def test_success_resets_breaker(monkeypatch):
     monkeypatch.setattr(stt_cleanup.time, "sleep", lambda *a, **k: None)
     mode = {"fail": True}

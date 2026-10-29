@@ -55,6 +55,7 @@ class SttProfile:
     model: str         # faster-whisper model id
     compute_type: str  # "float16" | "int8_float16" | "int8"
     reason: str        # human-readable justification, logged and shown by the installer
+    beam_size: int = 5  # 1 (greedy) on CPU, where each extra beam costs real seconds
 
 
 def _driver_major(driver_version: str) -> int:
@@ -187,12 +188,19 @@ def probe_gpu() -> GpuInfo:
     )
 
 
+def _cpu_profile(reason: str) -> SttProfile:
+    """Whisper small, int8, greedy: on 20 FLEURS it clips (.work/perf-bench/) it runs at
+    0.09x real time on a 16-thread CPU (medium: 0.26x, too slow on a 4-core laptop),
+    with 4.8% of words differing from large-v3 on GPU (medium: 2.8%)."""
+    return SttProfile("cpu", "small", "int8", reason, beam_size=1)
+
+
 def select_profile(gpu: GpuInfo | None = None) -> SttProfile:
     """Pick model + compute type for this host. Explicit tree, no hidden heuristics."""
     gpu = probe_gpu() if gpu is None else gpu
 
     if not gpu.present:
-        return SttProfile("cpu", "medium", "int8", "No NVIDIA GPU detected")
+        return _cpu_profile("No NVIDIA GPU detected")
 
     if not gpu.cuda_usable:
         detail = (
@@ -201,7 +209,7 @@ def select_profile(gpu: GpuInfo | None = None) -> SttProfile:
             if not gpu.confirmed_by_ct2
             else "ctranslate2 could not open the CUDA device"
         )
-        return SttProfile("cpu", "medium", "int8", f"{gpu.name} unusable: {detail}")
+        return _cpu_profile(f"{gpu.name} unusable: {detail}")
 
     if gpu.vram_mb >= VRAM_LARGE_FP16:
         return SttProfile(
@@ -219,9 +227,7 @@ def select_profile(gpu: GpuInfo | None = None) -> SttProfile:
             "cuda", "medium", "int8", f"{gpu.name}, only {gpu.vram_mb} MB VRAM"
         )
 
-    return SttProfile(
-        "cpu", "medium", "int8", f"{gpu.name} has too little VRAM ({gpu.vram_mb} MB)"
-    )
+    return _cpu_profile(f"{gpu.name} has too little VRAM ({gpu.vram_mb} MB)")
 
 
 if __name__ == "__main__":  # python -m src.core.gpu_probe

@@ -71,6 +71,10 @@ class ControlPanel:
         self._autostart = None  # unknown until a worker has asked Windows
         self._history_all = False
         self._history_mtime = None
+        # Sound pack add-ons: catalogue fetched only when the user asks (addons.py).
+        self._addon_catalog = None
+        self._addon_error = None
+        self._addon_busy = set()
 
     def show(self):
         with self._lock:
@@ -468,11 +472,18 @@ class ControlPanel:
         head.pack(fill="x", pady=(self._p(14), self._p(6)))
         tk.Label(head, text=_("Ultime trascrizioni"), font=(self.font, 10, "bold"), fg=c["text"],
                  bg=c["surface"], anchor="w").pack(side="left")
+        keep = history.keep(self.config)
+        self._switch(head, keep, lambda on: self._work(lambda: self.tray._set_keep_history(on)),
+                     _("Salva") if keep else _("Non salvare"))
+        if not keep:
+            self._card("file", _("Storico disattivato"),
+                       _("Le dettature non vengono salvate su questo PC."))
+            return
         if not saved:
             self._card("file", _("Ancora nessuna trascrizione"),
                        _("Quello che detti compare qui, anche se non è stato incollato."))
             return
-        self._button(head, _("Cancella storico"), self._clear_history).pack(side="right")
+        self._button(head, _("Cancella storico"), self._clear_history).pack(side="right", padx=(0, self._p(12)))
         for item in saved if self._history_all else saved[:HISTORY_SHOWN]:
             self._history_row(item)
         if len(saved) > HISTORY_SHOWN:
@@ -764,6 +775,70 @@ class ControlPanel:
         box = self._combo(control, names, current,
                           lambda label: self._work(lambda: self.tray._make_set_sound_pack(names[label])(None, None)),
                           width=24)
+        self._addons_section()
+
+    def _addons_section(self):
+        import tkinter as tk
+        from . import addons
+        c = self.colors
+        auto = bool(self.config.get("addons_auto_update", True))
+        self._switch(self._card("refresh", _("Aggiorna i pacchetti da soli"),
+                                _("Una volta al giorno controlla i pacchetti scaricati e li aggiorna.")),
+                     auto, lambda on: self._work(lambda: self.tray._set_addons_auto_update(on)))
+        if self._addon_catalog is None:
+            control = self._card("cloud", _("Altri pacchetti"), self._addon_error
+                                 or _("Scaricali dalla pagina del progetto su GitHub, quando vuoi."))
+            self._button(control, _("Cerca pacchetti"), lambda: self._work(self._load_addon_catalog)).pack(side="right")
+            return
+        have = addons.installed()
+        bundled = {name for name, count in self.packs}
+        for pack in self._addon_catalog:
+            control = self._card("music", fluent.pretty_pack(pack.name),
+                                 _("{sounds} suoni · {size} MB").format(sounds=pack.sounds,
+                                                                       size=f"{pack.size / 1e6:.1f}"))
+            if pack.name in self._addon_busy:
+                tk.Label(control, text=_("Download…"), font=(self.font, 9), fg=c["muted"],
+                         bg=c["card"]).pack(side="right")
+            elif pack.name in have:
+                self._button(control, _("Rimuovi"), lambda name=pack.name: self._work(
+                    lambda: self._remove_addon(name))).pack(side="right")
+                if have[pack.name] != pack.sha256:
+                    self._button(control, _("Aggiorna"), lambda p=pack: self._work(
+                        lambda: self._install_addon(p)), primary=True).pack(side="right", padx=(0, self._p(8)))
+            elif pack.name in bundled:
+                tk.Label(control, text=_("Incluso"), font=(self.font, 9), fg=c["muted"],
+                         bg=c["card"]).pack(side="right")
+            else:
+                self._button(control, _("Scarica"), lambda p=pack: self._work(
+                    lambda: self._install_addon(p))).pack(side="right")
+
+    def _load_addon_catalog(self):
+        from . import addons
+        try:
+            self._addon_catalog, self._addon_error = addons.fetch_catalog(), None
+        except addons.AddonError as e:
+            logger.warning(f"Sound pack catalogue unavailable: {e}")
+            self._addon_error = _("Catalogo non raggiungibile. Controlla la connessione e riprova.")
+
+    def _install_addon(self, pack):
+        from . import addons
+        self._addon_busy.add(pack.name)
+        self._commands.put("refresh")
+        try:
+            addons.install(pack)
+            self.tray._notify(_("Pacchetto {name} installato.").format(name=fluent.pretty_pack(pack.name)))
+        except addons.AddonError as e:
+            logger.warning(f"Sound pack install failed: {e}")
+            self.tray._notify(_("Download di {name} non riuscito. Riprova più tardi.").format(
+                name=fluent.pretty_pack(pack.name)))
+        finally:
+            self._addon_busy.discard(pack.name)
+
+    def _remove_addon(self, name):
+        from . import addons
+        addons.remove(name)
+        if self.config.get("sound_pack") == name:
+            self.tray._make_set_sound_pack("r2d2")(None, None)
 
     def _all_voices(self, voice_id):
         from .tray_icon import EDGE_VOICES

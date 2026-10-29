@@ -40,11 +40,13 @@ class Transcriber:
 
     def __init__(
         self,
-        model_name: str = "large-v3",
-        device: str = "cuda",
-        compute_type: str = "float16",
+        model_name: str | None = None,
+        device: str | None = None,
+        compute_type: str | None = None,
         language: str | None = None,
     ):
+        # None = follow the hardware (gpu_probe.select_profile): large-v3 fp16 on a big
+        # NVIDIA card, a quantized/smaller model on a small one, Whisper small on CPU.
         self._model_name = model_name
         self._device = device
         self._compute_type = compute_type
@@ -177,23 +179,14 @@ class Transcriber:
             if deepgram_key:
                 logger.info("Auto mode: GPU unavailable, using Deepgram cloud STT")
                 return self._make_deepgram_engine(deepgram_key)
-            logger.warning("Auto mode: no GPU and no cloud API keys — STT disabled")
-            return NullSTTEngine()
+            logger.info("Auto mode: no GPU and no cloud key, using local Whisper on CPU")
+            return self._make_local_engine()
 
         if mode == "local":
-            if gpu_ok:
-                return self._make_local_engine()
-            if self._get_auto_fallback():
-                groq_key = KeyManager.get_key("groq")
-                if groq_key:
-                    logger.info("Local mode: GPU unavailable, auto-fallback to Groq")
-                    return self._make_groq_engine(groq_key)
-                deepgram_key = KeyManager.get_key("deepgram")
-                if deepgram_key:
-                    logger.info("Local mode: GPU unavailable, auto-fallback to Deepgram")
-                    return self._make_deepgram_engine(deepgram_key)
-            logger.warning("Local mode: GPU unavailable and no fallback — STT disabled")
-            return NullSTTEngine()
+            # "Local" means the audio never leaves the PC: without a GPU, Whisper on CPU.
+            if not gpu_ok:
+                logger.info("Local mode: GPU unavailable, using local Whisper on CPU")
+            return self._make_local_engine()
 
         if mode == "cloud_groq":
             groq_key = KeyManager.get_key("groq")
@@ -213,13 +206,20 @@ class Transcriber:
         return NullSTTEngine()
 
     def _make_local_engine(self):
-        from ..core.stt_engine.whisper_rtx import WhisperRTXEngine
-        logger.info(f"Loading local Whisper: {self._model_name} on {self._device}")
-        return WhisperRTXEngine(
-            model_name=self._model_name,
-            device=self._device,
-            compute_type=self._compute_type,
+        from ..core.stt_engine import whisper_rtx
+        from src.core.gpu_probe import select_profile
+        self._detect_gpu()
+        profile = select_profile(self._gpu_info)
+        model = self._model_name or profile.model
+        device = self._device or profile.device
+        compute = self._compute_type or profile.compute_type
+        logger.info(f"Loading local Whisper: {model} on {device} ({compute}) - {profile.reason}")
+        return whisper_rtx.WhisperRTXEngine(
+            model_name=model,
+            device=device,
+            compute_type=compute,
             language=self._language,
+            beam_size=profile.beam_size,
             vad_filter=True,
         )
 
@@ -242,6 +242,21 @@ class Transcriber:
             return
         self._engine = self._resolve_engine()
         logger.info(f"STT engine ready: {self._engine.name}")
+
+    @_serialized
+    def warm_up(self) -> None:
+        """One throwaway inference on 1 s of silence right after loading: the first real
+        dictation otherwise pays CUDA/cuDNN kernel setup (first 16 s clip 1.34 s -> 1.0 s,
+        large-v3 on an RTX 5080, .work/perf-bench/warmup_effect.py). Cloud: nothing to warm."""
+        engine = self._engine
+        if engine is None or not engine.is_local:
+            return
+        import numpy as np
+        try:
+            engine.transcribe(np.zeros(16000, dtype=np.float32), language="en", beam_size=1,
+                              vad_filter=False, word_timestamps=False, without_timestamps=True)
+        except Exception:
+            logger.warning("STT warm-up failed; the first dictation will be slower", exc_info=True)
 
     def active_engine_name(self) -> str:
         """Return the name of the currently loaded engine (or 'not_loaded')."""
@@ -300,7 +315,10 @@ class Transcriber:
     def _transcribe_with(engine, audio, language):
         kwargs = {"language": language}
         if engine.is_local:
-            kwargs.update(beam_size=5, vad_filter=True, word_timestamps=False)
+            # Dictation needs only the text: no timestamp tokens to decode (-15% GPU
+            # time, 0.19% words changed vs prod on 20 FLEURS it clips, .work/perf-bench/).
+            kwargs.update(beam_size=getattr(engine, "beam_size", 5), vad_filter=True,
+                          word_timestamps=False, without_timestamps=True)
         return engine.transcribe(audio, **kwargs)
 
     def _runtime_fallback(self, audio, language) -> str:

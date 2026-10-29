@@ -10,7 +10,9 @@
 # no rebuild here - only launcher/bootstrapper/icon changes do.
 #
 #   .\scripts\build_exe.ps1              # both exes
-#   .\scripts\build_exe.ps1 -Installer   # also compile the .iss (needs Inno Setup 6)
+#   .\scripts\build_exe.ps1 -Installer   # also compile the .iss (needs Inno Setup 6);
+#                                        # first fetches the pinned uv into installer\bin\
+#                                        # (SHA-256 checked) - the installer must ship it
 #   .\scripts\build_exe.ps1 -Installer -Python C:\path\to\venv\Scripts\python.exe
 #                                        # e.g. from a git worktree, which has no venv\
 
@@ -87,6 +89,40 @@ foreach ($exe in @((Join-Path $Root "VoiceBridge.exe"), (Join-Path $Root "instal
 if (-not $Installer) {
     Write-Host "`n(skipping installer; pass -Installer to compile the .iss)" -ForegroundColor DarkGray
     exit 0
+}
+
+Write-Host "`n=== uv (pinned, shipped as {app}\bin\uv.exe)" -ForegroundColor Cyan
+# The bootstrapper has no download fallback: the installer must carry uv. Fetched
+# here from the GitHub release and accepted only if the zip matches the SHA-256
+# below (the value published as uv-x86_64-pc-windows-msvc.zip.sha256). A cached
+# installer\bin\uv.exe is reused only if it is byte-identical to the pinned one.
+# To bump uv: change all three values, then re-run scripts/lock_deps.py.
+$UvVersion   = "0.11.3"
+$UvZipSha256 = "ae681c0aaec7cc96af184648cb88d73f8393ed60fa5880abdd6bdb910f9b227c"
+$UvExeSha256 = "07876908e19cf9a875a01d3b702c89b25ded154cc736079feeb4ef78a8f4ca64"
+$UvBin = Join-Path $Root "installer\bin"
+$UvExe = Join-Path $UvBin "uv.exe"
+
+function Test-PinnedUv {
+    (Test-Path $UvExe) -and ((Get-FileHash $UvExe -Algorithm SHA256).Hash.ToLower() -eq $UvExeSha256)
+}
+
+if (Test-PinnedUv) {
+    Write-Host "OK  $UvExe (uv $UvVersion, cached)" -ForegroundColor Green
+} else {
+    $UvUrl  = "https://github.com/astral-sh/uv/releases/download/$UvVersion/uv-x86_64-pc-windows-msvc.zip"
+    $UvTmp  = Join-Path $Work "uv-$UvVersion"
+    $UvZip  = Join-Path $UvTmp "uv.zip"
+    Remove-Item -Recurse -Force $UvTmp -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $UvTmp, $UvBin | Out-Null
+    Write-Host "downloading $UvUrl"
+    Invoke-WebRequest -Uri $UvUrl -OutFile $UvZip -UseBasicParsing
+    $got = (Get-FileHash $UvZip -Algorithm SHA256).Hash.ToLower()
+    if ($got -ne $UvZipSha256) { throw "uv $UvVersion zip checksum mismatch: expected $UvZipSha256, got $got" }
+    Expand-Archive -Path $UvZip -DestinationPath (Join-Path $UvTmp "x") -Force
+    Copy-Item (Join-Path $UvTmp "x\uv.exe") $UvExe -Force
+    if (-not (Test-PinnedUv)) { throw "extracted uv.exe does not match the pinned SHA-256 $UvExeSha256" }
+    Write-Host "OK  $UvExe (uv $UvVersion, verified)" -ForegroundColor Green
 }
 
 Write-Host "`n=== 3/3  parlaconclaudio-voice-bridge-Setup.exe (Inno Setup)" -ForegroundColor Cyan

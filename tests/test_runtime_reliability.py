@@ -47,6 +47,28 @@ def test_timeout_release_validates_session_inside_transition(bridge):
     assert bridge.state == BridgeState.RECORDING
 
 
+def test_hotkey_press_starts_the_recording_watchdog_for_this_session(bridge, monkeypatch):
+    """Regression: the watchdog launch once sat in _prewarm_cleanup, where `cancel`
+    is undefined (ruff F821): the prewarm thread died with NameError and no
+    watchdog ever ran, so a stuck recording was never auto-stopped."""
+    from src.voice_bridge import bridge as module
+    started = []
+
+    class FakeThread:
+        def __init__(self, target=None, args=(), **kwargs):
+            self.target, self.args = target, args
+
+        def start(self):
+            started.append((self.target, self.args))
+
+    monkeypatch.setattr(module.threading, "Thread", FakeThread)
+    bridge._recorder.start = Mock()
+    bridge._on_hotkey_press()
+    assert bridge.state == module.BridgeState.RECORDING
+    watchdogs = [args for target, args in started if target == bridge._recording_watchdog]
+    assert watchdogs == [(bridge._recording_cancel,)]
+
+
 def test_microphone_failure_recovers_bridge_for_retry(bridge):
     from src.voice_bridge.bridge import BridgeState
     bridge._recorder.start = Mock(side_effect=OSError("disconnected"))

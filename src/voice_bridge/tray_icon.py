@@ -647,6 +647,23 @@ class TrayIcon:
         _save_config(config)
         logger.info(f"STT cleanup set to: {enabled}")
 
+    def _set_addons_auto_update(self, enabled: bool) -> None:
+        """Daily OTA update of downloaded sound packs (addons.update_if_due) on/off."""
+        config = _load_config()
+        config["addons_auto_update"] = bool(enabled)
+        _save_config(config)
+        logger.info(f"Sound pack auto-update set to: {enabled}")
+
+    def _set_keep_history(self, enabled: bool) -> None:
+        """Dictation history on/off; off also erases what was kept."""
+        from . import history
+        config = _load_config()
+        config["keep_history"] = bool(enabled)
+        _save_config(config)
+        if not enabled:
+            history.clear()
+        logger.info(f"Dictation history set to: {enabled}")
+
     def _set_ui_theme(self, choice: str) -> None:
         from . import fluent
         fluent.set_theme(choice)

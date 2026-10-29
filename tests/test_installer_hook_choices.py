@@ -126,10 +126,13 @@ def test_installer_defaults_and_explicit_yes_no_forwarding():
 
 
 @pytest.mark.parametrize("kind", ["cpu", "cloud", "gpu"])
-def test_setup_prefetches_local_model_only_for_supported_gpu_runtime(tmp_path, monkeypatch, kind):
+def test_setup_prefetches_the_local_model_except_for_cloud(tmp_path, monkeypatch, kind):
     payload = tmp_path / "src" / "voice_bridge" / "__main__.py"
     payload.parent.mkdir(parents=True)
     payload.write_text("")
+    (tmp_path / boot.LOCK_DIR).mkdir()
+    for name in boot.LOCK_FILES.values():
+        (tmp_path / boot.LOCK_DIR / name).write_text("")
     gpu = SimpleNamespace(name="test", vram_mb=8000, driver_version="test")
     profile = SimpleNamespace(device="cuda", model="small", compute_type="float16", reason="test")
     commands = []
@@ -140,4 +143,6 @@ def test_setup_prefetches_local_model_only_for_supported_gpu_runtime(tmp_path, m
     args = argparse.Namespace(profile=kind, dry_run=False, skip_model=False, skip_hook=True)
     assert boot.setup(args, tmp_path, None) == boot.EXIT_OK
     prefetch = [cmd for cmd in commands if "-c" in cmd]
-    assert len(prefetch) == (1 if kind == "gpu" else 0)
+    assert len(prefetch) == (0 if kind == "cloud" else 1)
+    if kind == "cpu":  # CPU forced on a GPU host: the CPU model, not the GPU one
+        assert "device='cpu'" in prefetch[0][-1] and "'small'" in prefetch[0][-1]

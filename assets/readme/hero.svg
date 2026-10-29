@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">ParlaConClaudio — Speak your prompts. Hear your agents.</title>
+  <desc id="desc">Voice dictation for Windows and spoken alerts for Claude Code and Codex. Open source, with local GPU and cloud recognition options.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#16191e"/><stop offset="1" stop-color="#25252a"/></linearGradient>
+    <linearGradient id="wave" x2="1"><stop stop-color="#ffb29c"/><stop offset="1" stop-color="#f37d62"/></linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#fff" stroke-opacity=".035"/></pattern>
+  </defs>
+  <rect width="1280" height="640" rx="24" fill="url(#bg)"/>
+  <rect width="1280" height="640" rx="24" fill="url(#grid)"/>
+  <rect x="64" y="62" width="7" height="28" rx="3.5" fill="#f37d62"/>
+  <g font-family="Segoe UI,Arial,sans-serif">
+    <text x="87" y="85" fill="#f7f6f4" font-size="25" font-weight="650">ParlaConClaudio</text>
+    <text x="64" y="202" fill="#fff" font-size="70" font-weight="700" letter-spacing="-2">Speak your prompts.</text>
+    <text x="64" y="285" fill="#ffad97" font-size="70" font-weight="700" letter-spacing="-2">Hear your agents.</text>
+    <text x="67" y="347" fill="#d2d1d4" font-size="25">Voice dictation for Windows.</text>
+    <text x="67" y="385" fill="#d2d1d4" font-size="25">Spoken alerts for Claude Code + Codex.</text>
+    <g fill="#24272c" stroke="#55565d">
+      <rect x="66" y="444" width="76" height="52" rx="9"/>
+      <rect x="173" y="444" width="70" height="52" rx="9"/>
+      <rect x="274" y="444" width="107" height="52" rx="9"/>
+    </g>
+    <g fill="#fff" font-size="21" text-anchor="middle">
+      <text x="104" y="478">Ctrl</text><text x="208" y="478">Alt</text><text x="327" y="478">Space</text>
+    </g>
+    <g fill="#b4b4bd" font-size="23"><text x="151" y="478">+</text><text x="251" y="478">+</text></g>
+    <text x="404" y="478" fill="#c4c2c8" font-size="21">Press. Speak. Keep going.</text>
+    <path d="M66 548H1214" stroke="#fff" stroke-opacity=".14"/>
+    <text x="66" y="589" fill="#bcbac3" font-size="18">Windows 10 / 11</text>
+    <text x="283" y="589" fill="#bcbac3" font-size="18">Local GPU or cloud</text>
+    <text x="531" y="589" fill="#bcbac3" font-size="18">MIT licensed</text>
+    <text x="1214" y="589" fill="#dedbe3" font-size="18" text-anchor="end">github.com/Bottega-Alu/parlaconclaudio</text>
+  </g>
+  <g stroke="url(#wave)" stroke-width="15" stroke-linecap="round" opacity=".96">
+    <path d="M915 201v48 M945 167v116 M975 126v198 M1005 155v140 M1035 192v66 M1065 158v134 M1095 182v86 M1125 205v40"/>
+  </g>
+  <g fill="none" stroke="#f7f6f4" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity=".8">
+    <path d="m974 384-24 22 24 22m64-44 24 22-24 22m-27-53-13 62"/>
+  </g>
+</svg>

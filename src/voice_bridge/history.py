@@ -3,7 +3,8 @@
 One JSON object per line in %LOCALAPPDATA%\\ParlaConClaudio\\history.jsonl:
     {"ts": "2026-10-28T09:12:03", "text": "...", "outcome": "pasted" | "clipboard" | "failed"}
 Only the newest MAX_ENTRIES are kept. Text stays on this PC; the app window
-shows it on the Home page and can clear it.
+shows it on the Home page and can clear it. keep_history=false in tts_config.json
+turns recording off (switching it off also erases what was kept).
 """
 
 import json
@@ -23,6 +24,11 @@ _lock = threading.Lock()
 def history_file() -> Path:
     base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
     return Path(base) / "ParlaConClaudio" / "history.jsonl"
+
+
+def keep(config: dict) -> bool:
+    """Is dictation history on? Default yes."""
+    return bool(config.get("keep_history", True))
 
 
 def entries(path: Path | None = None) -> list[dict]:

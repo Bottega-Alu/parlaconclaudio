@@ -28,9 +28,55 @@ def _never_truncate_live_log(monkeypatch):
 @pytest.fixture(autouse=True)
 def _never_touch_the_real_config(monkeypatch, tmp_path):
     """Tests read and write a throwaway tts_config.json, never the user's settings."""
+    from src.core.stt_engine import key_manager
     from src.voice_bridge import audio_file_processor, transcriber, tray_icon
-    for module in (tray_icon, transcriber, audio_file_processor):
+    for module in (tray_icon, transcriber, audio_file_processor, key_manager):
         monkeypatch.setattr(module, "TTS_CONFIG", tmp_path / "tts_config.json")
+    # Dictation history lives under %LOCALAPPDATA%: a throwaway one, never the user's.
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _never_touch_the_real_clipboard(monkeypatch):
+    """The private clipboard path is unavailable in tests: copies go through pyperclip,
+    which the delivery tests replace (a test that fakes win32clipboard overrides this)."""
+    from src.voice_bridge import output_handler
+
+    def unavailable():
+        raise OSError("clipboard disabled in tests")
+
+    monkeypatch.setattr(output_handler, "_win32clipboard", unavailable)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _no_addon_network(monkeypatch, tmp_path):
+    """Sound pack add-ons: a throwaway sounds folder, and no real download ever."""
+    from src.voice_bridge import addons
+
+    def offline(url, limit):
+        raise OSError("network disabled in tests")
+
+    monkeypatch.setattr(addons, "SOUNDS_DIR", tmp_path / "addon-sounds")
+    monkeypatch.setattr(addons, "STATE_FILE", tmp_path / "addons-state.json")
+    monkeypatch.setattr(addons, "_urlopen_fetch", offline)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _no_network_prewarm(monkeypatch):
+    """Starting a recording opens a connection to OpenRouter: never from tests."""
+    from src.voice_bridge import stt_cleanup
+    monkeypatch.setattr(stt_cleanup, "prewarm", lambda *a, **k: None)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _never_touch_the_real_credential_vault(monkeypatch):
+    """No test reads or writes the Windows Credential Manager: keyring is absent unless a test fakes it."""
+    import sys
+    monkeypatch.setitem(sys.modules, "keyring", None)
     yield
 
 

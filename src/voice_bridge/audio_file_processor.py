@@ -97,19 +97,10 @@ class BatchResult:
 
 
 def _load_groq_key() -> str | None:
-    """Resolve Groq API key: env var first, then tts_config.json."""
-    env_key = os.environ.get("GROQ_API_KEY")
-    if env_key:
-        return env_key.strip()
-    try:
-        if TTS_CONFIG.is_file():
-            cfg = json.loads(TTS_CONFIG.read_text(encoding="utf-8"))
-            key = cfg.get("stt_api_key_groq") or cfg.get("groq_api_key")
-            if key:
-                return str(key).strip()
-    except Exception:
-        pass
-    return None
+    """Resolve Groq API key via the layered KeyManager (env -> keyring -> json)."""
+    from ..core.stt_engine.key_manager import KeyManager
+    key = KeyManager.get_key("groq")
+    return key.strip() if key else None
 
 
 def _groq_translate(text: str, target_lang_name: str, api_key: str) -> str:

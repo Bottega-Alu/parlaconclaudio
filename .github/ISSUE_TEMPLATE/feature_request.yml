@@ -1,0 +1,24 @@
+name: Feature idea
+description: Tell us what you would like to do with ParlaConClaudio.
+title: "[Idea]: "
+body:
+  - type: markdown
+    attributes:
+      value: "Describe the task you want to complete. English, Italiano and Português are welcome."
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Explain the task and what makes it difficult today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything else you have tried?
