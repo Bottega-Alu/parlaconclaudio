@@ -163,6 +163,17 @@ class VoiceBridge:
             beep_start(self.config.sound_start_freq, self.config.sound_start_duration)
         threading.Thread(target=self._prewarm_cleanup, name="cleanup-prewarm", daemon=True).start()
 
+    def _update_addons(self) -> None:
+        """Daily OTA update of the sound packs downloaded as add-ons (never new ones)."""
+        try:
+            if bool(self._transcriber._load_config().get("addons_auto_update", True)):
+                from . import addons
+                updated = addons.update_if_due()
+                if updated:
+                    logger.info(f"Sound packs updated: {', '.join(updated)}")
+        except Exception:
+            logger.warning("Sound pack update check failed", exc_info=True)
+
     def _prewarm_cleanup(self) -> None:
         """While the user speaks, open the HTTPS connection the cleanup will use."""
         try:
@@ -363,6 +374,7 @@ class VoiceBridge:
         self._install_sound_packs()
         from ..core.stt_engine.key_manager import KeyManager
         KeyManager.migrate_json_keys()  # plaintext keys from older versions -> Credential Manager
+        threading.Thread(target=self._update_addons, name="addons-update", daemon=True).start()
         self._running = True
         logger.info("=" * 50)
         logger.info("Voice Bridge starting...")

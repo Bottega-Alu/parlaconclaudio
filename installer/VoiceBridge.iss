@@ -62,7 +62,9 @@ Source: "..\{#AppExeName}";  DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BootstrapExe}";   DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\*";          DestDir: "{app}\src";     Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc"
 Source: "..\scripts\*";      DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc"
-Source: "..\sounds\*";       DestDir: "{app}\sounds";  Flags: ignoreversion recursesubdirs createallsubdirs
+; Only the base pack ships in the installer: the others are add-ons downloaded on
+; demand from the "addons" GitHub release (src/voice_bridge/addons.py).
+Source: "..\sounds\r2d2\*";  DestDir: "{app}\sounds\r2d2"; Flags: ignoreversion
 Source: "..\assets\*";       DestDir: "{app}\assets";  Flags: ignoreversion
 Source: "..\README.md";      DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE";        DestDir: "{app}"; Flags: ignoreversion

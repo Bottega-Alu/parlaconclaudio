@@ -51,6 +51,20 @@ def _never_touch_the_real_clipboard(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_addon_network(monkeypatch, tmp_path):
+    """Sound pack add-ons: a throwaway sounds folder, and no real download ever."""
+    from src.voice_bridge import addons
+
+    def offline(url, limit):
+        raise OSError("network disabled in tests")
+
+    monkeypatch.setattr(addons, "SOUNDS_DIR", tmp_path / "addon-sounds")
+    monkeypatch.setattr(addons, "STATE_FILE", tmp_path / "addons-state.json")
+    monkeypatch.setattr(addons, "_urlopen_fetch", offline)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _no_network_prewarm(monkeypatch):
     """Starting a recording opens a connection to OpenRouter: never from tests."""
     from src.voice_bridge import stt_cleanup
