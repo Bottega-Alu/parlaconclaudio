@@ -1,23 +1,62 @@
 <p align="center">
-  <h1 align="center">parlaconclaudio</h1>
-  <p align="center"><strong>Professional voice dictation for Windows, with spoken status for Claude Code and Codex.</strong></p>
+  <img src="assets/readme/hero.svg" alt="ParlaConClaudio — Speak your prompts. Hear your agents. Voice dictation for Windows and spoken alerts for Claude Code and Codex." width="1280">
 </p>
 
 <p align="center">
-  <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest"><img src="https://img.shields.io/github/v/release/Bottega-Alu/parlaconclaudio?style=flat-square&color=blueviolet&label=version" alt="Latest release"></a>
-  <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe"><img src="https://img.shields.io/badge/download-Windows%20installer-0078D4?style=flat-square&logo=windows" alt="Download Windows installer"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?style=flat-square&logo=windows" alt="Windows 10 | 11">
-  <img src="https://img.shields.io/badge/STT-Whisper%20large--v3%20FP16-FF6F00?style=flat-square" alt="Whisper large-v3 FP16">
-  <img src="https://img.shields.io/badge/GPU-NVIDIA%20CUDA-76B900?style=flat-square&logo=nvidia" alt="NVIDIA CUDA">
-  <img src="https://img.shields.io/badge/cloud-Groq%20%7C%20Deepgram%20%7C%20OpenRouter-FF6F00?style=flat-square" alt="Groq | Deepgram | OpenRouter">
-  <img src="https://img.shields.io/badge/tests-440%20automated-2EA043?style=flat-square" alt="440 automated tests">
-  <img src="https://img.shields.io/badge/install-per--user%2C%20no%20admin-555?style=flat-square" alt="Per-user install, no admin">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License">
+  <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest"><img src="https://img.shields.io/github/v/release/Bottega-Alu/parlaconclaudio?style=flat-square&amp;color=C51B16&amp;label=release" alt="Latest release"></a>
+  <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe"><img src="https://img.shields.io/badge/Download-Windows%20installer-0078D4?style=flat-square" alt="Download Windows installer"></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%2F%2011-555?style=flat-square" alt="Windows 10 and 11">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-555?style=flat-square" alt="MIT license"></a>
+  <a href="https://github.com/Bottega-Alu/parlaconclaudio/stargazers"><img src="https://img.shields.io/github/stars/Bottega-Alu/parlaconclaudio?style=flat-square&amp;color=C51B16" alt="GitHub stars"></a>
 </p>
 
----
+**Talk instead of typing. Know when your coding agent needs you.**
+
+ParlaConClaudio brings voice dictation to the Windows apps you work in, plus spoken alerts for **Claude Code and Codex**. Use local Whisper on an NVIDIA GPU, Whisper on the CPU when there is no NVIDIA card, or a cloud engine. Free and open source under the MIT license; cloud providers may have their own usage limits and charges.
+
+**[Download for Windows](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe)** · **[Screenshots](#see-the-app)** · **[Quick start](#start-in-three-steps)** · **[Report a bug or suggest an idea](https://github.com/Bottega-Alu/parlaconclaudio/issues)**
 
 **[English](#english)** | **[Italiano](#italiano)** | **[Português BR](#português-br)**
+
+## See the app
+
+Your microphone, voice alerts and recognition engine, a click away in the tray.
+
+<table>
+  <tr>
+    <td width="50%" align="center"><strong>Light · English</strong></td>
+    <td width="50%" align="center"><strong>Dark · Italiano</strong></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="assets/readme/quick-controls-light.png"><img src="assets/readme/quick-controls-light.png" width="320" alt="Real quick controls in the light theme: dictation, audio, sound packs, voice alerts, microphone, recognition engine, theme, language and separate volume sliders."></a></td>
+    <td align="center"><a href="assets/readme/quick-controls-dark.png"><img src="assets/readme/quick-controls-dark.png" width="320" alt="The same real quick controls in Italian with the dark theme."></a></td>
+  </tr>
+</table>
+
+<details>
+<summary><strong>Make it yours: keyboard or mouse, toggle or hold to talk</strong></summary>
+
+<p><a href="assets/readme/dictation-settings.png"><img src="assets/readme/dictation-settings.png" width="960" alt="Dictation settings showing keyboard and mouse triggers, the default Ctrl+Alt+Space shortcut, toggle mode and a control test area."></a></p>
+
+</details>
+
+<sub>Real interface captures from the 1.0.17 UI verification, using demo settings. Current release: [1.0.19](https://github.com/Bottega-Alu/parlaconclaudio/releases/tag/v1.0.19). [Image sources](assets/readme/SOURCES.md).</sub>
+
+## Start in three steps
+
+1. **Install.** Download the Windows installer. It installs for your user, without admin rights; first launch downloads the required runtime and, for local recognition, the Whisper model.
+2. **Choose your engine.** Automatic picks local Whisper on an NVIDIA GPU, then a Groq/Deepgram key if you set one, then Whisper on the CPU: dictation works on any PC.
+3. **Speak.** Focus a text field, press **Ctrl + Alt + Space**, speak, then press again to stop. Change the trigger to a key combination or mouse button in the app.
+
+Want agent announcements too? Enable Claude Code or Codex in **Connections**. Interface and spoken status support **English, Italiano and Português BR**.
+
+**Privacy choice:** local recognition (GPU or CPU) keeps audio on your PC. Optional LLM cleanup sends transcript text to OpenRouter; turn it off for offline dictation after the required downloads. Cloud recognition sends audio to the selected provider. Spoken agent alerts send the announcement text (project name and status) to Microsoft's online Edge voices. Once a day the app asks GitHub whether downloaded sound packs changed (switch it off in Voice alerts > Sounds). Dictated text stays out of Windows clipboard history and cloud clipboard; the dictation history on the Home page can be switched off. API keys are stored in Windows Credential Manager.
+
+## Help more people find it
+
+If ParlaConClaudio is useful to you, **leave a ⭐ using the Star button at the top of this repository**. Share it with someone who dictates text or works with coding agents, or tell us what would make it better.
+
+[Report a bug or suggest an idea](https://github.com/Bottega-Alu/parlaconclaudio/issues) · [Contribute](CONTRIBUTING.md) · [Share the project](docs/SHARING.md)
 
 ---
 
@@ -34,7 +73,7 @@ It also gives your coding agents a voice: **Claude Code and Codex announce** fin
 | | |
 |---|---|
 | **Local-first speech recognition** | OpenAI Whisper **large-v3** in **FP16 on CUDA** (faster-whisper / CTranslate2). In local mode your **audio never leaves the PC**. |
-| **Deterministic fallback** | A fixed decision tree: local GPU → Groq → Deepgram. No GPU? A free Groq key is enough. |
+| **Deterministic fallback** | A fixed decision tree: local GPU → Groq → Deepgram → Whisper on CPU. No NVIDIA GPU and no cloud key? Whisper small runs on the processor. |
 | **Language-preserving LLM cleanup** | An optional pass fixes slips, punctuation and phonetically mangled technical terms (*"di tab"* → **GitHub**), grounded on **your glossary**, and never translates. If the network is down, you get the raw transcript: dictation **never blocks**. |
 | **Engineered for failure** | Retry honouring `Retry-After`, circuit breaker, truncation guard, a supervisor that relaunches a crashed bridge (3 times in 5 minutes, 2/4/6 s back-off) and a single-instance mutex. |
 | **Secrets handled properly** | API keys resolve from environment variables → Windows Credential Manager (keyring) → JSON, in that order. |
@@ -42,7 +81,7 @@ It also gives your coding agents a voice: **Claude Code and Codex announce** fin
 | **Native Windows 11 UI** | Fluent icons, system accent colour, live light/dark switching, per-monitor DPI awareness (sharp at 4K / 300%), rounded corners and native shadow. |
 | **Your trigger, your way** | Any key combination, the **middle mouse button** or the **side buttons** (Back/Forward), toggle or hold-to-talk. Mouse triggers are swallowed system-wide so the click never reaches other apps. |
 | **Quiet when idle** | Hidden windows do not poll devices or configuration and do not redraw. |
-| **Tested and verifiable** | 440 automated tests; every release ships a SHA-256 checksum file. |
+| **Tested and verifiable** | Automated regression tests; every release ships a SHA-256 checksum file. |
 
 ## Download
 
@@ -62,7 +101,7 @@ The animated tray sphere shows the state: rainbow drift when ready, amber while 
 
 ### Quick controls (left click)
 
-Laid out like Windows 11 Quick Settings: dictation, audio on/off, sound pack, voice announcements, microphone and recognition engine, separate **sound** and **voice** volume sliders, and shortcuts to audio-file transcription, settings and exit. Sound packs are chosen like Wi-Fi networks: expand a pack to **Listen** or **Use** it. It opens in about a tenth of a second and follows the Windows **system** light/dark mode, like Quick Settings.
+Laid out like Windows 11 Quick Settings: dictation, audio on/off, sound pack, voice announcements, microphone and recognition engine, separate **sound** and **voice** volume sliders, and shortcuts to audio-file transcription, settings and exit. Sound packs are chosen like Wi-Fi networks: expand a pack to **Listen** or **Use** it. Choose light, dark or the Windows system theme, and switch the interface language from the quick controls.
 
 ### App window (right click)
 
@@ -82,10 +121,10 @@ Laid out like Windows 11 Settings:
 
 | Mode | Engine | Notes |
 |---|---|---|
-| **Automatic** (default) | Local GPU, then Groq, then Deepgram | Picks the first available |
+| **Automatic** (default) | Local GPU, then Groq, then Deepgram, then Whisper small on CPU | Picks the first available |
 | **Local GPU** | Whisper large-v3, FP16, CUDA | NVIDIA GPU required |
-| **Cloud: Groq** | whisper-large-v3 | Free tier, no credit card |
-| **Cloud: Deepgram** | Nova-3 | Free starting credit |
+| **Cloud: Groq** | whisper-large-v3 | Provider API key required |
+| **Cloud: Deepgram** | Nova-3 | Provider API key required |
 
 Dictation language: automatic detection, or fixed to Italian, English, Portuguese, Spanish, French, German or Japanese. Fixing it avoids misdetection on short phrases.
 
@@ -116,11 +155,11 @@ Turn them on in **App window → Connections**. The switches read the real files
 
 Connecting adds only the missing entries; disconnecting removes only the entries that run `notify-tts.py`. Each write is parsed first, backed up as `<file>.bak-<timestamp>` and written atomically. The `AskUserQuestion` hook is asynchronous and never answers or approves anything. Codex runs a new hook only after you trust it in `/hooks`; its `notify` key in `config.toml` is left untouched.
 
-Announcements say who is speaking, for example *"Progetto explore-benchmark, Claudio ha bisogno del tuo aiuto"* (status phrases are in Italian; the voice is yours to choose). When several terminals work in parallel, give each session a name so you recognise the agent.
+Announcements say who is speaking, for example *"Project my-project, Claudio needs your help"* (status phrases follow the interface language: Italian, English or Brazilian Portuguese). When several terminals work in parallel, give each session a name so you recognise the agent.
 
 ## Sound packs
 
-Eight packs are included in the installer (R2-D2, South Park EN and IT, American Dad, Star Wars, Dune, Maccio Capatonda, Horror Zombie). Each pack is a folder in `~/.claude/cache/tts/sounds/<pack>/` with MP3 files and a `manifest.json` that maps sounds to seven events (`task_done`, `stop`, `permission`, `question`, `idle`, `auth`, `default`). Add a folder and it appears in the list, with no code changes.
+The installer includes R2-D2. Seven more (South Park EN and IT, American Dad, Star Wars, Dune, Maccio Capatonda, Horror Zombie) are add-ons: **Voice alerts > Sounds > Find packs** downloads them from the project's `addons` release, checks each file's SHA-256 and keeps them up to date without reinstalling. Each pack is a folder in `~/.claude/cache/tts/sounds/<pack>/` with MP3 files and a `manifest.json` that maps sounds to seven events (`task_done`, `stop`, `permission`, `question`, `idle`, `auth`, `default`). Add a folder and it appears in the list, with no code changes.
 
 ## Reliability and operations
 
@@ -186,7 +225,7 @@ Dà anche una voce ai tuoi agenti: **Claude Code e Codex annunciano** la fine de
 | | |
 |---|---|
 | **Riconoscimento vocale local-first** | OpenAI Whisper **large-v3** in **FP16 su CUDA** (faster-whisper / CTranslate2). In modalità locale **l'audio non lascia mai il PC**. |
-| **Fallback deterministico** | Un albero decisionale fisso: GPU locale → Groq → Deepgram. Niente GPU? Basta una chiave Groq gratuita. |
+| **Fallback deterministico** | Un albero decisionale fisso: GPU locale → Groq → Deepgram → Whisper su CPU. Niente GPU NVIDIA né chiave cloud? Whisper small gira sul processore. |
 | **Pulizia LLM che preserva la lingua** | Un passaggio opzionale corregge errori, punteggiatura e termini tecnici storpiati foneticamente (*"di tab"* → **GitHub**), ancorato al **tuo glossario**, senza mai tradurre. Se la rete non c'è ricevi il testo grezzo: la dettatura **non si blocca mai**. |
 | **Progettato per i guasti** | Retry che rispetta `Retry-After`, circuit breaker, controllo sulle risposte troncate, un supervisor che riavvia il bridge dopo un crash (3 volte in 5 minuti, attese di 2/4/6 s) e un mutex di istanza unica. |
 | **Chiavi gestite correttamente** | Le chiavi API si leggono da variabili d'ambiente → Gestione credenziali di Windows (keyring) → JSON, in quest'ordine. |
@@ -194,7 +233,7 @@ Dà anche una voce ai tuoi agenti: **Claude Code e Codex annunciano** la fine de
 | **Interfaccia nativa Windows 11** | Icone Fluent, colore principale del sistema, tema chiaro/scuro seguito in tempo reale, DPI per monitor (nitida anche a 4K / 300%), angoli arrotondati e ombra nativa. |
 | **Il comando che vuoi** | Qualsiasi combinazione di tasti, il **tasto centrale del mouse** o i **tasti laterali** (Indietro/Avanti), premi una volta o tieni premuto. I tasti del mouse vengono intercettati a livello di sistema: il clic non arriva alle altre app. |
 | **Silenzioso a riposo** | Le finestre nascoste non interrogano dispositivi né configurazione e non ridisegnano. |
-| **Testato e verificabile** | 440 test automatici; ogni release pubblica il file dei checksum SHA-256. |
+| **Testato e verificabile** | Test automatici di regressione; ogni release pubblica il file dei checksum SHA-256. |
 
 ## Download
 
@@ -214,7 +253,7 @@ La sfera animata nella tray mostra lo stato: arcobaleno quando è pronta, ambra 
 
 ### Comandi rapidi (clic sinistro)
 
-Come le Impostazioni rapide di Windows 11: dettatura, audio sì/no, pacchetto suoni, avvisi vocali, microfono e motore di riconoscimento, slider separati per volume **suoni** e **voci**, scorciatoie per trascrivere file audio, impostazioni ed Esci. I pacchetti suoni si scelgono come le reti Wi-Fi: espandi un pacchetto per **Ascoltarlo** o **Usarlo**. Si apre in circa un decimo di secondo e segue la modalità chiaro/scuro del **sistema**, come le Impostazioni rapide.
+Come le Impostazioni rapide di Windows 11: dettatura, audio sì/no, pacchetto suoni, avvisi vocali, microfono e motore di riconoscimento, slider separati per volume **suoni** e **voci**, scorciatoie per trascrivere file audio, impostazioni ed Esci. I pacchetti suoni si scelgono come le reti Wi-Fi: espandi un pacchetto per **Ascoltarlo** o **Usarlo**. Dai comandi rapidi puoi scegliere il tema chiaro, scuro o di sistema e cambiare la lingua dell’interfaccia.
 
 ### Finestra dell'app (clic destro)
 
@@ -234,10 +273,10 @@ Organizzata come le Impostazioni di Windows 11:
 
 | Modalità | Motore | Note |
 |---|---|---|
-| **Automatico** (predefinito) | GPU locale, poi Groq, poi Deepgram | Usa il primo disponibile |
+| **Automatico** (predefinito) | GPU locale, poi Groq, poi Deepgram, poi Whisper small su CPU | Usa il primo disponibile |
 | **GPU locale** | Whisper large-v3, FP16, CUDA | Serve una GPU NVIDIA |
-| **Cloud: Groq** | whisper-large-v3 | Piano gratuito, senza carta di credito |
-| **Cloud: Deepgram** | Nova-3 | Credito iniziale gratuito |
+| **Cloud: Groq** | whisper-large-v3 | Richiede una chiave API del fornitore |
+| **Cloud: Deepgram** | Nova-3 | Richiede una chiave API del fornitore |
 
 Lingua di dettatura: rilevamento automatico, oppure fissata su italiano, inglese, portoghese, spagnolo, francese, tedesco o giapponese. Fissarla evita errori di riconoscimento sulle frasi brevi.
 
@@ -272,7 +311,7 @@ Gli annunci dicono chi parla, per esempio *"Progetto explore-benchmark, Claudio 
 
 ## Pacchetti suoni
 
-Otto pacchetti sono inclusi nell'installer (R2-D2, South Park EN e IT, American Dad, Star Wars, Dune, Maccio Capatonda, Horror Zombie). Ogni pacchetto è una cartella in `~/.claude/cache/tts/sounds/<pacchetto>/` con file MP3 e un `manifest.json` che associa i suoni a sette eventi (`task_done`, `stop`, `permission`, `question`, `idle`, `auth`, `default`). Aggiungi una cartella e compare nella lista, senza modificare il codice.
+L'installer include R2-D2. Altri sette (South Park EN e IT, American Dad, Star Wars, Dune, Maccio Capatonda, Horror Zombie) sono add-on: **Avvisi vocali > Suoni > Cerca pacchetti** li scarica dalla release `addons` del progetto, verifica lo SHA-256 di ogni file e li tiene aggiornati senza reinstallare. Ogni pacchetto è una cartella in `~/.claude/cache/tts/sounds/<pacchetto>/` con file MP3 e un `manifest.json` che associa i suoni a sette eventi (`task_done`, `stop`, `permission`, `question`, `idle`, `auth`, `default`). Aggiungi una cartella e compare nella lista, senza modificare il codice.
 
 ## Affidabilità e gestione
 
@@ -300,7 +339,7 @@ Também dá voz aos seus agentes: **Claude Code e Codex anunciam** trabalhos con
 | | |
 |---|---|
 | **Reconhecimento de voz local-first** | OpenAI Whisper **large-v3** em **FP16 na CUDA** (faster-whisper / CTranslate2). No modo local **o áudio nunca sai do PC**. |
-| **Fallback determinístico** | Uma árvore de decisão fixa: GPU local → Groq → Deepgram. Sem GPU? Uma chave gratuita da Groq basta. |
+| **Fallback determinístico** | Uma árvore de decisão fixa: GPU local → Groq → Deepgram → Whisper na CPU. Sem GPU NVIDIA nem chave de nuvem? O Whisper small roda no processador. |
 | **Limpeza por LLM que preserva o idioma** | Uma etapa opcional corrige deslizes, pontuação e termos técnicos deturpados foneticamente (*"di tab"* → **GitHub**), ancorada no **seu glossário**, e nunca traduz. Sem rede, você recebe o texto bruto: o ditado **nunca trava**. |
 | **Projetado para falhas** | Retry que respeita `Retry-After`, circuit breaker, proteção contra respostas truncadas, um supervisor que reinicia o bridge após um crash (3 vezes em 5 minutos, esperas de 2/4/6 s) e um mutex de instância única. |
 | **Chaves tratadas corretamente** | As chaves de API são lidas de variáveis de ambiente → Gerenciador de Credenciais do Windows (keyring) → JSON, nessa ordem. |
@@ -308,7 +347,7 @@ Também dá voz aos seus agentes: **Claude Code e Codex anunciam** trabalhos con
 | **Interface nativa do Windows 11** | Ícones Fluent, cor de destaque do sistema, tema claro/escuro acompanhado em tempo real, DPI por monitor (nítida até em 4K / 300%), cantos arredondados e sombra nativa. |
 | **O comando que você quiser** | Qualquer combinação de teclas, o **botão do meio do mouse** ou os **botões laterais** (Voltar/Avançar), pressionar uma vez ou segurar. Os botões do mouse são interceptados no sistema: o clique não chega aos outros apps. |
 | **Silencioso em repouso** | Janelas ocultas não consultam dispositivos nem configuração e não redesenham. |
-| **Testado e verificável** | 440 testes automatizados; cada release publica o arquivo de checksums SHA-256. |
+| **Testado e verificável** | Testes automatizados de regressão; cada release publica o arquivo de checksums SHA-256. |
 
 ## Download
 
@@ -328,7 +367,7 @@ A esfera animada na bandeja mostra o estado: arco-íris quando pronta, âmbar en
 
 ### Controles rápidos (clique esquerdo)
 
-Como as Configurações rápidas do Windows 11: ditado, áudio ligado/desligado, pacote de sons, avisos de voz, microfone e motor de reconhecimento, controles separados de volume de **sons** e **vozes**, atalhos para transcrever arquivos de áudio, configurações e Sair. Os pacotes de sons são escolhidos como redes Wi-Fi: expanda um pacote para **Ouvir** ou **Usar**. Abre em cerca de um décimo de segundo e acompanha o modo claro/escuro do **sistema**, como as Configurações rápidas.
+Como as Configurações rápidas do Windows 11: ditado, áudio ligado/desligado, pacote de sons, avisos de voz, microfone e motor de reconhecimento, controles separados de volume de **sons** e **vozes**, atalhos para transcrever arquivos de áudio, configurações e Sair. Os pacotes de sons são escolhidos como redes Wi-Fi: expanda um pacote para **Ouvir** ou **Usar**. Nos controles rápidos você pode escolher o tema claro, escuro ou do sistema e mudar o idioma da interface.
 
 ### Janela do app (clique direito)
 
@@ -348,10 +387,10 @@ Organizada como as Configurações do Windows 11:
 
 | Modo | Motor | Notas |
 |---|---|---|
-| **Automático** (padrão) | GPU local, depois Groq, depois Deepgram | Usa o primeiro disponível |
+| **Automático** (padrão) | GPU local, depois Groq, depois Deepgram, depois Whisper small na CPU | Usa o primeiro disponível |
 | **GPU local** | Whisper large-v3, FP16, CUDA | Requer GPU NVIDIA |
-| **Nuvem: Groq** | whisper-large-v3 | Plano gratuito, sem cartão de crédito |
-| **Nuvem: Deepgram** | Nova-3 | Crédito inicial gratuito |
+| **Nuvem: Groq** | whisper-large-v3 | Requer chave de API do provedor |
+| **Nuvem: Deepgram** | Nova-3 | Requer chave de API do provedor |
 
 Idioma do ditado: detecção automática, ou fixado em italiano, inglês, português, espanhol, francês, alemão ou japonês. Fixá-lo evita erros de detecção em frases curtas.
 
@@ -382,11 +421,11 @@ Ative em **Janela do app → Conexões**. Os interruptores leem os arquivos reai
 
 Conectar adiciona só as entradas que faltam; desconectar remove só as que executam `notify-tts.py`. Cada escrita é precedida pela validação do arquivo e por um backup `<arquivo>.bak-<timestamp>`, e é atômica. O hook em `AskUserQuestion` é assíncrono e nunca responde nem aprova nada. O Codex só executa um hook novo depois que você o aprova em `/hooks`; a chave `notify` em `config.toml` não é alterada.
 
-Os avisos dizem quem está falando, por exemplo *"Progetto explore-benchmark, Claudio ha bisogno del tuo aiuto"* (as frases de estado são em italiano; a voz você escolhe). Com vários terminais em paralelo, dê um nome a cada sessão para reconhecer o agente.
+Os avisos dizem quem está falando, por exemplo *"Progetto explore-benchmark, Claudio ha bisogno del tuo aiuto"* (as frases de estado seguem o idioma da interface: português brasileiro, inglês ou italiano). Com vários terminais em paralelo, dê um nome a cada sessão para reconhecer o agente.
 
 ## Pacotes de sons
 
-Oito pacotes vêm incluídos no instalador (R2-D2, South Park EN e IT, American Dad, Star Wars, Dune, Maccio Capatonda, Horror Zombie). Cada pacote é uma pasta em `~/.claude/cache/tts/sounds/<pacote>/` com arquivos MP3 e um `manifest.json` que associa os sons a sete eventos (`task_done`, `stop`, `permission`, `question`, `idle`, `auth`, `default`). Adicione uma pasta e ela aparece na lista, sem mudar código.
+O instalador inclui o R2-D2. Outros sete (South Park EN e IT, American Dad, Star Wars, Dune, Maccio Capatonda, Horror Zombie) são add-ons: **Avisos de voz > Sons > Procurar pacotes** baixa-os da release `addons` do projeto, verifica o SHA-256 de cada arquivo e os mantém atualizados sem reinstalar. Cada pacote é uma pasta em `~/.claude/cache/tts/sounds/<pacote>/` com arquivos MP3 e um `manifest.json` que associa os sons a sete eventos (`task_done`, `stop`, `permission`, `question`, `idle`, `auth`, `default`). Adicione uma pasta e ela aparece na lista, sem mudar código.
 
 ## Confiabilidade e operação
 
