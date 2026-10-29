@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Same pinned uv as scripts/build_exe.ps1 bundles into the installer.
+  UV_VERSION: "0.11.3"
+  PYTEST_VERSION: "8.4.2"
+  RUFF_VERSION: "0.17.3"
+  PYINSTALLER_VERSION: "6.22.2"
+
+jobs:
+  test:
+    name: pytest + ruff (windows, Python 3.11)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: python -m pip install --disable-pip-version-check "uv==${{ env.UV_VERSION }}"
+
+      # The runtime the users get, minus the CUDA kernels: the hashed CPU/cloud
+      # lock the bootstrapper installs. This also proves the lock still resolves.
+      - name: Install runtime from the hashed lock
+        run: uv pip install --system --require-hashes -r installer/requirements-base.lock
+
+      - name: Install test tools
+        run: uv pip install --system "pytest==${{ env.PYTEST_VERSION }}" "ruff==${{ env.RUFF_VERSION }}"
+
+      - name: Locks in sync with BASE_DEPS / GPU_DEPS
+        run: python scripts/lock_deps.py --check
+
+      - name: ruff
+        run: ruff check .
+
+      - name: pytest
+        run: python -m pytest -q
+
+  installer:
+    name: build unsigned installer
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # The two exes only need the stdlib + PyInstaller (runtime deps are excluded).
+      - name: Install PyInstaller
+        run: python -m pip install --disable-pip-version-check "pyinstaller==${{ env.PYINSTALLER_VERSION }}"
+
+      - name: Install Inno Setup 6
+        run: choco install innosetup -y --no-progress
+
+      # build_exe.ps1 fetches the pinned uv (SHA-256 checked) into installer\bin
+      # and fails if it cannot; ISCC fails if uv.exe or a lock is missing.
+      - name: Build exes + installer
+        shell: pwsh
+        run: |
+          $py = (Get-Command python).Source
+          ./scripts/build_exe.ps1 -Installer -Python $py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voicebridge-setup-unsigned
+          path: installer/Output/*.exe
+          if-no-files-found: error
+          retention-days: 30

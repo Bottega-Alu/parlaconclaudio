@@ -67,9 +67,14 @@ Source: "..\assets\*";       DestDir: "{app}\assets";  Flags: ignoreversion
 Source: "..\README.md";      DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE";        DestDir: "{app}"; Flags: ignoreversion
 Source: "..\docs\releases\1.0.19.md"; DestDir: "{app}\docs\releases"; Flags: ignoreversion
-; Optional: drop uv.exe in installer\bin\ to make setup work fully offline-capable
-; (minus the wheels themselves). Without it the bootstrapper fetches uv itself.
-Source: "bin\uv.exe";        DestDir: "{app}\bin"; Flags: ignoreversion skipifsourcedoesntexist
+; Required: the pinned uv (scripts\build_exe.ps1 fetches it into installer\bin\ and
+; checks its SHA-256). The bootstrapper never downloads uv, so ISCC must fail
+; without it rather than produce an installer that cannot build the runtime.
+Source: "bin\uv.exe";        DestDir: "{app}\bin"; Flags: ignoreversion
+; Hashed dependency locks (scripts\lock_deps.py). Same relative path as in the
+; repo, so vb_bootstrap finds them under <root>\installer\ either way.
+Source: "requirements-base.lock"; DestDir: "{app}\installer"; Flags: ignoreversion
+Source: "requirements-gpu.lock";  DestDir: "{app}\installer"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}";           Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\assets\voicebridge.ico"

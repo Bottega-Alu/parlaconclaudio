@@ -163,6 +163,13 @@ class VoiceBridge:
             beep_start(self.config.sound_start_freq, self.config.sound_start_duration)
         threading.Thread(target=self._prewarm_cleanup, name="cleanup-prewarm", daemon=True).start()
 
+        # Start recording watchdog
+        threading.Thread(
+            target=self._recording_watchdog,
+            args=(cancel,),
+            daemon=True,
+        ).start()
+
     def _prewarm_cleanup(self) -> None:
         """While the user speaks, open the HTTPS connection the cleanup will use."""
         try:
@@ -174,13 +181,6 @@ class VoiceBridge:
                 prewarm()
         except Exception:
             logger.debug("Cleanup prewarm skipped", exc_info=True)
-
-        # Start recording watchdog
-        threading.Thread(
-            target=self._recording_watchdog,
-            args=(cancel,),
-            daemon=True,
-        ).start()
 
     def _recording_watchdog(self, cancel: threading.Event | None = None) -> None:
         """Auto-stop recording after timeout. Prevents stuck recording sessions.
