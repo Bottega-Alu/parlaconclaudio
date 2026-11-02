@@ -460,10 +460,98 @@ class ControlPanel:
         self._segmented(self._card("settings", _("Tema"), _("Chiaro, scuro o come Windows.")),
                         [("system", _("Sistema")), ("light", _("Chiaro")), ("dark", _("Scuro"))],
                         fluent.theme(), self._apply_theme)
+        self._logo_section()
         # Language names stay in their own language: findable whatever is shown now.
         self._segmented(self._card("globe", _("Lingua"), _("Menu, finestre e notifiche.")),
                         [(i18n.SYSTEM, _("Sistema"))] + list(i18n.LANGUAGES.items()),
                         self.config.get("ui_language", i18n.SOURCE), self._apply_ui_language)
+
+    def _logo_section(self):
+        """Tray icon look: one tile per style, the current one outlined; hover plays 'recording'."""
+        import tkinter as tk
+        from PIL import ImageTk
+        from . import tray_logo
+        c = self.colors
+        current = self.config.get("tray_logo") if self.config.get("tray_logo") in tray_logo.STYLE_IDS             else tray_logo.DEFAULT
+        card = tk.Frame(self.body, bg=c["card"], highlightthickness=1, highlightbackground=c["line"],
+                        padx=self._p(16), pady=self._p(12))
+        card.pack(fill="x", pady=(0, self._p(4)))
+        head = tk.Frame(card, bg=c["card"])
+        head.pack(fill="x")
+        self._glyph(head, "pulse", 14, c["text"], c["card"]).pack(side="left", padx=(0, self._p(16)))
+        texts = tk.Frame(head, bg=c["card"])
+        texts.pack(side="left", fill="x", expand=True)
+        tk.Label(texts, text=_("Icona nell'area di notifica"), font=(self.font, 10), fg=c["text"], bg=c["card"],
+                 anchor="w").pack(fill="x")
+        tk.Label(texts, text=_("Ferma quando è pronta, si muove mentre detti e trascrivi. "
+                               "Passa il mouse su un'icona per vederla in azione."),
+                 font=(self.font, 8), fg=c["muted"], bg=c["card"], anchor="w", justify="left").pack(fill="x")
+        row = tk.Frame(card, bg=c["card"])
+        row.pack(fill="x", pady=(self._p(10), 0))
+        size = self._p(40)
+        color = tray_logo.color_for(self.dark)
+
+        def image(style, state, index):
+            if style == "marble":
+                from .tray_icon import _render_icon_frame
+                picture = _render_icon_frame(0.45, hue_range=0.08, saturation=0.9, brightness=0.95)
+                picture = picture.resize((size, size))
+            else:
+                picture = tray_logo.frame(style, state, index, size, color)
+            photo = ImageTk.PhotoImage(picture, master=self.root)
+            self._images.append(photo)
+            return photo
+
+        for column, (style, label) in enumerate(tray_logo.STYLES):
+            row.columnconfigure(column, weight=1, uniform="logo")
+            selected = style == current
+            tile = tk.Frame(row, bg=c["raised"] if selected else c["card"], cursor="hand2", takefocus=1,
+                            highlightthickness=self._p(2) if selected else 1,
+                            highlightbackground=c["accent"] if selected else c["line"], highlightcolor=c["text"],
+                            padx=self._p(4), pady=self._p(6))
+            tile.grid(row=0, column=column, sticky="nsew", padx=(0, self._p(6)))
+            still = image(style, "idle", 0)
+            picture = tk.Label(tile, image=still, bg=tile["bg"])
+            picture.pack()
+            name = tk.Label(tile, text=_(label), font=(self.font, 8, "bold" if selected else "normal"),
+                            fg=c["text"] if selected else c["muted"], bg=tile["bg"], justify="center",
+                            wraplength=self._p(64))
+            name.pack(pady=(self._p(4), 0))
+            play = {"job": None, "frames": None, "index": 0}
+
+            def step(picture=picture, play=play):
+                if not picture.winfo_exists():
+                    return
+                play["index"] = (play["index"] + 1) % len(play["frames"])
+                picture.configure(image=play["frames"][play["index"]])
+                play["job"] = self.root.after(120, step)
+
+            def enter(event, style=style, picture=picture, play=play, step=step):
+                if style == "marble" or play["job"]:
+                    return
+                if play["frames"] is None:
+                    count = tray_logo.frame_count(style, "recording")
+                    play["frames"] = [image(style, "recording", i) for i in range(count)]
+                play["job"] = self.root.after(0, step)
+
+            def leave(event, picture=picture, play=play, still=still):
+                if play["job"]:
+                    self.root.after_cancel(play["job"])
+                    play["job"] = None
+                if picture.winfo_exists():
+                    picture.configure(image=still)
+
+            for widget in (tile, picture, name):
+                widget.bind("<Button-1>", lambda event, s=style: self._apply_logo(s))
+                widget.bind("<Enter>", enter, add="+")
+                widget.bind("<Leave>", leave, add="+")
+            tile.bind("<Return>", lambda event, s=style: self._apply_logo(s))
+            tile.bind("<space>", lambda event, s=style: self._apply_logo(s))
+
+    def _apply_logo(self, style):
+        self.tray._set_tray_logo(style)
+        self._load()
+        self._render()
 
     def _history_section(self):
         import tkinter as tk

@@ -1,10 +1,9 @@
 """
 System Tray Icon - Voice Bridge control panel.
 
-Animated marble sphere icon that shifts colors:
-- Idle: static teal marble (no animation wakeups)
-- Recording: pulsing red/magenta
-- Transcribing: fast golden shimmer
+Tray icon: a flat monochrome logo (tray_logo.py, chosen in the window, default
+"wave") that moves differently per state and stays still at rest, or the classic
+animated marble sphere.
 
 Right-click menu:
 - Voice selector (single speaker for all events)
@@ -27,7 +26,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from . import i18n
+from . import i18n, tray_logo
 from .i18n import APP_NAME, N_, _
 from .menu_dpi import native_menu_dpi
 
@@ -432,15 +431,23 @@ def _render_icon_frame(hue: float, **kwargs) -> "Image.Image":
 
 
 class _IconAnimator:
-    """Static at rest, bounded reusable frames while work is in progress."""
+    """Static at rest, bounded reusable frames while work is in progress.
 
-    def __init__(self):
+    The look is a tray_logo style (flat, monochrome, follows the taskbar's light/dark
+    mode) or the classic marble sphere. Frames are cached per (style, colour, state,
+    frame); changing style or colour drops the cache, so it never holds more than
+    one style's loops.
+    """
+
+    def __init__(self, style=None):
         self._state = "idle"
         self._running = False
         self._thread = None
         self._icon_ref = None
         self._wake = threading.Event()
         self._frames = {}
+        self._style = style if style in tray_logo.STYLE_IDS else tray_logo.DEFAULT
+        self._dark = None
 
     def set_icon(self, icon):
         self._icon_ref = icon
@@ -448,6 +455,20 @@ class _IconAnimator:
     def set_state(self, state: str):
         if self._state != state:
             self._state = state
+            self._wake.set()
+
+    def set_style(self, style: str):
+        style = style if style in tray_logo.STYLE_IDS else tray_logo.DEFAULT
+        if style != self._style:
+            self._style = style
+            self._frames.clear()
+            self._wake.set()
+
+    def follow_theme(self):
+        """Re-render when the taskbar switched light/dark (called from an existing UI tick)."""
+        from . import fluent
+        dark = fluent.dark_mode("system")
+        if self._dark is not None and dark != self._dark:
             self._wake.set()
 
     def start(self):
@@ -460,19 +481,33 @@ class _IconAnimator:
         self._wake.set()
 
     def _frame(self, state, index):
-        state = state if state in _ANIM_PRESETS else "idle"
-        index = 0 if state == "idle" else index % 12
-        key = (state, index)
+        if self._style == "marble":
+            state = state if state in _ANIM_PRESETS else "idle"
+            index = 0 if state == "idle" else index % 12
+            key = ("marble", state, index)
+        else:
+            from . import fluent
+            dark = fluent.dark_mode("system")
+            if dark != self._dark:
+                self._dark = dark
+                self._frames.clear()
+            state = state if state in tray_logo.STATES else "idle"
+            index = 0 if state == "idle" else index % tray_logo.frame_count(self._style, state)
+            key = (self._style, state, index)
         if key not in self._frames:
-            preset = _ANIM_PRESETS[state]
-            phase = index * math.tau / 12
-            hue = preset.get("base_hue", 0.45)
-            brightness = 0.8 + 0.15 * math.sin(phase) if preset.get("pulse") else preset["brightness"]
-            self._frames[key] = _render_icon_frame(
-                hue, hue_range=preset["hue_range"],
-                saturation=preset["saturation"], brightness=brightness,
-                time_val=phase,
-            )
+            if self._style == "marble":
+                preset = _ANIM_PRESETS[state]
+                phase = index * math.tau / 12
+                hue = preset.get("base_hue", 0.45)
+                brightness = 0.8 + 0.15 * math.sin(phase) if preset.get("pulse") else preset["brightness"]
+                self._frames[key] = _render_icon_frame(
+                    hue, hue_range=preset["hue_range"],
+                    saturation=preset["saturation"], brightness=brightness,
+                    time_val=phase,
+                )
+            else:
+                self._frames[key] = tray_logo.frame(self._style, state, index, ICON_SIZE,
+                                                    tray_logo.color_for(self._dark))
         return self._frames[key]
 
     def _animation_loop(self):
@@ -485,7 +520,7 @@ class _IconAnimator:
                     self._icon_ref.icon = self._frame(state, index)
             except Exception as exc:
                 logger.debug("Animation frame error: %s", exc)
-            index = (index + 1) % 12
+            index = index + 1 if state != "idle" else 0
             # No periodic rendering, shell updates or wakeups while idle.
             self._wake.wait(None if state == "idle" else 0.12)
 
@@ -531,7 +566,7 @@ class TrayIcon:
         self._recorder = recorder
         self._icon: "pystray.Icon | None" = None
         self._thread: threading.Thread | None = None
-        self._animator = _IconAnimator()
+        self._animator = _IconAnimator(config.get("tray_logo"))
         self._flyout = None
         self._flyout_lock = threading.Lock()
         self._flyout_timer = None
@@ -655,6 +690,14 @@ class TrayIcon:
         if not enabled:
             history.clear()
         logger.info(f"Dictation history set to: {enabled}")
+
+    def _set_tray_logo(self, style: str) -> None:
+        """Tray icon look (tray_logo.STYLES); applied at once, kept in tts_config.json."""
+        self._animator.set_style(style)
+        config = _load_config()
+        config["tray_logo"] = self._animator._style
+        _save_config(config)
+        logger.info(f"Tray logo set to: {config['tray_logo']}")
 
     def _set_ui_theme(self, choice: str) -> None:
         from . import fluent
@@ -887,7 +930,7 @@ class TrayIcon:
 
         self._thread = threading.Thread(target=self._run_icon, daemon=True)
         self._thread.start()
-        logger.info("Tray icon started with animated marble sphere")
+        logger.info("Tray icon started (%s)", self._animator._style)
         # The first click then only shows an already built window.
         prewarm = threading.Timer(3.0, self._prewarm_flyout)
         prewarm.daemon = True
