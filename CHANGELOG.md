@@ -2,6 +2,11 @@
 
 Detailed notes for each release: [`docs/releases/`](docs/releases/) and the [GitHub releases](https://github.com/Bottega-Alu/parlaconclaudio/releases).
 
+## 1.0.22
+
+### Look
+- The Wave tray logo (default) fills its slot: longer, bolder ticks and a larger centre dot. It used to take about 88% of the icon. The exe icon follows.
+
 ## 1.0.21
 
 ### Keys
