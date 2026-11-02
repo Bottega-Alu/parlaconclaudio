@@ -118,13 +118,14 @@ def _shapes(style, state, t):
     lines, dots = [], []
     if style == "wave":
         ring_turn = 32 * math.floor(t * 10) if state == "loading" else 0
-        core = 13.0
+        # Fills the tray slot: tick ends (with round caps) reach the canvas edge at rest;
+        # recording only shortens ticks, so the equaliser never clips.
+        core, inner, length, width = 15.0, 25.0, 19.0, 11.0
         for i in range(10):
             angle = 36 + 32 * i + ring_turn
-            inner, outer, alpha = 22.0, 38.0, 1.0
+            start, outer, alpha = inner, inner + length, 1.0
             if state == "recording":
-                k = 0.45 + 0.8 * (0.5 + 0.5 * math.sin(math.tau * (t + i * 0.2)))
-                outer = inner + 16 * k
+                outer = inner + length * (0.4 + 0.6 * (0.5 + 0.5 * math.sin(math.tau * (t + i * 0.2))))
             elif state == "transcribing":
                 d = (t - i / 10) % 1.0
                 alpha = 1.0 if d < 0.15 else 0.3
@@ -132,14 +133,14 @@ def _shapes(style, state, t):
                 d = min(1.0, max(0.0, t * 1.15 - i * 0.012))
                 if d < 0.6:
                     p = _ease(d / 0.6)
-                    inner, outer, alpha = 22 + 10 * p, 38 + 14 * p, 1 - p
+                    start, outer, alpha = inner + 8 * p, inner + length + 8 * p, 1 - p
                 else:
                     p = _ease((d - 0.6) / 0.4)
-                    inner, outer, alpha = 22.0, 22 + 16 * p, p
+                    outer, alpha = inner + length * p, p
             if alpha > 0.02:
-                lines.append((_transform([(50 + inner, 50), (50 + outer, 50)], angle), 8, True, alpha))
+                lines.append((_transform([(50 + start, 50), (50 + outer, 50)], angle), width, True, alpha))
         if state == "recording":
-            core = 13 * (1 + 0.3 * (0.5 + 0.5 * math.sin(math.tau * t * 2)))
+            core = 15 * (1 + 0.22 * (0.5 + 0.5 * math.sin(math.tau * t * 2)))
         dots.append((50, 50, core, 1.0))
         return lines, dots
 

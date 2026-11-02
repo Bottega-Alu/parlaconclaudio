@@ -3,8 +3,11 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe"><img src="https://img.shields.io/github/v/release/Bottega-Alu/parlaconclaudio?style=for-the-badge&amp;logo=windows&amp;logoColor=white&amp;label=Download%20for%20Windows&amp;color=0078D4" alt="Download the latest Windows installer" height="44"></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest"><img src="https://img.shields.io/github/v/release/Bottega-Alu/parlaconclaudio?style=flat-square&amp;color=C51B16&amp;label=release" alt="Latest release"></a>
-  <a href="https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe"><img src="https://img.shields.io/badge/Download-Windows%20installer-0078D4?style=flat-square" alt="Download Windows installer"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011-555?style=flat-square" alt="Windows 10 and 11">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-555?style=flat-square" alt="MIT license"></a>
   <a href="https://github.com/Bottega-Alu/parlaconclaudio/stargazers"><img src="https://img.shields.io/github/stars/Bottega-Alu/parlaconclaudio?style=flat-square&amp;color=C51B16" alt="GitHub stars"></a>
@@ -85,7 +88,7 @@ It also gives your coding agents a voice: **Claude Code and Codex announce** fin
 
 ## Download
 
-**[Download the latest Windows installer](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe)** (~23 MB), or choose a version on the **[Releases page](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest)**. Checksums are in `SHA256SUMS.txt` on each release.
+**[Download the latest Windows installer](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe)** (~25 MB), or choose a version on the **[Releases page](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest)**. Checksums are in `SHA256SUMS.txt` on each release.
 
 - Installs **per user, without admin rights** (x64). Upgrades install in place.
 - On first launch a bootstrap creates the Python environment and downloads what your machine needs: the **GPU profile** on an NVIDIA PC (~2.3 GB including the Whisper model) or the **CPU/cloud profile** elsewhere (~0.3 GB).
@@ -237,7 +240,7 @@ Dà anche una voce ai tuoi agenti: **Claude Code e Codex annunciano** la fine de
 
 ## Download
 
-**[Scarica l'ultimo installer per Windows](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe)** (~23 MB), oppure scegli una versione nella **[pagina Releases](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest)**. I checksum sono in `SHA256SUMS.txt` di ogni release.
+**[Scarica l'ultimo installer per Windows](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe)** (~25 MB), oppure scegli una versione nella **[pagina Releases](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest)**. I checksum sono in `SHA256SUMS.txt` di ogni release.
 
 - Installazione **per utente, senza diritti di amministratore** (x64). Gli aggiornamenti si installano sopra la versione precedente.
 - Al primo avvio un bootstrap crea l'ambiente Python e scarica ciò che serve alla tua macchina: **profilo GPU** su PC NVIDIA (~2,3 GB compreso il modello Whisper) o **profilo CPU/cloud** altrove (~0,3 GB).
@@ -351,7 +354,7 @@ Também dá voz aos seus agentes: **Claude Code e Codex anunciam** trabalhos con
 
 ## Download
 
-**[Baixe o instalador mais recente para Windows](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe)** (~23 MB), ou escolha uma versão na **[página Releases](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest)**. Os checksums estão em `SHA256SUMS.txt` de cada release.
+**[Baixe o instalador mais recente para Windows](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest/download/parlaconclaudio-voice-bridge-Setup.exe)** (~25 MB), ou escolha uma versão na **[página Releases](https://github.com/Bottega-Alu/parlaconclaudio/releases/latest)**. Os checksums estão em `SHA256SUMS.txt` de cada release.
 
 - Instalação **por usuário, sem direitos de administrador** (x64). Atualizações instalam por cima da versão anterior.
 - Na primeira execução um bootstrap cria o ambiente Python e baixa o que sua máquina precisa: **perfil GPU** em PCs NVIDIA (~2,3 GB incluindo o modelo Whisper) ou **perfil CPU/nuvem** nos demais (~0,3 GB).
