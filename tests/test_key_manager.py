@@ -98,3 +98,12 @@ def test_keyring_is_installed_by_the_bootstrap(monkeypatch):
     monkeypatch.setitem(sys.modules, "vb_bootstrap_probe", bootstrap)
     spec.loader.exec_module(bootstrap)
     assert any(dep.startswith("keyring") for dep in bootstrap.BASE_DEPS)
+
+
+def test_resolve_reports_where_the_key_comes_from(vault, monkeypatch):
+    assert KeyManager.resolve("groq") == (None, None)
+    KeyManager.set_key("groq", "gsk_vault")
+    assert KeyManager.resolve("groq") == ("gsk_vault", "keyring")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_env")
+    assert KeyManager.key_source("groq") == "env"  # the environment wins over the vault
+    assert KeyManager.get_key("groq") == "gsk_env"

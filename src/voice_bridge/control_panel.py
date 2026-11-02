@@ -75,6 +75,9 @@ class ControlPanel:
         self._addon_catalog = None
         self._addon_error = None
         self._addon_busy = set()
+        # Cloud keys: hover tooltip and live check results shown on the cards (key_ui.py).
+        self._key_tooltip = None
+        self._key_dialog = None
 
     def show(self):
         with self._lock:
@@ -212,6 +215,9 @@ class ControlPanel:
             for child in frame.winfo_children():
                 child.destroy()
         self._images = []
+        if self._key_tooltip:
+            self._key_tooltip.hide()
+        self._key_badges = {}
         self.state_label = self.record_button = self.files_button = None
         self._nav()
         self.canvas = tk.Canvas(self.content_holder, bg=c["surface"], highlightthickness=0)
@@ -878,17 +884,8 @@ class ControlPanel:
         else:
             self._switch(control, self._autostart, lambda on: self._toggle_autostart())
         self._section(_("Riconoscimento cloud"))
-        from ..core.stt_engine.key_manager import KeyManager
-        for provider, label, ask, get in (
-                ("groq", "Groq", self.tray._ask_api_key_groq, self.tray._open_groq_console),
-                ("deepgram", "Deepgram", self.tray._ask_api_key_deepgram, self.tray._open_deepgram_console)):
-            configured = bool(KeyManager.get_key(provider))
-            control = self._card("cloud", _("Chiave {provider}").format(provider=label),
-                                 _("Configurata. Resta nel portachiavi di Windows.") if configured
-                                 else _("Non configurata. Resta nel portachiavi di Windows."))
-            self._button(control, _("Imposta…"), lambda ask=ask: ask(None, None)).pack(side="right")
-            self._button(control, _("Ottieni chiave"), lambda get=get: get(None, None)).pack(
-                side="right", padx=(0, self._p(8)))
+        self._key_card("groq")
+        self._key_card("deepgram")
         control = self._card("refresh", _("Verifica connessione"), _("Prova i provider cloud configurati."))
         self._button(control, _("Verifica"), lambda: self.tray._test_cloud_connection(None, None)).pack(side="right")
         self._section(_("Correzione del testo"))
@@ -897,14 +894,66 @@ class ControlPanel:
                                   "con la tua chiave. Senza chiave il testo resta com'è.")),
                      bool(self.config.get("enable_stt_cleanup", True)),
                      lambda on: self._work(lambda: self.tray._set_text_cleanup(on)))
-        configured = bool(KeyManager.get_key("openrouter"))
-        control = self._card("cloud", _("Chiave {provider}").format(provider="OpenRouter"),
-                             _("Configurata. Resta nel portachiavi di Windows.") if configured
-                             else _("Non configurata. Resta nel portachiavi di Windows."))
-        self._button(control, _("Imposta…"),
-                     lambda: self.tray._ask_api_key_openrouter(None, None, on_done=self._refresh_soon)).pack(side="right")
-        self._button(control, _("Ottieni chiave"), lambda: self.tray._open_openrouter_console(None, None)).pack(
+        self._key_card("openrouter")
+
+    def _key_card(self, provider):
+        """Active keys stand out (accent border, badge); hovering shows the key's details."""
+        import tkinter as tk
+        from . import key_info, key_ui
+        from ..core.stt_engine.key_manager import KeyManager
+        c = self.colors
+        meta = key_info.PROVIDERS[provider]
+        key = KeyManager.get_key(provider)
+        description = (_("Attiva. Passa il mouse per vedere chiave, plafond e scadenza.") if key
+                       else _("Non configurata. Resta nel portachiavi di Windows."))
+        control = self._card("cloud", _("Chiave {provider}").format(provider=meta["label"]), description)
+        card = control.master
+        self._button(control, _("Cambia…") if key else _("Imposta…"), lambda: self._open_key_dialog(provider),
+                     primary=not key).pack(side="right")
+        self._button(control, _("Ottieni nuova chiave"), lambda: self.tray._open_key_console(provider)).pack(
             side="right", padx=(0, self._p(8)))
+        if not key:
+            return
+        card.configure(highlightbackground=c["accent"], highlightthickness=self._p(2))
+        badge = tk.Label(control, font=(self.font, 8, "bold"), bg=c["card"], padx=self._p(8))
+        badge.pack(side="right", padx=(0, self._p(8)))
+        self._key_badges[provider] = badge
+        report = key_info.cached(provider, key)
+        self._paint_badge(provider, report)
+        if self._key_tooltip is None:
+            self._key_tooltip = key_ui.KeyTooltip(self)
+        self._key_tooltip.attach(card, provider)
+        if report is None:
+            def run():
+                fresh = key_info.check(provider, key)
+                self._call_soon(lambda: self._key_checked(provider, fresh))
+            threading.Thread(target=run, daemon=True, name="key-info").start()
+
+    def _paint_badge(self, provider, report):
+        badge = self._key_badges.get(provider)
+        if not badge or not badge.winfo_exists():
+            return
+        c = self.colors
+        if report is None:
+            badge.configure(text="● " + _("Attiva"), fg=c["ok"])
+        elif report.ok:
+            badge.configure(text="● " + _("Attiva"), fg=c["ok"])
+        elif report.error.kind == "network":
+            badge.configure(text="● " + _("Non verificata"), fg=c["busy"])
+        else:
+            badge.configure(text="● " + _("Non valida"), fg=c["rec"])
+
+    def _key_checked(self, provider, report):
+        self._paint_badge(provider, report)
+
+    def _open_key_dialog(self, provider):
+        from . import key_ui
+        if self._key_dialog and self._key_dialog.top.winfo_exists():
+            self._key_dialog.top.lift()
+            return
+        if self._key_tooltip:
+            self._key_tooltip.hide()
+        self._key_dialog = key_ui.KeyDialog(self, provider, on_saved=self._refresh_soon)
 
     def _page_about(self):
         from .build_info import VERSION, IS_TEST_BUILD
@@ -917,6 +966,11 @@ class ControlPanel:
         self._button(control, _("Esci"), self._exit).pack(side="right")
 
     # ── actions ─────────────────────────────────────────────────────
+
+    def _call_soon(self, callback):
+        """From any thread: run *callback* on the panel's Tk thread."""
+        self._commands.put(("call", callback))
+        self._wake()
 
     def _refresh_soon(self):
         """From any thread: reload settings and redraw the page."""
@@ -1068,6 +1122,12 @@ class ControlPanel:
         try:
             while True:
                 command = self._commands.get_nowait()
+                if isinstance(command, tuple):
+                    try:
+                        command[1]()
+                    except Exception:
+                        logger.exception("Aggiornamento del pannello non riuscito")
+                    continue
                 if command == "stop":
                     self.root.destroy()
                     return False

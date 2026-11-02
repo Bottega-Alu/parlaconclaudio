@@ -149,7 +149,7 @@ WHISPER_LANGUAGES = {
 # === MENU EMOJI ===
 
 
-REPO_URL = "https://github.com/fra-itc/parlaconclaudio"
+REPO_URL = "https://github.com/Bottega-Alu/parlaconclaudio"
 
 # STT mode labels for menu display
 STT_MODES = {
@@ -626,19 +626,11 @@ class TrayIcon:
             logger.info(f"STT mode set to: {mode}")
         return handler
 
-    def _ask_api_key_groq(self, icon, item):
-        self._ask_api_key("groq", _("Groq API Key"), _("Enter your Groq API key:\n(Get one free at console.groq.com)"))
-
-    def _ask_api_key_deepgram(self, icon, item):
-        self._ask_api_key("deepgram", _("Deepgram API Key"), _("Enter your Deepgram API key:\n(Get $200 free at console.deepgram.com)"))
-
-    def _ask_api_key_openrouter(self, icon, item, on_done=None):
-        self._ask_api_key("openrouter", _("Chiave API OpenRouter"),
-                          _("Incolla la chiave API di OpenRouter:\n(la crei su openrouter.ai/keys)"), on_done)
-
-    def _open_openrouter_console(self, icon, item):
+    def _open_key_console(self, provider):
+        """Provider page where a new API key is created (URLs live in key_info.PROVIDERS)."""
         import webbrowser
-        webbrowser.open("https://openrouter.ai/keys")
+        from .key_info import PROVIDERS
+        webbrowser.open(PROVIDERS[provider]["console"])
 
     def _set_text_cleanup(self, enabled: bool) -> None:
         """LLM correction of the transcript (OpenRouter); read at every dictation."""
@@ -678,26 +670,6 @@ class TrayIcon:
         config["ui_language"] = setting if setting in i18n.LANGUAGES else i18n.SYSTEM
         _save_config(config)
         logger.info(f"Interface language set to: {config['ui_language']} (showing {shown})")
-
-    def _ask_api_key(self, provider: str, title: str, prompt: str, on_done=None):
-        def _run():
-            try:
-                import tkinter as tk
-                from tkinter import simpledialog
-                root = tk.Tk()
-                root.withdraw()
-                root.attributes("-topmost", True)
-                key = simpledialog.askstring(title, prompt, show="*", parent=root)
-                root.destroy()
-                if key and key.strip():
-                    from ..core.stt_engine.key_manager import KeyManager
-                    store = KeyManager.set_key(provider, key.strip())
-                    logger.info(f"{provider} API key saved ({store})")
-                    if on_done:
-                        on_done()
-            except Exception as e:
-                logger.error(f"API key dialog failed: {e}")
-        threading.Thread(target=_run, daemon=True).start()
 
     def _test_cloud_connection(self, icon, item):
         """Quick validation of cloud STT connection (no actual transcription)."""
@@ -974,14 +946,6 @@ class TrayIcon:
         """Open the GitHub repo in the default browser."""
         import webbrowser
         webbrowser.open(REPO_URL)
-
-    def _open_groq_console(self, icon, item):
-        import webbrowser
-        webbrowser.open("https://console.groq.com/keys")
-
-    def _open_deepgram_console(self, icon, item):
-        import webbrowser
-        webbrowser.open("https://console.deepgram.com/")
 
     def _purge_vram_clicked(self, icon, item):
         """Purge VRAM: unload model, clear CUDA cache, reload."""
