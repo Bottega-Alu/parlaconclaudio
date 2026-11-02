@@ -1,7 +1,9 @@
-"""Regenerate assets/voicebridge.ico from the tray's marble-sphere renderer.
+"""Regenerate assets/voicebridge.ico: the tray's default logo (wave) in white on a dark tile.
 
-Keeps the exe icon visually identical to the system-tray icon (same generator,
-frozen at a fixed hue/time so the file is deterministic).
+The tray draws the logo bare, tinted for the taskbar. Explorer, the Start menu and the
+installer can sit on light or dark backgrounds, so the exe icon carries its own dark
+rounded tile. Each size is rendered on its own (no downscaled 256 px blur at 16 px),
+so the file is deterministic and crisp.
 
     .\venv\Scripts\python.exe scripts\make_icon.py
 """
@@ -12,18 +14,31 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.voice_bridge.tray_icon import _generate_marble_sphere  # noqa: E402
+from src.voice_bridge import tray_logo  # noqa: E402
 
-ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+SIZES = (16, 24, 32, 48, 64, 128, 256)
 OUT = ROOT / "assets" / "voicebridge.ico"
+TILE = (32, 32, 32, 255)
+LOGO = (255, 255, 255)
+SUPERSAMPLE = 4
+
+
+def render(size):
+    from PIL import Image, ImageDraw
+    big = size * SUPERSAMPLE
+    tile = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    ImageDraw.Draw(tile).rounded_rectangle((0, 0, big - 1, big - 1), radius=round(big * 0.22), fill=TILE)
+    tile = tile.resize((size, size), Image.LANCZOS)
+    inset = max(1, round(size * 0.10))
+    logo = tray_logo.frame(tray_logo.DEFAULT, "idle", 0, size - 2 * inset, LOGO)
+    tile.alpha_composite(logo, (inset, inset))
+    return tile
 
 
 def main() -> None:
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    sphere = _generate_marble_sphere(
-        256, hue_offset=0.45, hue_range=0.30, saturation=0.80, brightness=0.98, time_val=0.0
-    )
-    sphere.save(OUT, format="ICO", sizes=ICO_SIZES)
+    images = [render(size) for size in SIZES]
+    images[-1].save(OUT, format="ICO", sizes=[(s, s) for s in SIZES], append_images=images[:-1])
     print(f"{OUT}  ({OUT.stat().st_size} bytes)")
 
 

@@ -2,7 +2,18 @@
 
 Detailed notes for each release: [`docs/releases/`](docs/releases/) and the [GitHub releases](https://github.com/Bottega-Alu/parlaconclaudio/releases).
 
-## Unreleased
+## 1.0.21
+
+### Keys
+- Setting an API key opens a themed dialog that checks the key with the provider before saving it; a refused key is not saved, and offline you can save anyway.
+- Configured keys stand out on the Links page with a status badge; hovering shows the first and last characters, where the key is stored and what the provider reports (OpenRouter: remaining budget, renewal, expiry, account credit).
+- A key set in an environment variable is flagged, since it overrides the one in Credential Manager.
+- "Get key" is now "Get new key"; the project link opens the current repository.
+
+### Look
+- Flat monochrome tray logo, still when idle and animated per state; seven styles, chosen in the app window (Appearance). The exe and Start menu icon use the same logo on a dark tile.
+
+## 1.0.20
 
 ### Security
 - API keys are stored in Windows Credential Manager; keys left in plaintext by older versions are moved there at start-up.
