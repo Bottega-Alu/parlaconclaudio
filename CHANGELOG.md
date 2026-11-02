@@ -2,6 +2,13 @@
 
 Detailed notes for each release: [`docs/releases/`](docs/releases/) and the [GitHub releases](https://github.com/Bottega-Alu/parlaconclaudio/releases).
 
+## 1.0.23
+
+### Look
+- New Equalizer tray logo, now the default: the bars of the README banner pulse from the centre while you dictate, a light sweeps back and forth while transcribing. The exe icon uses it too. A style you already picked stays.
+- The app window is organised by topic: Home for daily use; agent alerts (Claude Code, Codex) in Voice alerts; text correction in Dictation; all keys in API keys; theme, language, tray icon and start with Windows in Personalize.
+- Readable social preview card for links shared in chats.
+
 ## 1.0.22
 
 ### Look
