@@ -19,7 +19,8 @@ PAGES = (
     ("home", "home", N_("Home")),
     ("dictation", "mic", N_("Dettatura")),
     ("alerts", "bell", N_("Avvisi vocali")),
-    ("links", "link", N_("Collegamenti")),
+    ("keys", "key", N_("Chiavi API")),
+    ("personal", "brush", N_("Personalizza")),
     ("about", "info", N_("Informazioni")),
 )
 STATE_LABELS = {"idle": N_("Pronto per dettare"), "recording": N_("Registrazione in corso"),
@@ -451,11 +452,10 @@ class ControlPanel:
                              _("in qualsiasi app: detta, poi il testo viene copiato negli appunti.")),
                  font=(self.font, 8), fg=c["muted"], bg=c["card"], anchor="w").pack(fill="x", pady=(self._p(6), 0))
 
-        self._appearance_section()
         self._history_section()
         self._quick_line()
 
-    def _appearance_section(self):
+    def _page_personal(self):
         self._section(_("Aspetto"))
         self._segmented(self._card("settings", _("Tema"), _("Chiaro, scuro o come Windows.")),
                         [("system", _("Sistema")), ("light", _("Chiaro")), ("dark", _("Scuro"))],
@@ -465,6 +465,14 @@ class ControlPanel:
         self._segmented(self._card("globe", _("Lingua"), _("Menu, finestre e notifiche.")),
                         [(i18n.SYSTEM, _("Sistema"))] + list(i18n.LANGUAGES.items()),
                         self.config.get("ui_language", i18n.SOURCE), self._apply_ui_language)
+        self._section(_("Sistema"))
+        control = self._card("power", _("Avvia all'accesso a Windows"), _("L'app parte nell'area di notifica."))
+        if self._autostart is None:
+            import tkinter as tk
+            tk.Label(control, text=_("Verifica…"), font=(self.font, 9), fg=self.colors["muted"],
+                     bg=self.colors["card"]).pack(side="right")
+        else:
+            self._switch(control, self._autostart, lambda on: self._toggle_autostart())
 
     def _logo_section(self):
         """Tray icon look: one tile per style, the current one outlined; hover plays 'recording'."""
@@ -472,7 +480,9 @@ class ControlPanel:
         from PIL import ImageTk
         from . import tray_logo
         c = self.colors
-        current = self.config.get("tray_logo") if self.config.get("tray_logo") in tray_logo.STYLE_IDS             else tray_logo.DEFAULT
+        current = self.config.get("tray_logo")
+        if current not in tray_logo.STYLE_IDS:
+            current = tray_logo.DEFAULT
         card = tk.Frame(self.body, bg=c["card"], highlightthickness=1, highlightbackground=c["line"],
                         padx=self._p(16), pady=self._p(12))
         card.pack(fill="x", pady=(0, self._p(4)))
@@ -502,20 +512,23 @@ class ControlPanel:
             self._images.append(photo)
             return photo
 
-        for column, (style, label) in enumerate(tray_logo.STYLES):
+        per_row = 4  # two rows of four: long names (Equalizzatore, Sfera classica) fit unclipped
+        for column in range(per_row):
             row.columnconfigure(column, weight=1, uniform="logo")
+        for index, (style, label) in enumerate(tray_logo.STYLES):
             selected = style == current
             tile = tk.Frame(row, bg=c["raised"] if selected else c["card"], cursor="hand2", takefocus=1,
                             highlightthickness=self._p(2) if selected else 1,
                             highlightbackground=c["accent"] if selected else c["line"], highlightcolor=c["text"],
                             padx=self._p(4), pady=self._p(6))
-            tile.grid(row=0, column=column, sticky="nsew", padx=(0, self._p(6)))
+            tile.grid(row=index // per_row, column=index % per_row, sticky="nsew",
+                      padx=(0, self._p(6)), pady=(0, self._p(6)))
             still = image(style, "idle", 0)
             picture = tk.Label(tile, image=still, bg=tile["bg"])
             picture.pack()
             name = tk.Label(tile, text=_(label), font=(self.font, 8, "bold" if selected else "normal"),
                             fg=c["text"] if selected else c["muted"], bg=tile["bg"], justify="center",
-                            wraplength=self._p(64))
+                            wraplength=self._p(120))
             name.pack(pady=(self._p(4), 0))
             play = {"job": None, "frames": None, "index": 0}
 
@@ -625,7 +638,7 @@ class ControlPanel:
         parts = (
             ("mic", _clip(mic.split(" [")[0], 26), "dictation"),
             ("bell", _clip(f"{mode} · {sound} · {volume}", 40), "alerts"),
-            ("link", _clip(_join_and(linked), 26) if linked else _("Nessun agente"), "links"),
+            ("link", _clip(_join_and(linked), 26) if linked else _("Nessun agente"), "alerts"),
         )
         self._section(_("Impostazioni rapide"))
         line = tk.Frame(self.body, bg=c["card"], highlightthickness=1, highlightbackground=c["line"],
@@ -669,6 +682,11 @@ class ControlPanel:
                                 _("Spento: il testo resta solo negli appunti e lo incolli tu con Ctrl+V.")),
                      paste, lambda on: self._work(self.tray._toggle_auto_paste_clicked),
                      _("Attivo") if paste else _("Solo appunti"))
+        self._switch(self._card("chat", _("Correggi la trascrizione con un LLM"),
+                                _("Sistema punteggiatura e parole fraintese tramite OpenRouter, "
+                                  "con la tua chiave (pagina Chiavi API). Senza chiave il testo resta com'è.")),
+                     bool(config.get("enable_stt_cleanup", True)),
+                     lambda on: self._work(lambda: self.tray._set_text_cleanup(on)))
         self._section(_("Memoria GPU"))
         control = self._card("pulse", _("Modello locale"),
                              _("Libera la VRAM quando ti serve per altro: il modello si ricarica al prossimo uso."))
@@ -819,6 +837,12 @@ class ControlPanel:
         c = self.colors
         config = self.config
         muted = bool(config.get("muted", False))
+        from ..core import voice_hooks
+        self._section(_("Avvisi vocali degli agenti"))
+        for agent in voice_hooks.AGENTS:
+            label = voice_hooks.AGENT_LABEL[agent]
+            self._switch(self._card("chat", label, _("{agent} annuncia la fine delle attività e le richieste di permesso.").format(agent=label)),
+                         self.hooks.get(agent, False), lambda on, a=agent: self._set_hook(a, on))
         self._section(_("Audio"))
         self._switch(self._card("speaker", _("Suoni e voce"), _("Disattiva tutti gli avvisi senza perdere le impostazioni.")),
                      not muted, lambda on: self._work(lambda: self.tray._make_toggle_mute()(None, None)),
@@ -956,32 +980,13 @@ class ControlPanel:
         self._commands.put("refresh")
         self._wake()
 
-    def _page_links(self):
-        from ..core import voice_hooks
-        self._section(_("Avvisi vocali degli agenti"))
-        for agent in voice_hooks.AGENTS:
-            label = voice_hooks.AGENT_LABEL[agent]
-            self._switch(self._card("chat", label, _("{agent} annuncia la fine delle attività e le richieste di permesso.").format(agent=label)),
-                         self.hooks.get(agent, False), lambda on, a=agent: self._set_hook(a, on))
-        self._section(_("Sistema"))
-        control = self._card("power", _("Avvia all'accesso a Windows"), _("L'app parte nell'area di notifica."))
-        if self._autostart is None:
-            import tkinter as tk
-            tk.Label(control, text=_("Verifica…"), font=(self.font, 9), fg=self.colors["muted"],
-                     bg=self.colors["card"]).pack(side="right")
-        else:
-            self._switch(control, self._autostart, lambda on: self._toggle_autostart())
+    def _page_keys(self):
         self._section(_("Riconoscimento cloud"))
         self._key_card("groq")
         self._key_card("deepgram")
         control = self._card("refresh", _("Verifica connessione"), _("Prova i provider cloud configurati."))
         self._button(control, _("Verifica"), lambda: self.tray._test_cloud_connection(None, None)).pack(side="right")
         self._section(_("Correzione del testo"))
-        self._switch(self._card("chat", _("Correggi la trascrizione con un LLM"),
-                                _("Sistema punteggiatura e parole fraintese tramite OpenRouter, "
-                                  "con la tua chiave. Senza chiave il testo resta com'è.")),
-                     bool(self.config.get("enable_stt_cleanup", True)),
-                     lambda on: self._work(lambda: self.tray._set_text_cleanup(on)))
         self._key_card("openrouter")
 
     def _key_card(self, provider):

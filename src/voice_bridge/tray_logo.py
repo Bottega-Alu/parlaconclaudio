@@ -1,4 +1,4 @@
-"""Flat monochrome tray logos: C inside C holding a P (A-E) and the letter-free wave (F).
+"""Flat monochrome tray logos: the equaliser (default, as in the README), C inside C holding a P, the wave.
 
 Each logo is a few polylines in a 100x100 space; a state is a motion applied to
 them (rotation, flip, dash flow, tick lengths). frame() renders one supersampled
@@ -10,8 +10,9 @@ import math
 
 from .i18n import N_
 
-DEFAULT = "wave"
+DEFAULT = "bars"
 STYLES = (  # id, label shown in the panel
+    ("bars", N_("Equalizzatore")),
     ("wave", N_("Onda")),
     ("rings", N_("Anelli")),
     ("mech", N_("Meccanica")),
@@ -31,7 +32,7 @@ _FRAMES = {"idle": 1, "recording": 12, "transcribing": 12, "loading": 24, "outpu
 def frame_count(style, state):
     if state not in _FRAMES:
         state = "idle"
-    if style in ("mech", "mech_soft", "gyro", "wave") and state in ("recording", "loading"):
+    if style in ("mech", "mech_soft", "gyro", "wave", "bars") and state in ("recording", "loading"):
         return 16 if state == "recording" else 20
     return _FRAMES[state]
 
@@ -144,6 +145,9 @@ def _shapes(style, state, t):
         dots.append((50, 50, core, 1.0))
         return lines, dots
 
+    if style == "bars":
+        return _bars(state, t), dots
+
     outer_rot = inner_rot = 0.0
     outer_s = inner_s = (1.0, 1.0)
     p_scale = 1.0
@@ -221,6 +225,37 @@ def _shapes(style, state, t):
     lines.append((_transform(inner, inner_rot, *inner_s), widths[1], caps, 1.0))
     lines.append((_transform(letter, sx=p_scale, sy=p_scale), widths[2], caps, 1.0))
     return lines, dots
+
+
+# Equaliser, 8 vertical bars (README hero). Talking-car voice box: bars pulse
+# symmetrically from the centre while recording, a light sweeps back and forth
+# while transcribing.
+_BARS = (0.30, 0.62, 1.0, 0.72, 0.37, 0.69, 0.47, 0.25)
+_BAR_STEP, _BAR_WIDTH, _BAR_SPAN = 12.4, 8.6, 88.0
+
+
+def _bars(state, t):
+    lines = []
+    count = len(_BARS)
+    for i, base in enumerate(_BARS):
+        x = 50 + (i - (count - 1) / 2) * _BAR_STEP
+        height, alpha = base, 1.0
+        if state == "recording":
+            centre = abs(i - (count - 1) / 2) / ((count - 1) / 2)  # 0 middle, 1 edges
+            level = 0.5 + 0.5 * math.sin(math.tau * (2 * t - 0.35 * centre))
+            height = max(0.14, (1.0 - 0.55 * centre) * (0.25 + 0.75 * level))
+        elif state == "transcribing":
+            sweep = (count - 1) * (1 - abs(1 - 2 * t))  # 0 -> 7 -> 0
+            alpha = max(0.25, 1 - abs(i - sweep) * 0.38)
+            height = max(base, 0.45) if alpha > 0.6 else base
+        elif state == "loading":
+            height = base * (0.55 + 0.45 * (0.5 + 0.5 * math.sin(math.tau * (t - i / count))))
+        elif state == "output":
+            position = -1.5 + (count + 2) * _ease(t)  # a ripple runs left to right
+            height = base + (1 - base) * max(0.0, 1 - abs(i - position) / 1.5)
+        half = max(height * _BAR_SPAN / 2 - _BAR_WIDTH / 2, 0.01)
+        lines.append(([(x, 50 - half), (x, 50 + half)], _BAR_WIDTH, True, alpha))
+    return lines
 
 
 def _quad(p0, p1, p2, n=8):
