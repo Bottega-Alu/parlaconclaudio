@@ -2,7 +2,7 @@
 System Tray Icon - Voice Bridge control panel.
 
 Tray icon: a flat monochrome logo (tray_logo.py, chosen in the window, default
-"wave") that moves differently per state and stays still at rest, or the classic
+"bars") that moves differently per state and stays still at rest, or the classic
 animated marble sphere.
 
 Right-click menu:

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#16191e"/><stop offset="1" stop-color="#25252a"/></linearGradient>
+    <linearGradient id="wave" x2="1"><stop stop-color="#ffb29c"/><stop offset="1" stop-color="#f37d62"/></linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#fff" stroke-opacity=".035"/></pattern>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <g stroke="url(#wave)" stroke-width="30" stroke-linecap="round" transform="translate(600 150)">
+    <path d="M-210 -18v36 M-150 -48v96 M-90 -88v176 M-30 -62v124 M30 -100v200 M90 -54v108 M150 -76v152 M210 -26v52"/>
+  </g>
+  <g font-family="Segoe UI,Arial,sans-serif" text-anchor="middle">
+    <text x="600" y="362" fill="#ffffff" font-size="80" font-weight="700" letter-spacing="-2">ParlaConClaudio</text>
+    <text x="600" y="436" fill="#ffad97" font-size="43" font-weight="600">Dettatura vocale per Windows</text>
+    <text x="600" y="520" fill="#d2d1d4" font-size="31">Gratis · open source · Claude Code e Codex</text>
+  </g>
+</svg>

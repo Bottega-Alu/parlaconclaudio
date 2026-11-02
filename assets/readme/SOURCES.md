@@ -10,6 +10,6 @@ The source captures were saved in the local `.work/combo-probe/shots2/` verifica
 | `quick-controls-dark.png` | `it_dark_flyout.png` | `353dddcb59643aeddd53703072585d5d096a84221f3e6e652c6572d5a76176ad` |
 | `dictation-settings.png` | `en_light_dictation.png` | `d758c1584d5fe646de6d67a755b660394aa4fde1b4d57b29266a01d12ffde4d7` |
 
-`hero.svg` is an editable vector title graphic, not a screenshot. `social-card.png` is its 1280×640 raster export, rendered with ImageMagick for sharing. Its typography and warm accent accompany the application imagery; it does not replace the application's marble-sphere icon. All fonts use system fallbacks, with no external resources or scripts.
+`hero.svg` is an editable vector title graphic, not a screenshot. `social-card.png` (1200×630) is the repository's social preview, shown when a GitHub link is shared in chats such as WhatsApp: `social-card.svg` reuses the hero's colours and equaliser with fewer, larger words so it stays readable in a small preview and in a square centre crop. It is rendered with Microsoft Edge headless and uploaded by hand in Settings > Social preview (GitHub has no API for it). All fonts use system fallbacks, with no external resources or scripts.
 
 To refresh the gallery, capture the actual app with non-sensitive demo settings, preserve its pixels and version label, review the image for private data, then update this manifest and the screenshot note in the README. Do not substitute a mock interface for a real product recording.

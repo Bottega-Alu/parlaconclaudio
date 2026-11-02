@@ -12,7 +12,7 @@ ICON = {
     "globe": "", "file": "", "settings": "", "list": "",
     "next": "", "back": "", "check": "", "play": "",
     "shuffle": "", "home": "", "link": "", "info": "",
-    "bell": "", "refresh": "", "power": "", "pulse": "",
+    "bell": "", "refresh": "", "power": "", "key": "", "brush": "", "pulse": "",
 }
 
 _PALETTE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent"

@@ -18,7 +18,7 @@ def test_every_style_renders_every_state_quickly():
 
 
 def test_idle_is_one_still_frame_and_work_states_move():
-    for style in ("wave", "rings", "mech", "mech_soft", "gyro", "alien"):
+    for style in ("wave", "rings", "mech", "mech_soft", "gyro", "alien", "bars"):
         assert tray_logo.frame_count(style, "idle") == 1
         first = tray_logo.frame(style, "recording", 0).tobytes()
         assert any(tray_logo.frame(style, "recording", i).tobytes() != first for i in range(1, 4)), style
@@ -34,7 +34,7 @@ def test_loops_are_seamless():
 def test_logo_animator_idle_renders_once_and_sleeps(monkeypatch):
     monkeypatch.setattr(fluent, "dark_mode", lambda surface="apps": True)
     animator = tray_icon._IconAnimator()
-    assert animator._style == "wave"  # default
+    assert animator._style == "bars"  # default
     animator._icon_ref = SimpleNamespace(icon=None)
     animator._running = True
     waits = []

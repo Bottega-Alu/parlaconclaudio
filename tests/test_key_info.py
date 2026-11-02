@@ -108,7 +108,7 @@ def test_panel_key_cards_dialog_and_tooltip(monkeypatch):
         panel._check_autostart = lambda: None
         panel._build()
         try:
-            panel._go("links")
+            panel._go("keys")
             assert set(panel._key_badges) == {"openrouter"}  # only the configured key is emphasised
             card = panel._key_badges["openrouter"].master.master
             assert card.cget("highlightbackground") == panel.colors["accent"]
