@@ -75,6 +75,9 @@ class ControlPanel:
         self._addon_catalog = None
         self._addon_error = None
         self._addon_busy = set()
+        # Cloud keys: hover tooltip and live check results shown on the cards (key_ui.py).
+        self._key_tooltip = None
+        self._key_dialog = None
 
     def show(self):
         with self._lock:
@@ -212,6 +215,9 @@ class ControlPanel:
             for child in frame.winfo_children():
                 child.destroy()
         self._images = []
+        if self._key_tooltip:
+            self._key_tooltip.hide()
+        self._key_badges = {}
         self.state_label = self.record_button = self.files_button = None
         self._nav()
         self.canvas = tk.Canvas(self.content_holder, bg=c["surface"], highlightthickness=0)
@@ -454,10 +460,98 @@ class ControlPanel:
         self._segmented(self._card("settings", _("Tema"), _("Chiaro, scuro o come Windows.")),
                         [("system", _("Sistema")), ("light", _("Chiaro")), ("dark", _("Scuro"))],
                         fluent.theme(), self._apply_theme)
+        self._logo_section()
         # Language names stay in their own language: findable whatever is shown now.
         self._segmented(self._card("globe", _("Lingua"), _("Menu, finestre e notifiche.")),
                         [(i18n.SYSTEM, _("Sistema"))] + list(i18n.LANGUAGES.items()),
                         self.config.get("ui_language", i18n.SOURCE), self._apply_ui_language)
+
+    def _logo_section(self):
+        """Tray icon look: one tile per style, the current one outlined; hover plays 'recording'."""
+        import tkinter as tk
+        from PIL import ImageTk
+        from . import tray_logo
+        c = self.colors
+        current = self.config.get("tray_logo") if self.config.get("tray_logo") in tray_logo.STYLE_IDS             else tray_logo.DEFAULT
+        card = tk.Frame(self.body, bg=c["card"], highlightthickness=1, highlightbackground=c["line"],
+                        padx=self._p(16), pady=self._p(12))
+        card.pack(fill="x", pady=(0, self._p(4)))
+        head = tk.Frame(card, bg=c["card"])
+        head.pack(fill="x")
+        self._glyph(head, "pulse", 14, c["text"], c["card"]).pack(side="left", padx=(0, self._p(16)))
+        texts = tk.Frame(head, bg=c["card"])
+        texts.pack(side="left", fill="x", expand=True)
+        tk.Label(texts, text=_("Icona nell'area di notifica"), font=(self.font, 10), fg=c["text"], bg=c["card"],
+                 anchor="w").pack(fill="x")
+        tk.Label(texts, text=_("Ferma quando è pronta, si muove mentre detti e trascrivi. "
+                               "Passa il mouse su un'icona per vederla in azione."),
+                 font=(self.font, 8), fg=c["muted"], bg=c["card"], anchor="w", justify="left").pack(fill="x")
+        row = tk.Frame(card, bg=c["card"])
+        row.pack(fill="x", pady=(self._p(10), 0))
+        size = self._p(40)
+        color = tray_logo.color_for(self.dark)
+
+        def image(style, state, index):
+            if style == "marble":
+                from .tray_icon import _render_icon_frame
+                picture = _render_icon_frame(0.45, hue_range=0.08, saturation=0.9, brightness=0.95)
+                picture = picture.resize((size, size))
+            else:
+                picture = tray_logo.frame(style, state, index, size, color)
+            photo = ImageTk.PhotoImage(picture, master=self.root)
+            self._images.append(photo)
+            return photo
+
+        for column, (style, label) in enumerate(tray_logo.STYLES):
+            row.columnconfigure(column, weight=1, uniform="logo")
+            selected = style == current
+            tile = tk.Frame(row, bg=c["raised"] if selected else c["card"], cursor="hand2", takefocus=1,
+                            highlightthickness=self._p(2) if selected else 1,
+                            highlightbackground=c["accent"] if selected else c["line"], highlightcolor=c["text"],
+                            padx=self._p(4), pady=self._p(6))
+            tile.grid(row=0, column=column, sticky="nsew", padx=(0, self._p(6)))
+            still = image(style, "idle", 0)
+            picture = tk.Label(tile, image=still, bg=tile["bg"])
+            picture.pack()
+            name = tk.Label(tile, text=_(label), font=(self.font, 8, "bold" if selected else "normal"),
+                            fg=c["text"] if selected else c["muted"], bg=tile["bg"], justify="center",
+                            wraplength=self._p(64))
+            name.pack(pady=(self._p(4), 0))
+            play = {"job": None, "frames": None, "index": 0}
+
+            def step(picture=picture, play=play):
+                if not picture.winfo_exists():
+                    return
+                play["index"] = (play["index"] + 1) % len(play["frames"])
+                picture.configure(image=play["frames"][play["index"]])
+                play["job"] = self.root.after(120, step)
+
+            def enter(event, style=style, picture=picture, play=play, step=step):
+                if style == "marble" or play["job"]:
+                    return
+                if play["frames"] is None:
+                    count = tray_logo.frame_count(style, "recording")
+                    play["frames"] = [image(style, "recording", i) for i in range(count)]
+                play["job"] = self.root.after(0, step)
+
+            def leave(event, picture=picture, play=play, still=still):
+                if play["job"]:
+                    self.root.after_cancel(play["job"])
+                    play["job"] = None
+                if picture.winfo_exists():
+                    picture.configure(image=still)
+
+            for widget in (tile, picture, name):
+                widget.bind("<Button-1>", lambda event, s=style: self._apply_logo(s))
+                widget.bind("<Enter>", enter, add="+")
+                widget.bind("<Leave>", leave, add="+")
+            tile.bind("<Return>", lambda event, s=style: self._apply_logo(s))
+            tile.bind("<space>", lambda event, s=style: self._apply_logo(s))
+
+    def _apply_logo(self, style):
+        self.tray._set_tray_logo(style)
+        self._load()
+        self._render()
 
     def _history_section(self):
         import tkinter as tk
@@ -878,17 +972,8 @@ class ControlPanel:
         else:
             self._switch(control, self._autostart, lambda on: self._toggle_autostart())
         self._section(_("Riconoscimento cloud"))
-        from ..core.stt_engine.key_manager import KeyManager
-        for provider, label, ask, get in (
-                ("groq", "Groq", self.tray._ask_api_key_groq, self.tray._open_groq_console),
-                ("deepgram", "Deepgram", self.tray._ask_api_key_deepgram, self.tray._open_deepgram_console)):
-            configured = bool(KeyManager.get_key(provider))
-            control = self._card("cloud", _("Chiave {provider}").format(provider=label),
-                                 _("Configurata. Resta nel portachiavi di Windows.") if configured
-                                 else _("Non configurata. Resta nel portachiavi di Windows."))
-            self._button(control, _("Imposta…"), lambda ask=ask: ask(None, None)).pack(side="right")
-            self._button(control, _("Ottieni chiave"), lambda get=get: get(None, None)).pack(
-                side="right", padx=(0, self._p(8)))
+        self._key_card("groq")
+        self._key_card("deepgram")
         control = self._card("refresh", _("Verifica connessione"), _("Prova i provider cloud configurati."))
         self._button(control, _("Verifica"), lambda: self.tray._test_cloud_connection(None, None)).pack(side="right")
         self._section(_("Correzione del testo"))
@@ -897,14 +982,66 @@ class ControlPanel:
                                   "con la tua chiave. Senza chiave il testo resta com'è.")),
                      bool(self.config.get("enable_stt_cleanup", True)),
                      lambda on: self._work(lambda: self.tray._set_text_cleanup(on)))
-        configured = bool(KeyManager.get_key("openrouter"))
-        control = self._card("cloud", _("Chiave {provider}").format(provider="OpenRouter"),
-                             _("Configurata. Resta nel portachiavi di Windows.") if configured
-                             else _("Non configurata. Resta nel portachiavi di Windows."))
-        self._button(control, _("Imposta…"),
-                     lambda: self.tray._ask_api_key_openrouter(None, None, on_done=self._refresh_soon)).pack(side="right")
-        self._button(control, _("Ottieni chiave"), lambda: self.tray._open_openrouter_console(None, None)).pack(
+        self._key_card("openrouter")
+
+    def _key_card(self, provider):
+        """Active keys stand out (accent border, badge); hovering shows the key's details."""
+        import tkinter as tk
+        from . import key_info, key_ui
+        from ..core.stt_engine.key_manager import KeyManager
+        c = self.colors
+        meta = key_info.PROVIDERS[provider]
+        key = KeyManager.get_key(provider)
+        description = (_("Attiva. Passa il mouse per vedere chiave, plafond e scadenza.") if key
+                       else _("Non configurata. Resta nel portachiavi di Windows."))
+        control = self._card("cloud", _("Chiave {provider}").format(provider=meta["label"]), description)
+        card = control.master
+        self._button(control, _("Cambia…") if key else _("Imposta…"), lambda: self._open_key_dialog(provider),
+                     primary=not key).pack(side="right")
+        self._button(control, _("Ottieni nuova chiave"), lambda: self.tray._open_key_console(provider)).pack(
             side="right", padx=(0, self._p(8)))
+        if not key:
+            return
+        card.configure(highlightbackground=c["accent"], highlightthickness=self._p(2))
+        badge = tk.Label(control, font=(self.font, 8, "bold"), bg=c["card"], padx=self._p(8))
+        badge.pack(side="right", padx=(0, self._p(8)))
+        self._key_badges[provider] = badge
+        report = key_info.cached(provider, key)
+        self._paint_badge(provider, report)
+        if self._key_tooltip is None:
+            self._key_tooltip = key_ui.KeyTooltip(self)
+        self._key_tooltip.attach(card, provider)
+        if report is None:
+            def run():
+                fresh = key_info.check(provider, key)
+                self._call_soon(lambda: self._key_checked(provider, fresh))
+            threading.Thread(target=run, daemon=True, name="key-info").start()
+
+    def _paint_badge(self, provider, report):
+        badge = self._key_badges.get(provider)
+        if not badge or not badge.winfo_exists():
+            return
+        c = self.colors
+        if report is None:
+            badge.configure(text="● " + _("Attiva"), fg=c["ok"])
+        elif report.ok:
+            badge.configure(text="● " + _("Attiva"), fg=c["ok"])
+        elif report.error.kind == "network":
+            badge.configure(text="● " + _("Non verificata"), fg=c["busy"])
+        else:
+            badge.configure(text="● " + _("Non valida"), fg=c["rec"])
+
+    def _key_checked(self, provider, report):
+        self._paint_badge(provider, report)
+
+    def _open_key_dialog(self, provider):
+        from . import key_ui
+        if self._key_dialog and self._key_dialog.top.winfo_exists():
+            self._key_dialog.top.lift()
+            return
+        if self._key_tooltip:
+            self._key_tooltip.hide()
+        self._key_dialog = key_ui.KeyDialog(self, provider, on_saved=self._refresh_soon)
 
     def _page_about(self):
         from .build_info import VERSION, IS_TEST_BUILD
@@ -917,6 +1054,11 @@ class ControlPanel:
         self._button(control, _("Esci"), self._exit).pack(side="right")
 
     # ── actions ─────────────────────────────────────────────────────
+
+    def _call_soon(self, callback):
+        """From any thread: run *callback* on the panel's Tk thread."""
+        self._commands.put(("call", callback))
+        self._wake()
 
     def _refresh_soon(self):
         """From any thread: reload settings and redraw the page."""
@@ -1068,6 +1210,12 @@ class ControlPanel:
         try:
             while True:
                 command = self._commands.get_nowait()
+                if isinstance(command, tuple):
+                    try:
+                        command[1]()
+                    except Exception:
+                        logger.exception("Aggiornamento del pannello non riuscito")
+                    continue
                 if command == "stop":
                     self.root.destroy()
                     return False

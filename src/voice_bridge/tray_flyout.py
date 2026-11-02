@@ -871,6 +871,9 @@ class TrayFlyout:
             return
         if self.root.state() != "withdrawn":
             self._update_state()
+        self._ticks = getattr(self, "_ticks", 0) + 1
+        if self._ticks % 5 == 0:  # ~5 s hidden: the tray logo follows a taskbar light/dark switch
+            self.tray._animator.follow_theme()
         # A hidden flyout never polls files/devices or renders frames.
         self.root.after(1000 if self.root.state() == "withdrawn" else 250, self._tick)
 

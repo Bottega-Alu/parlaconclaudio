@@ -89,7 +89,17 @@ class KeyManager:
 
     @staticmethod
     def get_key(provider: str) -> str | None:
-        """Retrieve API key for *provider* ('groq' or 'deepgram')."""
+        """Retrieve API key for *provider* ('groq', 'deepgram' or 'openrouter')."""
+        return KeyManager.resolve(provider)[0]
+
+    @staticmethod
+    def key_source(provider: str) -> str | None:
+        """Where the key in use comes from: 'env', 'keyring', 'json' or None."""
+        return KeyManager.resolve(provider)[1]
+
+    @staticmethod
+    def resolve(provider: str) -> tuple[str | None, str | None]:
+        """(key, source) following the order env → keyring → JSON."""
         provider = provider.lower()
 
         # 1. Environment variable
@@ -97,7 +107,7 @@ class KeyManager:
         if env_var:
             val = os.environ.get(env_var)
             if val:
-                return val
+                return val, "env"
 
         # 2. OS keyring
         if _keyring_available():
@@ -105,7 +115,7 @@ class KeyManager:
                 import keyring
                 val = keyring.get_password(_KEYRING_SERVICE, provider)
                 if val:
-                    return val
+                    return val, "keyring"
             except Exception as e:
                 logger.debug(f"Keyring read failed for {provider}: {e}")
 
@@ -115,9 +125,9 @@ class KeyManager:
             config = _load_json_config()
             val = config.get(json_key)
             if val:
-                return val
+                return val, "json"
 
-        return None
+        return None, None
 
     @staticmethod
     def set_key(provider: str, key: str) -> str:
