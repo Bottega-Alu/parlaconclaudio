@@ -8,6 +8,7 @@ dictation alive.
 import logging
 import queue
 import threading
+import time
 
 from . import fluent, i18n
 from .fluent import ICON
@@ -79,6 +80,9 @@ class ControlPanel:
         # Cloud keys: hover tooltip and live check results shown on the cards (key_ui.py).
         self._key_tooltip = None
         self._key_dialog = None
+        # "Verifica connessione": result shown inline on its card, never a modal box.
+        self._cloud_checking = False
+        self._cloud_result = None   # (ok: bool, text) of the last run
 
     def show(self):
         with self._lock:
@@ -984,10 +988,54 @@ class ControlPanel:
         self._section(_("Riconoscimento cloud"))
         self._key_card("groq")
         self._key_card("deepgram")
-        control = self._card("refresh", _("Verifica connessione"), _("Prova i provider cloud configurati."))
-        self._button(control, _("Verifica"), lambda: self.tray._test_cloud_connection(None, None)).pack(side="right")
+        self._cloud_check_card()
         self._section(_("Correzione del testo"))
         self._key_card("openrouter")
+
+    def _cloud_check_card(self):
+        """Live check of the cloud keys; the outcome lands on this card and on the key badges."""
+        c = self.colors
+        if self._cloud_checking:
+            description = _("Contatto i provider cloud…")
+        elif self._cloud_result:
+            description = self._cloud_result[1]
+        else:
+            description = _("Prova i provider cloud configurati.")
+        control = self._card("refresh", _("Verifica connessione"), description)
+        if self._cloud_result and not self._cloud_checking:
+            labels = control.master.winfo_children()[-1].winfo_children()
+            labels[-1].configure(fg=c["ok"] if self._cloud_result[0] else c["rec"])
+        self._button(control, _("Verifico…") if self._cloud_checking else _("Verifica"),
+                     self._check_cloud, enabled=not self._cloud_checking).pack(side="right")
+
+    def _check_cloud(self):
+        from . import key_info
+        from ..core.stt_engine.key_manager import KeyManager
+        keys = {p: k for p in ("groq", "deepgram") if (k := KeyManager.get_key(p))}
+        if not keys:
+            self._cloud_result = (False, _("Nessuna chiave cloud configurata."))
+            self._render()
+            return
+        self._cloud_checking = True
+        self._render()
+
+        def run():
+            reports = {p: key_info.check(p, k, use_cache=False) for p, k in keys.items()}
+            failed = [key_info.PROVIDERS[p]["label"] for p, r in reports.items() if not r.ok]
+            when = time.strftime("%H:%M")
+            if failed:
+                result = (False, _("Verificata alle {time}. Da controllare: {names} (passa il mouse sulla chiave per il motivo).")
+                          .format(time=when, names=", ".join(failed)))
+            else:
+                result = (True, _("Verificata alle {time}: tutti i provider rispondono.").format(time=when))
+
+            def done():
+                self._cloud_checking = False
+                self._cloud_result = result
+                self._render()
+            self._call_soon(done)
+        threading.Thread(target=run, daemon=True, name="cloud-check").start()
+
 
     def _key_card(self, provider):
         """Active keys stand out (accent border, badge); hovering shows the key's details."""
@@ -1027,7 +1075,9 @@ class ControlPanel:
         if not badge or not badge.winfo_exists():
             return
         c = self.colors
-        if report is None:
+        if self._cloud_checking and provider in ("groq", "deepgram"):
+            badge.configure(text="● " + _("Verifico…"), fg=c["busy"])
+        elif report is None:
             badge.configure(text="● " + _("Attiva"), fg=c["ok"])
         elif report.ok:
             badge.configure(text="● " + _("Attiva"), fg=c["ok"])

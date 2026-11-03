@@ -2,6 +2,16 @@
 
 Detailed notes for each release: [`docs/releases/`](docs/releases/) and the [GitHub releases](https://github.com/Bottega-Alu/parlaconclaudio/releases).
 
+## 1.1.0
+
+### Quick controls
+- The quick controls (left click on the tray icon) are drawn on a single canvas instead of ~300 native widgets: page switches, theme and language changes appear in one step, with no screenshot curtain. Measured with real clicks: back from a list 7 visible states and 1 flash -> 2 states, 0 flashes; lists open in 172-197 ms instead of 266-784 ms; Theme tile 727 ms -> 327 ms.
+- Keyboard: Tab / Shift+Tab move the focus, arrows move in lists and change the volume sliders, Enter / Space activate; the focus ring appears only after keyboard use.
+- Margins are symmetric at every scale (the native shadow frame takes a few pixels of the window).
+
+### API keys
+- "Check connection" no longer opens a Windows message box (and its system sound): the key badges show "Checking..." and the result appears on the card, green or red.
+
 ## 1.0.23
 
 ### Look
