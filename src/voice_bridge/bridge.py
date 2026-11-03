@@ -79,14 +79,14 @@ class VoiceBridge:
 
         # Read initial config from shared tts_config.json
         self._load_shared_config()
-        self._mic_device_id = self.config.mic_device_id
+        self._mic_name = self.config.mic_device_name
 
         # Components (lazy init for heavy ones like Whisper)
         self._recorder = AudioRecorder(
             sample_rate=self.config.sample_rate,
             channels=self.config.channels,
             chunk_size=self.config.chunk_size,
-            device_id=self._mic_device_id,
+            device_id=None,  # the saved microphone is looked up by name at start
             max_seconds=self.config.recording_timeout,
         )
         self._transcriber = Transcriber(
@@ -386,7 +386,9 @@ class VoiceBridge:
         logger.info("=" * 50)
 
         # Mic health check — detect flooding/broken devices before user tries to record
-        logger.info(f"Mic health check (device {self._mic_device_id})...")
+        if self._mic_name and not self._recorder.use_microphone(self._mic_name):
+            logger.warning(f"Microphone '{self._mic_name}' is not connected: using the Windows default")
+        logger.info(f"Mic health check ({self._mic_name or 'Windows default'})...")
         hc = self._recorder.health_check(test_duration=0.5)
         if hc["ok"]:
             logger.info(
@@ -396,7 +398,7 @@ class VoiceBridge:
         else:
             logger.warning(f"Mic FAILED: {hc['error']}")
             # Try default device as fallback
-            if self._mic_device_id is not None:
+            if self._mic_name:
                 logger.info("Trying default system microphone as fallback...")
                 self._recorder.set_device(None)
                 hc2 = self._recorder.health_check(test_duration=0.5)
@@ -411,7 +413,7 @@ class VoiceBridge:
                         "Recording may not work — check audio devices."
                     )
                     # Restore original device so user can fix via tray menu
-                    self._recorder.set_device(self._mic_device_id)
+                    self._recorder.use_microphone(self._mic_name)
 
         # Start tray first so user sees loading animation
         self._tray.start()
@@ -451,8 +453,10 @@ class VoiceBridge:
                 shared = json.loads(config_path.read_text(encoding="utf-8"))
 
                 # Microphone
-                mic_id = shared.get("mic_device_id")
-                self.config.mic_device_id = int(mic_id) if mic_id is not None else None
+                # Saved by name: indexes change whenever a device is plugged in or out.
+                self.config.mic_device_name = shared.get("mic_device_name") or None
+                if shared.get("mic_device_id") is not None and not self.config.mic_device_name:
+                    logger.info("Old microphone setting (device index) ignored: using the Windows default")
 
                 # Volume & Mute
                 self.config.volume = int(shared.get("volume", 100))
@@ -473,15 +477,16 @@ class VoiceBridge:
         """DEPRECATED: Use _load_shared_config instead."""
         return None
 
-    def _on_mic_changed(self, device_id: int | None) -> bool:
-        """Handle microphone change from tray menu."""
+    def _on_mic_changed(self, name: str | None) -> bool:
+        """Handle microphone change from the quick controls or the app window."""
         with self._lock:
             if self._state != BridgeState.IDLE:
                 logger.warning("Cannot switch microphone while recording")
                 return False
-            self._recorder.set_device(device_id)
-            self._mic_device_id = device_id
-        logger.info(f"Microphone switched to device {device_id}")
+            connected = self._recorder.use_microphone(name)
+            self._mic_name = name
+        logger.info(f"Microphone switched to {name or 'Windows default'}"
+                    + ("" if connected else " (not connected: using the Windows default)"))
         return True
 
     def _on_volume_changed(self, level: int) -> None:

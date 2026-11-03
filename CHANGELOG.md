@@ -2,6 +2,12 @@
 
 Detailed notes for each release: [`docs/releases/`](docs/releases/) and the [GitHub releases](https://github.com/Bottega-Alu/parlaconclaudio/releases).
 
+## 1.1.1
+
+### Microphone
+- The microphone list shows each microphone Windows has active once, with its full name (as in Windows Settings > Sound). It used to show every input once per Windows audio system plus unplugged devices and Bluetooth hands-free profiles: 11 entries on a PC with one microphone.
+- The choice is saved by name instead of by position in the list, which changed whenever a device was plugged in or out (and could point to a device that is not a microphone). A saved microphone that is unplugged stays in the list as "Not connected" and the Windows default is used meanwhile. A choice saved by an older version is reset to the Windows default once.
+
 ## 1.1.0
 
 ### Quick controls

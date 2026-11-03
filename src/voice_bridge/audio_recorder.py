@@ -10,7 +10,7 @@ import threading
 import time
 import numpy as np
 
-from ..core.audio_capture.audio_capture_base import AudioCaptureConfig
+from ..core.audio_capture.audio_capture_base import AudioCaptureConfig, AudioDevice
 from ..core.audio_capture.drivers.portaudio_driver import PortAudioDriver
 from .config import DEFAULT_RECORDING_TIMEOUT_SECONDS
 
@@ -220,9 +220,22 @@ class AudioRecorder:
         return result
 
     def list_devices(self) -> list:
-        """List available input devices via PortAudio."""
+        """Active Windows microphones, each once (see microphones.py)."""
+        from . import microphones
         self._ensure_driver()
-        return self._driver.list_devices()
+        return [AudioDevice(device_id=mic.index, name=mic.name, is_default=mic.is_default)
+                for mic in microphones.list_microphones(self._driver.port_audio)]
+
+    def use_microphone(self, name: str | None) -> bool:
+        """Record from the microphone called *name* (None = Windows default).
+
+        False when that microphone is not connected: the Windows default is used.
+        """
+        from . import microphones
+        self._ensure_driver()
+        mic = microphones.find(self._driver.port_audio, name)
+        self.set_device(mic.index if mic else None)
+        return name is None or mic is not None
 
     def cleanup(self) -> None:
         """Release audio resources."""

@@ -70,7 +70,6 @@
  "Disattiva tutti gli avvisi senza perdere le impostazioni.": "Desativa todos os avisos sem perder as configurações.",
  "Disattivati": "Desativados",
  "Disattivato": "Desativado",
- "Dispositivo {number}": "Dispositivo {number}",
  "Documentazione, novità e segnalazioni.": "Documentação, novidades e relatos de problemas.",
  "Dove viene trascritta la voce.": "Onde a fala é transcrita.",
  "Download di {name} non riuscito. Riprova più tardi.": "Falha ao baixar {name}. Tente mais tarde.",
@@ -162,6 +161,7 @@
  "Nessun limite sulla chiave": "Sem limite na chave",
  "Nessuna": "Nenhuma",
  "Nessuna chiave cloud configurata.": "Nenhuma chave na nuvem configurada.",
+ "Non collegato": "Não conectado",
  "Non configurata. Resta nel portachiavi di Windows.": "Não configurada. Fica no Gerenciador de Credenciais do Windows.",
  "Non inviata": "Não enviada",
  "Non leggibile: la chiave non ha il permesso billing:read": "Não legível: a chave não tem a permissão billing:read",
@@ -311,5 +311,6 @@
  "{left} rimasti su {limit}": "{left} restantes de {limit}",
  "{name} (femminile)": "{name} (feminina)",
  "{name} (maschile)": "{name} (masculina)",
+ "{name} (non collegato)": "{name} (não conectado)",
  "{sounds} suoni · {size} MB": "{sounds} sons · {size} MB"
 }
