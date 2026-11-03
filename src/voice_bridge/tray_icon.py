@@ -714,62 +714,6 @@ class TrayIcon:
         _save_config(config)
         logger.info(f"Interface language set to: {config['ui_language']} (showing {shown})")
 
-    def _test_cloud_connection(self, icon, item):
-        """Quick validation of cloud STT connection (no actual transcription)."""
-        def _run():
-            from ..core.stt_engine.key_manager import KeyManager
-            import urllib.request
-            import urllib.error
-
-            results = []
-            groq_key = KeyManager.get_key("groq")
-            if groq_key:
-                try:
-                    req = urllib.request.Request(
-                        "https://api.groq.com/openai/v1/models",
-                        headers={"Authorization": f"Bearer {groq_key}", "User-Agent": "parlaconclaudio/1.0"},
-                    )
-                    with urllib.request.urlopen(req, timeout=5):
-                        results.append(_("Groq: ✓ Connected"))
-                except urllib.error.HTTPError as e:
-                    results.append(_("Groq: ✗ HTTP {code}").format(code=e.code))
-                except Exception as e:
-                    results.append(_("Groq: ✗ {error}").format(error=e))
-            else:
-                results.append(_("Groq: no key"))
-
-            deepgram_key = KeyManager.get_key("deepgram")
-            if deepgram_key:
-                try:
-                    req = urllib.request.Request(
-                        "https://api.deepgram.com/v1/projects",
-                        headers={"Authorization": f"Token {deepgram_key}", "User-Agent": "parlaconclaudio/1.0"},
-                    )
-                    with urllib.request.urlopen(req, timeout=5):
-                        results.append(_("Deepgram: ✓ Connected"))
-                except urllib.error.HTTPError as e:
-                    results.append(_("Deepgram: ✗ HTTP {code}").format(code=e.code))
-                except Exception as e:
-                    results.append(_("Deepgram: ✗ {error}").format(error=e))
-            else:
-                results.append(_("Deepgram: no key"))
-
-            msg = "\n".join(results)
-            logger.info(f"Cloud connection test:\n{msg}")
-
-            try:
-                import tkinter as tk
-                from tkinter import messagebox
-                root = tk.Tk()
-                root.withdraw()
-                root.attributes("-topmost", True)
-                messagebox.showinfo(_("STT Cloud Connection Test"), msg, parent=root)
-                root.destroy()
-            except Exception:
-                pass
-
-        threading.Thread(target=_run, daemon=True).start()
-
     def _make_set_language(self, lang_code):
         def handler(icon, item):
             config = _load_config()
