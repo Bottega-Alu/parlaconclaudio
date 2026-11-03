@@ -533,7 +533,7 @@ class TrayIcon:
         on_exit: Callable[[], None] | None = None,
         on_purge_vram: Callable[[], None] | None = None,
         on_stt_mode_changed: Callable[[str], None] | None = None,
-        on_mic_changed: Callable[[int | None], None] | None = None,
+        on_mic_changed: Callable[[str | None], bool] | None = None,
         on_volume_changed: Callable[[int], None] | None = None,
         on_muted_changed: Callable[[bool], None] | None = None,
         transcriber=None,
@@ -598,15 +598,17 @@ class TrayIcon:
             logger.warning("Failed to list microphones: %s", exc)
             return []
 
-    def _make_set_mic(self, device_id: int):
+    def _make_set_mic(self, name: str | None):
+        """Save the microphone by name (None = Windows default): indexes are not stable."""
         def handler(icon, item):
-            if self._on_mic_changed and self._on_mic_changed(device_id) is False:
+            if self._on_mic_changed and self._on_mic_changed(name) is False:
                 self._notify(_("Microfono invariato: termina la registrazione prima di cambiarlo."))
                 return
             config = _load_config()
-            config["mic_device_id"] = device_id
+            config["mic_device_name"] = name
+            config.pop("mic_device_id", None)
             _save_config(config)
-            logger.info(f"Microphone set to device {device_id}")
+            logger.info(f"Microphone set to {name or 'Windows default'}")
         return handler
 
     # ------------------------------------------------------------------

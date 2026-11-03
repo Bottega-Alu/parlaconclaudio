@@ -37,7 +37,7 @@ class VoiceBridgeConfig:
     sample_rate: int = 16000
     channels: int = 1
     chunk_size: int = 1024
-    mic_device_id: int | None = None
+    mic_device_name: str | None = None  # None = Windows default (see microphones.py)
 
     # Sound feedback
     sound_on_start: bool = True

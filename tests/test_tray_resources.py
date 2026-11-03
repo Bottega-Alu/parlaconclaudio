@@ -32,7 +32,7 @@ def test_mic_rejection_does_not_persist(monkeypatch):
     tray = tray_icon.TrayIcon(on_mic_changed=lambda device: False)
     monkeypatch.setattr(tray_icon, '_save_config', lambda config: (_ for _ in ()).throw(AssertionError('must not save')))
     monkeypatch.setattr(tray, '_notify', lambda text: None)
-    tray._make_set_mic(12)(None, None)
+    tray._make_set_mic('Microfono USB')(None, None)
 
 
 def test_file_dialog_busy_guard(monkeypatch):

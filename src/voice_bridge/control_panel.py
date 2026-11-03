@@ -190,8 +190,12 @@ class ControlPanel:
         from .tray_icon import _load_config, list_sound_packs
         from ..core import voice_hooks
         self.config = _load_config()
-        self.mics = {_("Predefinito di Windows"): None}
-        self.mics.update({f"{dev.name} [{dev.device_id}]": dev.device_id for dev in self.tray._list_mics()})
+        from .microphones import choices
+        mics, _default, missing = choices(self.tray._list_mics(), self.config)
+        # Combo labels: translated default entry, a saved microphone that is unplugged marked as such.
+        self.mics = {(_(label) if value is None else
+                      _("{name} (non collegato)").format(name=label) if value == missing else label): value
+                     for label, value in mics.items()}
         self.packs = list_sound_packs()
         self.hooks = {agent: voice_hooks.status(agent) is True for agent in voice_hooks.AGENTS}
 
@@ -632,7 +636,7 @@ class ControlPanel:
         from ..core import voice_hooks
         c = self.colors
         config = self.config
-        mic = next((name for name, value in self.mics.items() if value == config.get("mic_device_id")),
+        mic = next((name for name, value in self.mics.items() if value == config.get("mic_device_name")),
                    _("Predefinito di Windows"))
         mode = _(next((label for label, value in TTS_MODES.items() if value == config.get("tts_mode", "full")), ""))
         pack = config.get("sound_pack", "r2d2")
@@ -666,7 +670,7 @@ class ControlPanel:
         config = self.config
         self._trigger_section()
         self._section(_("Ingresso"))
-        mic = next((name for name, value in self.mics.items() if value == config.get("mic_device_id")),
+        mic = next((name for name, value in self.mics.items() if value == config.get("mic_device_name")),
                    _("Predefinito di Windows"))
         self._combo(self._card("mic", _("Microfono"), _("Il dispositivo usato per la dettatura.")),
                     self.mics, mic, self._apply_mic)

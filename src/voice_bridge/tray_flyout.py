@@ -23,6 +23,7 @@ from .menu_dpi import native_menu_dpi
 from . import flyout_window
 from . import fluent
 from .fluent import ICON
+from .microphones import choices as microphone_choices
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ class TrayFlyout:
         self.volume = 100
         self.voice_volume = 100
         self.mics = {}
+        self._default_mic = self._missing_mic = None
         self.packs = []
         self.root = None
         self.canvas = None
@@ -206,6 +208,15 @@ class TrayFlyout:
         return self.canvas.create_text(x, y, text=text, font=self._font(size, weight), anchor=anchor,
                                        fill=fill or self.colors["text"], width=width or 0)
 
+    def _fit(self, text, size, width, weight="normal"):
+        """*text* cut with an ellipsis to *width* pixels (canvas text does not clip)."""
+        font = self._font(size, weight)
+        if font.measure(text) <= width:
+            return text
+        while text and font.measure(text + "…") > width:
+            text = text[:-1]
+        return text.rstrip() + "…"
+
     def _glyph(self, x, y, name, size=12, fill=None):
         if self.icons:
             self.canvas.create_text(x, y, text=ICON[name], font=self._font(size, icons=True),
@@ -297,7 +308,7 @@ class TrayFlyout:
         pack = config.get("sound_pack", "r2d2")
         mode = config.get("tts_mode", "full")
         mic = next((name for name, value in self.mics.items()
-                    if value == config.get("mic_device_id")), _("Predefinito"))
+                    if value == config.get("mic_device_name")), _("Predefinito"))
         return {
             "audio": _("Disattivato") if self._muted else _("Suoni {volume}% · voci {voices}%").format(
                 volume=self.volume, voices=self.voice_volume),
@@ -507,9 +518,14 @@ class TrayFlyout:
             return (_("Avvisi vocali"), items, config.get("tts_mode", "full"), False,
                     _("Come vengono annunciati la fine di un'attività e le richieste di permesso."))
         if page == "mic":
-            items = [(value, _t(name.split(" [")[0]), _("Segue l'impostazione di Windows") if value is None
-                      else _("Dispositivo {number}").format(number=value), "mic") for name, value in self.mics.items()]
-            return (_("Microfono"), items, config.get("mic_device_id"), False,
+            def detail(value):
+                if value is None:
+                    return _("Segue l'impostazione di Windows")
+                if value == self._missing_mic:
+                    return _("Non collegato")
+                return _("Predefinito di Windows") if value == self._default_mic else ""
+            items = [(value, _t(name), detail(value), "mic") for name, value in self.mics.items()]
+            return (_("Microfono"), items, config.get("mic_device_name"), False,
                     _("Il dispositivo usato per la dettatura."))
         items = [(key, _t(label).split(" (")[0], _t(STT_MODE_DETAILS.get(key, "")), "cloud" if key.startswith("cloud") else "chip")
                  for key, label in STT_MODES.items()]
@@ -594,9 +610,11 @@ class TrayFlyout:
         self._glyph(x + p(10), text_top + (line + self._line(8)) / 2, row["icon"], 13,
                     c["accent"] if current else c["text"])
         tx = x + p(20) + p(12)
-        self._text(tx, text_top, row["label"], 10, weight="bold" if current else "normal")
+        room = right - tx - p(36)  # the check mark sits on the right
+        weight = "bold" if current else "normal"
+        self._text(tx, text_top, self._fit(row["label"], 10, room, weight), 10, weight=weight)
         detail = (_("In uso · {detail}").format(detail=row["detail"]) if current and expandable else row["detail"])
-        self._text(tx, text_top + line, detail, 8, c["muted"])
+        self._text(tx, text_top + line, self._fit(detail, 8, room), 8, c["muted"])
         if current and not expandable:
             self._glyph(right - p(20), text_top + (line + self._line(8)) / 2, "check", 11, c["accent"])
         visible = (max(y, top), min(y + h, bottom))
@@ -819,8 +837,7 @@ class TrayFlyout:
         self._muted = bool(config.get("muted", False))
         self.volume = sound_volume(config)
         self.voice_volume = voice_volume(config)
-        self.mics = {N_("Predefinito di Windows"): None}
-        self.mics.update({f"{d.name} [{d.device_id}]": d.device_id for d in self.tray._list_mics()})
+        self.mics, self._default_mic, self._missing_mic = microphone_choices(self.tray._list_mics(), config)
         self.packs = list_sound_packs()
 
     def _refresh(self, rebuild=True):

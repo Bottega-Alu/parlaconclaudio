@@ -88,6 +88,11 @@ class PortAudioDriver(AudioCaptureBase):
             except:
                 pass
 
+    @property
+    def port_audio(self):
+        """The PyAudio instance, to enumerate host APIs (microphones.py)."""
+        return self._pa
+
     def _get_api_name(self) -> str:
         """Get the underlying audio API name."""
         try:

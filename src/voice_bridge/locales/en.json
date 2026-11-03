@@ -70,7 +70,6 @@
  "Disattiva tutti gli avvisi senza perdere le impostazioni.": "Turns off all alerts without losing your settings.",
  "Disattivati": "Off",
  "Disattivato": "Off",
- "Dispositivo {number}": "Device {number}",
  "Documentazione, novità e segnalazioni.": "Documentation, news and issue reports.",
  "Dove viene trascritta la voce.": "Where speech is transcribed.",
  "Download di {name} non riuscito. Riprova più tardi.": "Downloading {name} failed. Try again later.",
@@ -162,6 +161,7 @@
  "Nessun limite sulla chiave": "No limit on the key",
  "Nessuna": "None",
  "Nessuna chiave cloud configurata.": "No cloud key configured.",
+ "Non collegato": "Not connected",
  "Non configurata. Resta nel portachiavi di Windows.": "Not configured. It stays in Windows Credential Manager.",
  "Non inviata": "Not delivered",
  "Non leggibile: la chiave non ha il permesso billing:read": "Not readable: the key lacks the billing:read permission",
@@ -311,5 +311,6 @@
  "{left} rimasti su {limit}": "{left} left of {limit}",
  "{name} (femminile)": "{name} (female)",
  "{name} (maschile)": "{name} (male)",
+ "{name} (non collegato)": "{name} (not connected)",
  "{sounds} suoni · {size} MB": "{sounds} sounds · {size} MB"
 }
