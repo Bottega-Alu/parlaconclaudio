@@ -7,6 +7,12 @@ from src.voice_bridge.menu_dpi import native_menu_dpi
 from src.voice_bridge.tray_flyout import TrayFlyout
 
 
+def _texts(flyout):
+    """Every text drawn on the quick controls' single canvas."""
+    canvas = flyout.canvas
+    return [canvas.itemcget(item, "text") for item in canvas.find_all() if canvas.type(item) == "text"]
+
+
 def _packs(tmp_path, monkeypatch):
     for name, count in (("r2d2", 2), ("dune", 1), ("_private", 3), ("empty", 0)):
         folder = tmp_path / name
@@ -44,11 +50,12 @@ def test_pack_rows_expand_like_wifi_and_use_selects_the_pack(tmp_path, monkeypat
         try:
             flyout._show()
             flyout._open_page("packs")
-            keys = [row._row_key for row in flyout.rows]
+            keys = [row["key"] for row in flyout.rows]
             assert keys == ["random", "dune", "empty", "r2d2"]
-            assert flyout.root.focus_get() is flyout.rows[1]  # current pack
+            assert flyout._focus == ("row", "dune")  # current pack
             flyout._toggle_row("r2d2")
             assert flyout._expanded == "r2d2"
+            assert "Ascolta" in _texts(flyout) and "Usa" in _texts(flyout)
             flyout._work = lambda action: action()
             flyout._select("r2d2")
             assert config["sound_pack"] == "r2d2"
@@ -140,7 +147,7 @@ def test_hook_plays_voices_at_voice_volume(monkeypatch, tmp_path):
     assert [args[args.index("-af") + 1] for args in calls] == ["volume=110/100", "volume=30/100"]
 
 
-def test_main_page_actions_update_in_place_without_rebuilding(monkeypatch):
+def test_main_page_actions_redraw_the_single_canvas(monkeypatch):
     config = {"volume": 100, "muted": False, "sound_pack": "random"}
     monkeypatch.setattr(tray_icon, "_load_config", lambda: dict(config))
     monkeypatch.setattr(tray_icon, "_save_config", lambda value: config.update(value))
@@ -150,19 +157,20 @@ def test_main_page_actions_update_in_place_without_rebuilding(monkeypatch):
         flyout._build()
         try:
             flyout._show()
-            canvas = flyout.record_tile["canvas"]
+            canvas = flyout.canvas
             config.update(muted=True, volume=40)
             flyout._commands.put("refresh")
             flyout._drain()
-            assert flyout.record_tile["canvas"] is canvas  # nothing destroyed: no flicker
-            assert flyout.tiles["audio"]["value"]["text"] == "Disattivato"
-            assert flyout.slider.value == 40
+            assert flyout.canvas is canvas
+            assert flyout.root.winfo_children() == [canvas]  # no child windows to repaint one by one
+            assert flyout.tiles["audio"]["value"] == "Disattivato" and "Disattivato" in _texts(flyout)
+            assert flyout.volume == 40 and "40%" in _texts(flyout)
         finally:
             flyout.root.destroy()
 
 
-def test_page_switch_happens_behind_a_curtain_lifted_once_painted(monkeypatch):
-    """Opening a list shows the old picture until the new page is fully painted."""
+def test_page_switch_redraws_one_canvas_without_resizing(monkeypatch):
+    """Pages are scenes on the same canvas: no window is created, mapped or resized."""
     monkeypatch.setattr(tray_icon, "_load_config", lambda: {"volume": 100, "sound_pack": "random"})
     tray = tray_icon.TrayIcon()
     with native_menu_dpi():
@@ -171,17 +179,65 @@ def test_page_switch_happens_behind_a_curtain_lifted_once_painted(monkeypatch):
         try:
             flyout._show()
             height = flyout.root.winfo_height()
-            seen = []
-            real_raise = flyout._raise_page
-            def raise_page(page):
-                seen.append((page, flyout._curtain.active, flyout._curtain.top.winfo_ismapped()))
-                real_raise(page)
-            flyout._raise_page = raise_page
-            flyout._open_page("engine")
-            flyout._back()
-            assert seen == [("engine", True, True), ("main", True, True)]
-            assert not flyout._curtain.active and not flyout._curtain.top.winfo_ismapped()
-            assert flyout.root.winfo_height() == height  # one height for every page: no resize
+            for action in (lambda: flyout._open_page("engine"), flyout._back,
+                           lambda: flyout._open_page("packs"), flyout._escape):
+                action()
+                flyout.root.update()
+                assert flyout.root.winfo_children() == [flyout.canvas]
+                assert flyout.root.winfo_height() == height
+            assert flyout._page == "main" and flyout._focus == ("tile", "packs")
+        finally:
+            flyout.root.destroy()
+
+
+def test_keyboard_moves_focus_and_activates(monkeypatch):
+    config = {"volume": 100, "sound_pack": "random", "tts_mode": "full"}
+    monkeypatch.setattr(tray_icon, "_load_config", lambda: dict(config))
+    monkeypatch.setattr(tray_icon, "_save_config", lambda value: config.update(value))
+    tray = tray_icon.TrayIcon()
+    tray._on_toggle_recording = lambda: None  # dictation wired: its tile takes the focus
+    with native_menu_dpi():
+        flyout = TrayFlyout(tray)
+        flyout._build()
+        try:
+            flyout._show()
+            assert flyout._focus == ("tile", "record")
+            for _ in range(3):
+                flyout._move_focus(1)
+            assert flyout._focus == ("tile", "voice")
+            flyout._activate_focus()
+            assert flyout._page == "voice" and flyout._focus == ("row", "full")
+            flyout._arrow(1)
+            assert flyout._focus == ("row", "semi-silent")
+            flyout._work = lambda action: action()
+            flyout._activate_focus()
+            assert config["tts_mode"] == "semi-silent"
+            flyout._escape()
+            assert flyout._page == "main"
+        finally:
+            flyout.root.destroy()
+
+
+def test_slider_drag_commits_once_on_release(monkeypatch):
+    config = {"volume": 100, "voice_volume": 100}
+    monkeypatch.setattr(tray_icon, "_load_config", lambda: dict(config))
+    tray = tray_icon.TrayIcon()
+    with native_menu_dpi():
+        flyout = TrayFlyout(tray)
+        flyout._build()
+        try:
+            flyout._show()
+            saved = []
+            flyout._work = saved.append
+            start, end, maximum = flyout._slider_track[("slider", "volume")]
+            box = next(hit for hit in flyout._hits if hit[0] == ("slider", "volume"))
+            y = (box[2] + box[4]) / 2
+            event = lambda x: type("E", (), {"x": x, "y": y})()
+            flyout._on_press(event(start))
+            flyout._on_drag(event(start + (end - start) / 2))
+            assert flyout.volume == round(maximum / 2) and not saved
+            flyout._on_release(event(start + (end - start) / 2))
+            assert len(saved) == 1
         finally:
             flyout.root.destroy()
 
@@ -270,52 +326,29 @@ def test_controls_show_their_value_when_another_tk_root_exists_first(monkeypatch
         flyout._build()
         try:
             flyout._show()
-            assert flyout.volume_text.get() == "40%" and flyout.voice_text.get() == "60%"
-            assert flyout.state.get()
+            assert "40%" in _texts(flyout) and "60%" in _texts(flyout)
+            assert "Pronto per dettare" in _texts(flyout)
         finally:
             flyout.root.destroy()
             first.destroy()
 
 
-def test_theme_and_language_tiles_repaint_behind_a_curtain_that_survives(monkeypatch):
-    """The tiles rebuild every page; the curtain must cover that rebuild and outlive it.
-
-    The picture is synthetic (no screen grab in tests): this checks the curtain's
-    lifecycle, not what reaches the screen; flicker_probe measures that.
-    """
-    from PIL import Image
+def test_theme_and_language_tiles_redraw_in_place(monkeypatch):
+    """Theme and language change colours and words on the same canvas, in one redraw."""
     config = {"volume": 100, "sound_pack": "random", "ui_language": "it", "ui_theme": "light"}
     monkeypatch.setattr(tray_icon, "_load_config", lambda: dict(config))
     monkeypatch.setattr(tray_icon, "_save_config", lambda value: (config.clear(), config.update(value)))
-    monkeypatch.setattr(flyout_window, "_grab", lambda x, y, w, h: Image.new("RGB", (w, h), "#304050"))
     tray = tray_icon.TrayIcon()
     with native_menu_dpi():
         flyout = TrayFlyout(tray)
         flyout._build()
         try:
             flyout._show()
-            for action in (flyout._next_theme, flyout._next_language):
-                flyout._curtain._drop()  # the curtain exists before the rebuild
-                top = flyout._curtain.top
-                destroyed = []
-                top.bind("<Destroy>", lambda event: destroyed.append(event.widget), add="+")
-                covered = []
-                real_update = flyout._update_main
-                def update_main():
-                    covered.append(flyout._curtain.active and top.winfo_exists() and top.winfo_ismapped())
-                    real_update()
-                flyout._update_main = update_main
-                flyout._curtain.top.withdraw()
-                old_page = flyout._pages["main"]
-                action()
-                flyout._update_main = real_update
-                assert covered == [True]  # rebuilt pages were hidden behind the curtain
-                assert destroyed == [] and top.winfo_exists()
-                assert flyout._curtain.top is top and not top.winfo_ismapped()
-                assert not old_page.winfo_exists()  # old pages go once the curtain is lifted
-                assert flyout._pages["packs"].winfo_manager() == ""  # laid out when first opened
-            assert config["ui_theme"] != "light" and config["ui_language"] != "it"
-            flyout._open_page("packs")
-            assert flyout._pages["packs"].winfo_manager() == "place" and flyout._page == "packs"
+            canvas = flyout.canvas
+            flyout._next_theme()
+            assert config["ui_theme"] != "light" and flyout.canvas["bg"] == flyout.colors["surface"]
+            flyout._next_language()
+            assert config["ui_language"] != "it"
+            assert flyout.canvas is canvas and flyout.root.winfo_children() == [canvas]
         finally:
             flyout.root.destroy()  # conftest restores the Italian interface and system theme
