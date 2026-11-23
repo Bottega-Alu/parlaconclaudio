@@ -1307,11 +1307,25 @@ def _pending_entries() -> list[Path]:
         return []
 
 
+def _next_stamp() -> int:
+    """Arrival stamp, strictly after every queued entry: time.time_ns() on
+    Python 3.11/Windows ticks every ~15 ms, so two entries written in a row
+    could share it and lose their arrival order."""
+    stamp = time.time_ns()
+    pending = _pending_entries()
+    if pending:
+        try:
+            stamp = max(stamp, int(pending[-1].name.split("-", 1)[0]) + 1)
+        except ValueError:
+            pass
+    return stamp
+
+
 def _write_entry(entry: dict) -> bool:
     import uuid
     try:
         VOICE_QUEUE_DIR.mkdir(parents=True, exist_ok=True)
-        name = f"{time.time_ns():020d}-{uuid.uuid4().hex[:8]}"
+        name = f"{_next_stamp():020d}-{uuid.uuid4().hex[:8]}"
         tmp = VOICE_QUEUE_DIR / f"{name}.tmp"
         tmp.write_text(json.dumps(entry), encoding="utf-8")
         os.replace(tmp, VOICE_QUEUE_DIR / f"{name}.json")  # the drainer never sees half a file

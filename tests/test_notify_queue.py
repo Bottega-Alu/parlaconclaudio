@@ -78,6 +78,15 @@ def test_easter_egg_only_once_queue_is_empty(queue):
     assert queue == ["chime:stop", "alpha-finito", "beta-finito", "egg:full"]
 
 
+def test_arrival_order_survives_a_coarse_clock(queue, monkeypatch):
+    """Python 3.11 on Windows: time_ns ticks every ~15 ms (seen failing in CI)."""
+    monkeypatch.setattr(nt.time, "time_ns", lambda: 1_000)
+    for name in ("primo", "secondo", "terzo", "quarto"):
+        nt._write_entry(_entry(nt.PRIO_DONE, name))
+    nt.drain_queue()
+    assert queue == ["chime:stop", "primo", "secondo", "terzo", "quarto"]
+
+
 def test_subagent_has_no_chime_and_goes_last(queue):
     nt._write_entry(_entry(nt.PRIO_SUBAGENT, "subagente", chime=None))
     nt._write_entry(_entry(nt.PRIO_DONE, "alpha-finito"))
