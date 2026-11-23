@@ -18,10 +18,11 @@ def spoken(monkeypatch, tmp_path):
     said = []
     config = {"tts_mode": "full"}
     monkeypatch.setattr(nt, "QUESTION_MARK_FILE", tmp_path / "q.json")
-    monkeypatch.setattr(nt, "burst_check_should_play", lambda wait_ms=0: True)
+    monkeypatch.setattr(nt, "burst_check_should_play", lambda *a, **k: True)
     monkeypatch.setattr(nt, "cleanup_tts_cache", lambda: None)
     monkeypatch.setattr(nt, "load_config", lambda: dict(config))
     monkeypatch.setattr(nt, "play_chime", lambda key, progress=0.0: None)
+    monkeypatch.setattr(nt, "enqueue_announcement", lambda e: None)
     monkeypatch.setattr(nt, "resolve_audio", lambda text, profile: said.append((text, profile["voice"])) or None)
     monkeypatch.setattr(nt, "maybe_play_easter_egg", lambda mode: None)
     monkeypatch.setattr(nt, "extract_repo_name", lambda data: "alpha")
