@@ -2,6 +2,11 @@
 
 Detailed notes for each release: [`docs/releases/`](docs/releases/) and the [GitHub releases](https://github.com/Bottega-Alu/parlaconclaudio/releases).
 
+## 1.1.3
+
+### Voice alerts
+- Alerts that arrive a few milliseconds apart keep their arrival order: the Windows clock seen by Python 3.11 ticks every ~15 ms, so two of them could share a timestamp and play in random order.
+
 ## 1.1.2
 
 ### Voice alerts
