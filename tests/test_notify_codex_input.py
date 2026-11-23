@@ -91,11 +91,12 @@ def test_garbage_input_is_silent(raw):
 @pytest.fixture()
 def spoken(monkeypatch):
     said: list[str] = []
-    monkeypatch.setattr(nt, "burst_check_should_play", lambda wait_ms=0: True)
+    monkeypatch.setattr(nt, "burst_check_should_play", lambda *a, **k: True)
     monkeypatch.setattr(nt, "cleanup_tts_cache", lambda: None)
     monkeypatch.setattr(nt, "load_config", lambda: {"tts_mode": "full"})
-    monkeypatch.setattr(nt, "play_chime", lambda key, progress=0.0: said.append(f"chime:{key}"))
-    monkeypatch.setattr(nt, "resolve_audio", lambda text, profile: said.append(text) or None)
+    monkeypatch.setattr(nt, "enqueue_announcement",
+                        lambda e: said.extend([f"chime:{e['chime']}"] + ([e["text"]] if e.get("text") else [])))
+    monkeypatch.setattr(nt, "resolve_audio", lambda text, profile: None)
     monkeypatch.setattr(nt, "maybe_play_easter_egg", lambda mode: None)
     monkeypatch.setattr(nt, "extract_repo_name", lambda data: "alpha")
     return said

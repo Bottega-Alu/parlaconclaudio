@@ -44,7 +44,11 @@ SOUNDS_DIR = CACHE_DIR / "sounds"
 TTS_CONFIG = CACHE_DIR / "tts_config.json"
 TRACKER_FILE = CACHE_DIR / "subtask_tracker.json"
 CHIME_STATE_FILE = CACHE_DIR / "chime_state.json"
-NOTIFY_BURST_FILE = CACHE_DIR / "notify_burst.txt"
+NOTIFY_BURST_FILE = CACHE_DIR / "notify_burst.txt"  # legacy single file; now one per session
+NOTIFY_BURST_DIR = CACHE_DIR / "notify_burst"
+VOICE_QUEUE_DIR = CACHE_DIR / "voice_queue"
+VOICE_QUEUE_LOCK = CACHE_DIR / "voice_queue.lock"
+VOICE_LAST_END_FILE = CACHE_DIR / "voice_last_end.txt"
 ERROR_LOG_FILE = CACHE_DIR / "notify-tts.log"
 ERROR_BEEP_FILE = CACHE_DIR / "error_beep.txt"
 
@@ -56,11 +60,26 @@ ERROR_LOG_SNIPPET_CHARS = 80
 ERROR_BEEP_MIN_INTERVAL_S = 30
 ERROR_BEEP_TONES = ((330, 120), (220, 120), (150, 250))  # (Hz, ms) descending
 
-# Burst suppression: when several hooks fire in quick succession only
-# the last invocation actually plays audio. Each invocation writes its
-# UUID, sleeps a short wait, and proceeds only if its UUID is still the
-# latest on disk.
+# Burst suppression, per session: when one session fires several hooks in
+# quick succession only its last invocation speaks. Each invocation writes its
+# UUID to the session's burst file, sleeps a short wait, and proceeds only if
+# its UUID is still the latest there. Different sessions never swallow each
+# other: they meet in the voice queue below.
 BURST_WAIT_MS = 300
+
+# One voice queue for every session (decision tree in drain_queue):
+#   - the queue was silent for CHIME_QUIET_S -> ONE chime, then the voices
+#   - otherwise                              -> no chime, the voice waits its turn
+#   - order: who needs help first (permission, question, waiting for input),
+#     then "has finished", then subagents; same priority -> arrival order
+#   - the Frisco easter egg only once the queue is empty
+# A detached --drain process holds an OS file lock while it plays; it dies with
+# the process, so a crash never leaves the queue stuck.
+DRAIN_FLAG = "--drain"
+CHIME_QUIET_S = 4
+QUEUE_STALE_S = 120
+PRIO_HELP, PRIO_DONE, PRIO_SUBAGENT = 0, 1, 2
+HELP_NOTIFICATIONS = ("permission_prompt", "elicitation_dialog", "idle_prompt")
 
 # Live playback: the detached player re-reads the sliders every block, so a
 # volume change reaches the voice already speaking. ffplay is the fallback.
@@ -497,6 +516,27 @@ def play_live(filepath: str, voice: bool) -> bool:
                 pass
         if audio is not None:
             audio.terminate()
+
+
+def play_sync(filepath: str, voice: bool) -> None:
+    """Play and wait for the end (the queue drainer speaks one line at a time).
+    Live playback first; ffplay at the level read now as the fallback."""
+    if not os.path.isfile(filepath):
+        return
+    level = get_voice_volume() if voice else get_volume()
+    if get_muted() or level <= 0:
+        return
+    if play_live(filepath, voice):
+        return
+    try:
+        subprocess.run(
+            ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
+             "-af", f"volume={level}/100", filepath],
+            creationflags=_CREATE_NO_WINDOW,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60,
+        )
+    except Exception:
+        pass
 
 
 def play_command(args: list[str]) -> None:
@@ -1123,8 +1163,9 @@ _ALL_VOICES = [v for voices in _NATIVE_VOICES.values() for v in voices]
 
 
 def maybe_play_easter_egg(tts_mode: str) -> None:
-    """~7% chance to play a Frisco appreciation quote.
-    50% native voice for the quote's language, 50% any random voice.
+    """EASTER_EGG_CHANCE to play a Frisco appreciation quote; called by the
+    queue drainer once the queue is empty, and played only if it still is.
+    80% native voice for the quote's language, 20% any random voice.
     """
     if tts_mode == "silent":
         return
@@ -1142,12 +1183,12 @@ def maybe_play_easter_egg(tts_mode: str) -> None:
     profile = {"voice": voice_id, "rate": "-2%", "pitch": "+0Hz"}
 
     audio_path = resolve_audio(quote_text, profile)
-    if audio_path:
+    if audio_path and not _pending_entries():
         time.sleep(0.8)
-        play_mp3(audio_path, voice=True)
+        play_sync(audio_path, voice=True)
 
 
-def play_subagent_voice(lang: str = "it") -> None:
+def subagent_voice_audio(lang: str = "it") -> str | None:
     """Speak the fixed SUBAGENT_PHRASE with a randomly-picked voice from
     the multilingual pool.
 
@@ -1160,9 +1201,7 @@ def play_subagent_voice(lang: str = "it") -> None:
     pool = _ALL_VOICES if lang == "it" else _NATIVE_VOICES["pt" if lang == "pt-BR" else lang]
     voice_id = random.choice(pool)
     profile = {"voice": voice_id, "rate": "+0%", "pitch": "+0Hz"}
-    audio_path = resolve_audio(PHRASES[lang]["subagent"], profile)
-    if audio_path:
-        play_mp3(audio_path, voice=True)
+    return resolve_audio(PHRASES[lang]["subagent"], profile)
 
 
 # ══════════════════════════════════════════════════
@@ -1217,28 +1256,204 @@ def update_tracker(data: dict) -> tuple[int, int]:
 # MAIN
 # ══════════════════════════════════════════════════
 
-def burst_check_should_play(wait_ms: int = BURST_WAIT_MS) -> bool:
-    """Last-wins burst suppression.
+def _burst_file(session_id: str | None) -> Path:
+    key = hashlib.sha1((session_id or "no-session").encode("utf-8")).hexdigest()[:16]
+    return NOTIFY_BURST_DIR / f"{key}.txt"
 
-    Each invocation writes a fresh UUID to NOTIFY_BURST_FILE, sleeps a
-    short window, and only proceeds to play audio if its UUID is still
-    the latest one on disk. When several hooks fire in quick succession
-    (parallel subtasks finishing together) only the last one survives —
-    the earlier ones see the file overwritten and exit silently.
+
+def burst_check_should_play(wait_ms: int = BURST_WAIT_MS, session_id: str | None = None) -> bool:
+    """Last-wins burst suppression within ONE session.
+
+    Each invocation writes a fresh UUID to its session's burst file, sleeps a
+    short window, and only proceeds if its UUID is still the latest there.
+    When one session fires several hooks in quick succession (parallel
+    subtasks finishing together) only the last one survives. Another
+    session has its own file: its announcement is never swallowed.
     """
     import uuid
     my_id = uuid.uuid4().hex
+    path = _burst_file(session_id)
     try:
-        NOTIFY_BURST_FILE.parent.mkdir(parents=True, exist_ok=True)
-        NOTIFY_BURST_FILE.write_text(my_id, encoding="utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(my_id, encoding="utf-8")
     except Exception:
         return True  # if we can't write, just play
     time.sleep(wait_ms / 1000)
     try:
-        latest = NOTIFY_BURST_FILE.read_text(encoding="utf-8").strip()
+        latest = path.read_text(encoding="utf-8").strip()
     except Exception:
         return True
     return latest == my_id
+
+
+# ══════════════════════════════════════════════════
+# VOICE QUEUE: one chime, then the voices in turn
+# ══════════════════════════════════════════════════
+
+def announcement_priority(event_name: str, sub_type: str | None) -> int:
+    if event_name == "PreToolUse":
+        return PRIO_HELP
+    if event_name == "Notification" and sub_type in HELP_NOTIFICATIONS:
+        return PRIO_HELP
+    if event_name == "TaskCompleted":
+        return PRIO_SUBAGENT
+    return PRIO_DONE
+
+
+def _pending_entries() -> list[Path]:
+    try:
+        return sorted(VOICE_QUEUE_DIR.glob("*.json"))
+    except OSError:
+        return []
+
+
+def _write_entry(entry: dict) -> bool:
+    import uuid
+    try:
+        VOICE_QUEUE_DIR.mkdir(parents=True, exist_ok=True)
+        name = f"{time.time_ns():020d}-{uuid.uuid4().hex[:8]}"
+        tmp = VOICE_QUEUE_DIR / f"{name}.tmp"
+        tmp.write_text(json.dumps(entry), encoding="utf-8")
+        os.replace(tmp, VOICE_QUEUE_DIR / f"{name}.json")  # the drainer never sees half a file
+        return True
+    except OSError:
+        return False
+
+
+def enqueue_announcement(entry: dict) -> None:
+    """Queue one announcement and make sure a drainer is running. If no
+    drainer can be spawned, drain here (the hook is async: nothing waits)."""
+    if not _write_entry(entry):
+        return
+    if not _spawn_hidden([DRAIN_FLAG]):
+        drain_queue()
+
+
+def _pop_next(now: float | None = None) -> dict | None:
+    """Most urgent entry (priority, then arrival); removed from disk. Entries
+    older than QUEUE_STALE_S are dropped: a line that late is noise."""
+    now = time.time() if now is None else now
+    best = None
+    for path in _pending_entries():
+        try:
+            entry = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            path.unlink(missing_ok=True)
+            continue
+        if not isinstance(entry, dict) or now - float(entry.get("ts", 0)) > QUEUE_STALE_S:
+            path.unlink(missing_ok=True)
+            continue
+        key = (int(entry.get("prio", PRIO_DONE)), path.name)
+        if best is None or key < best[0]:
+            best = (key, path, entry)
+    if best is None:
+        return None
+    try:
+        best[1].unlink()
+    except OSError:
+        return None  # another drainer took it
+    return best[2]
+
+
+class _QueueLock:
+    """Non-blocking OS lock on VOICE_QUEUE_LOCK, released by the OS if the
+    process dies. Off Windows there is no lock (one drainer is assumed)."""
+
+    def __init__(self):
+        self.fh = None
+
+    def acquire(self) -> bool:
+        try:
+            import msvcrt
+        except ImportError:
+            return True
+        try:
+            VOICE_QUEUE_LOCK.parent.mkdir(parents=True, exist_ok=True)
+            self.fh = open(VOICE_QUEUE_LOCK, "a+b")
+            self.fh.seek(0)
+            msvcrt.locking(self.fh.fileno(), msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            self.close()
+            return False
+
+    def release(self) -> None:
+        if self.fh is None:
+            return
+        try:
+            import msvcrt
+            self.fh.seek(0)
+            msvcrt.locking(self.fh.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        self.close()
+
+    def close(self) -> None:
+        if self.fh is not None:
+            try:
+                self.fh.close()
+            except OSError:
+                pass
+            self.fh = None
+
+
+def _quiet_for(seconds: float, now: float | None = None) -> bool:
+    now = time.time() if now is None else now
+    try:
+        last = float(VOICE_LAST_END_FILE.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return True
+    return now - last >= seconds
+
+
+def _mark_sound_end() -> None:
+    try:
+        VOICE_LAST_END_FILE.write_text(str(time.time()), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _drain_locked() -> None:
+    """Play every queued line, most urgent first. One chime only, and only if
+    the queue had been silent; the easter egg once the queue is empty."""
+    egg_mode = None
+    egg_done = False
+    first = True
+    while True:
+        entry = _pop_next()
+        if entry is None:
+            if egg_mode is None or egg_done:
+                return
+            egg_done = True
+            maybe_play_easter_egg(egg_mode)
+            _mark_sound_end()
+            continue
+        if first and entry.get("chime") and _quiet_for(CHIME_QUIET_S):
+            play_chime(entry["chime"], progress=float(entry.get("progress", 0.0)))
+            if entry.get("audio"):
+                time.sleep(CHIME_GAP_MS / 1000)
+        first = False
+        if entry.get("audio"):
+            play_sync(entry["audio"], voice=True)
+        _mark_sound_end()
+        if entry.get("egg"):
+            egg_mode = entry["egg"]
+
+
+def drain_queue() -> None:
+    """Entry of the --drain process. Exits at once if another drainer holds
+    the lock: that one plays our entry too. After releasing, look again: an
+    entry queued while we held the lock had its own drainer bounce off it."""
+    while True:
+        lock = _QueueLock()
+        if not lock.acquire():
+            return
+        try:
+            _drain_locked()
+        finally:
+            lock.release()
+        if not _pending_entries():
+            return
 
 
 def mark_question(session_id: str | None, now: float | None = None) -> None:
@@ -1422,6 +1637,9 @@ def main(argv: list[str] | None = None, read_stdin=None, detach=None) -> None:
     if argv[:1] == [PLAY_FLAG]:
         play_command(argv[1:])
         return
+    if argv[:1] == [DRAIN_FLAG]:
+        drain_queue()
+        return
     if read_stdin is None:
         read_stdin = (lambda: sys.stdin.read()) if sys.stdin is not None else (lambda: "")
     captured: dict[str, str] = {}
@@ -1456,7 +1674,7 @@ def main(argv: list[str] | None = None, read_stdin=None, detach=None) -> None:
     # window so clusters collapse to one voice line; Stop and
     # Notification stay reactive on the default 300 ms window.
     burst_wait = SUBAGENT_BURST_WAIT_MS if event_name == "TaskCompleted" else BURST_WAIT_MS
-    if not burst_check_should_play(burst_wait):
+    if not burst_check_should_play(burst_wait, session_id=data.get("session_id")):
         return
 
     # Run cache cleanup (fast, non-blocking)
@@ -1470,7 +1688,10 @@ def main(argv: list[str] | None = None, read_stdin=None, detach=None) -> None:
         tts_mode = load_config().get("tts_mode", "full")
         if tts_mode in ("silent", "semi-silent"):
             return
-        play_subagent_voice(announce_language())
+        audio = subagent_voice_audio(announce_language())
+        if audio:
+            enqueue_announcement({"ts": time.time(), "prio": PRIO_SUBAGENT, "chime": None,
+                                  "audio": audio, "text": PHRASES[announce_language()]["subagent"]})
         return
 
     sub_type = data.get("notification_type") or data.get("type") or data.get("sub_type")
@@ -1508,24 +1729,20 @@ def main(argv: list[str] | None = None, read_stdin=None, detach=None) -> None:
     # Check TTS mode
     tts_mode = load_config().get("tts_mode", "full")
 
-    # 1) Smart chime (context-aware selection)
-    play_chime(chime_key, progress=progress)
+    # Voice depends on the mode; the chime is the queue's to decide (one per burst).
+    speak = tts_mode != "silent" and not (tts_mode == "semi-silent" and event_name != "Stop")
+    audio_path = resolve_audio(message, voice) if speak else None
 
-    # 2) Voice (depends on mode)
-    if tts_mode == "silent":
-        return
-    if tts_mode == "semi-silent" and event_name != "Stop":
-        return
-
-    audio_path = resolve_audio(message, voice)
-    if not audio_path:
-        return
-
-    time.sleep(CHIME_GAP_MS / 1000)
-    play_mp3(audio_path, voice=True)
-
-    # Easter egg: ~7% chance of Frisco appreciation in a random language
-    maybe_play_easter_egg(tts_mode)
+    enqueue_announcement({
+        "ts": time.time(),
+        "prio": announcement_priority(event_name, sub_type),
+        "chime": chime_key,
+        "progress": progress,
+        "audio": audio_path,
+        "text": message if speak else None,
+        # Easter egg only after a line that was actually spoken, as before.
+        "egg": tts_mode if audio_path else None,
+    })
 
 
 if __name__ == "__main__":
