@@ -2,6 +2,14 @@
 
 Detailed notes for each release: [`docs/releases/`](docs/releases/) and the [GitHub releases](https://github.com/Bottega-Alu/parlaconclaudio/releases).
 
+## 1.1.2
+
+### Voice alerts
+- When several Claude Code or Codex sessions finish or need help at the same time, you hear one chime and then one voice per project, in turn, instead of chimes and voices on top of each other.
+- Who needs help (permission, question, waiting for input) speaks first, then who has finished, then subagents.
+- An announcement from one project no longer swallows another project's announcement that arrived within 300 ms; repeated hooks of the same session still collapse to one.
+- The Frisco easter egg plays only once every announcement has been spoken.
+
 ## 1.1.1
 
 ### Microphone
