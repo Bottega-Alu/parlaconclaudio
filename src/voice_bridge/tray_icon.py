@@ -663,6 +663,23 @@ class TrayIcon:
             logger.info(f"STT mode set to: {mode}")
         return handler
 
+    def _set_cpu_quality(self, quality: str) -> bool:
+        """Speed or accuracy for dictation on the CPU (gpu_probe CPU_QUALITIES).
+        The engine is unloaded through the same path as a mode switch, so the next
+        dictation loads the chosen model; refused while recording/transcribing."""
+        from src.core.gpu_probe import CPU_QUALITIES
+        if quality not in CPU_QUALITIES:
+            return False
+        config = _load_config()
+        if self._on_stt_mode_changed and self._on_stt_mode_changed(config.get("stt_mode", "auto")) is False:
+            self._notify(_("Motore invariato: attendi la fine del lavoro in corso."))
+            return False
+        config = _load_config()  # the mode switch rewrote the file
+        config["stt_cpu_quality"] = quality
+        _save_config(config)
+        logger.info(f"CPU dictation quality set to: {quality}")
+        return True
+
     def _open_key_console(self, provider):
         """Provider page where a new API key is created (URLs live in key_info.PROVIDERS)."""
         import webbrowser

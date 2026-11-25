@@ -131,6 +131,11 @@ class Transcriber:
         """Read stt_mode from tts_config.json."""
         return self._load_config().get("stt_mode", "auto")
 
+    def _get_cpu_quality(self) -> str:
+        """Read stt_cpu_quality ("fast" | "accurate") from tts_config.json; used only
+        when dictation runs on the CPU (gpu_probe.select_profile)."""
+        return self._load_config().get("stt_cpu_quality", "fast")
+
     def _get_system_language(self) -> str | None:
         """Fallback language when no explicit ``whisper_language`` is set.
 
@@ -209,11 +214,12 @@ class Transcriber:
         from ..core.stt_engine import whisper_rtx
         from src.core.gpu_probe import select_profile
         self._detect_gpu()
-        profile = select_profile(self._gpu_info)
+        profile = select_profile(self._gpu_info, cpu_quality=self._get_cpu_quality())
         model = self._model_name or profile.model
         device = self._device or profile.device
         compute = self._compute_type or profile.compute_type
-        logger.info(f"Loading local Whisper: {model} on {device} ({compute}) - {profile.reason}")
+        threads = f", {profile.cpu_threads} threads" if profile.cpu_threads else ""
+        logger.info(f"Loading local Whisper: {model} on {device} ({compute}{threads}) - {profile.reason}")
         return whisper_rtx.WhisperRTXEngine(
             model_name=model,
             device=device,
@@ -221,6 +227,7 @@ class Transcriber:
             language=self._language,
             beam_size=profile.beam_size,
             vad_filter=True,
+            cpu_threads=profile.cpu_threads,
         )
 
     def _make_groq_engine(self, api_key: str):

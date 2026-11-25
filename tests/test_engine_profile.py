@@ -89,3 +89,68 @@ def test_live_dictation_skips_timestamps_and_uses_the_profile_beam(monkeypatch, 
     made[0].is_local = True
     t.transcribe(np.zeros(16000, dtype=np.float32))
     assert calls and calls[0]["without_timestamps"] is True and calls[0]["beam_size"] == 1
+
+
+# --------------------------------------------------------------------------- CPU: fast or accurate
+
+
+def test_accurate_cpu_profile_is_turbo_beam5_one_thread_per_core(monkeypatch):
+    monkeypatch.setattr(gpu_probe.os, "cpu_count", lambda: 32)
+    profile = select_profile(NO_GPU, cpu_quality="accurate")
+    assert (profile.device, profile.model, profile.compute_type, profile.beam_size, profile.cpu_threads) == \
+        ("cpu", "large-v3-turbo", "int8", 5, 16)
+
+
+@pytest.mark.parametrize("quality", ["fast", "garbage", ""])
+def test_anything_but_accurate_keeps_small(quality):
+    assert select_profile(NO_GPU, cpu_quality=quality).model == "small"
+
+
+def test_gpu_host_ignores_the_cpu_choice():
+    assert select_profile(BIG_GPU, cpu_quality="accurate") == select_profile(BIG_GPU)
+
+
+@pytest.mark.parametrize("logical,threads", [(32, 16), (64, 16), (16, 8), (8, 4), (4, 4), (2, 4)])
+def test_cpu_threads_one_per_physical_core_capped(logical, threads):
+    assert gpu_probe.cpu_thread_count(logical) == threads
+
+
+def test_cpu_threads_when_windows_cannot_count(monkeypatch):
+    monkeypatch.setattr(gpu_probe.os, "cpu_count", lambda: None)
+    assert gpu_probe.cpu_thread_count() == 4
+
+
+def test_transcriber_reads_the_cpu_choice(monkeypatch, made):
+    import json
+    tr.TTS_CONFIG.write_text(json.dumps({"stt_cpu_quality": "accurate"}), encoding="utf-8")
+    t = transcriber_on(monkeypatch, NO_GPU)
+    t._ensure_engine()
+    kw = made[0].kwargs
+    assert (kw["model_name"], kw["beam_size"]) == ("large-v3-turbo", 5) and kw["cpu_threads"] >= 4
+
+
+def test_set_cpu_quality_reloads_engine_then_saves(monkeypatch, tmp_path):
+    import json
+    from src.voice_bridge import tray_icon as ti
+    monkeypatch.setattr(ti, "TTS_CONFIG", tmp_path / "tts_config.json")
+    ti.TTS_CONFIG.write_text(json.dumps({"stt_mode": "local"}), encoding="utf-8")
+    switched, notes = [], []
+    tray = ti.TrayIcon.__new__(ti.TrayIcon)
+    tray._on_stt_mode_changed = lambda mode: switched.append(mode) or True
+    tray._notify = notes.append
+    assert tray._set_cpu_quality("accurate") is True
+    assert switched == ["local"] and json.loads(ti.TTS_CONFIG.read_text())["stt_cpu_quality"] == "accurate"
+    assert tray._set_cpu_quality("bogus") is False
+
+
+def test_set_cpu_quality_refused_while_busy_keeps_config(monkeypatch, tmp_path):
+    import json
+    from src.voice_bridge import tray_icon as ti
+    monkeypatch.setattr(ti, "TTS_CONFIG", tmp_path / "tts_config.json")
+    ti.TTS_CONFIG.write_text(json.dumps({"stt_cpu_quality": "fast"}), encoding="utf-8")
+    notes = []
+    tray = ti.TrayIcon.__new__(ti.TrayIcon)
+    tray._on_stt_mode_changed = lambda mode: False
+    tray._notify = notes.append
+    assert tray._set_cpu_quality("accurate") is False
+    assert json.loads(ti.TTS_CONFIG.read_text())["stt_cpu_quality"] == "fast" and notes
