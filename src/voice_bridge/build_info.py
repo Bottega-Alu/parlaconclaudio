@@ -1,4 +1,4 @@
 """Identity of the consolidated release candidate."""
 
-VERSION = "1.1.3"
+VERSION = "1.1.4"
 IS_TEST_BUILD = False

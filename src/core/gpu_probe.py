@@ -56,6 +56,24 @@ class SttProfile:
     compute_type: str  # "float16" | "int8_float16" | "int8"
     reason: str        # human-readable justification, logged and shown by the installer
     beam_size: int = 5  # 1 (greedy) on CPU, where each extra beam costs real seconds
+    cpu_threads: int = 0  # 0 = ctranslate2 default (4 threads); set for the accurate CPU profile
+
+
+# Dictation without a usable NVIDIA GPU: the user picks speed or accuracy
+# (tts_config.json "stt_cpu_quality"; Dettatura page of the app window).
+CPU_QUALITY_FAST = "fast"
+CPU_QUALITY_ACCURATE = "accurate"
+CPU_QUALITIES = (CPU_QUALITY_FAST, CPU_QUALITY_ACCURATE)
+MAX_CPU_THREADS = 16
+
+
+def cpu_thread_count(logical: int | None = None) -> int:
+    """One thread per physical core, at most MAX_CPU_THREADS. Windows reports logical
+    processors: with SMT that is twice the cores, and on a Ryzen 9 9950X3D 32 threads
+    ran turbo slower than 16 (bench 2026-11-25_cpu-threads). Without SMT this halves a
+    small CPU, which still beats the 4-thread default only from 8 logical processors."""
+    logical = os.cpu_count() if logical is None else logical
+    return max(4, min(MAX_CPU_THREADS, (logical or 8) // 2))
 
 
 def _driver_major(driver_version: str) -> int:
@@ -188,19 +206,26 @@ def probe_gpu() -> GpuInfo:
     )
 
 
-def _cpu_profile(reason: str) -> SttProfile:
-    """Whisper small, int8, greedy: on 20 FLEURS it clips (.work/perf-bench/) it runs at
-    0.09x real time on a 16-thread CPU (medium: 0.26x, too slow on a 4-core laptop),
-    with 4.8% of words differing from large-v3 on GPU (medium: 2.8%)."""
+def _cpu_profile(reason: str, quality: str = CPU_QUALITY_FAST) -> SttProfile:
+    """Decision tree for CPU dictation (FLEURS it_it, 100 utterances, ~15 s each, auto-detect;
+    C:\\PROJECTS\\bench parlaconclaudio-stt-engine, runs 2026-11-25_*, Ryzen 9 9950X3D):
+      fast (default) -> Whisper small int8 greedy: WER 5.67%, ~2.6 s per utterance
+      accurate       -> large-v3-turbo int8 beam 5, one thread per core: WER 1.88%,
+                        ~8.5 s per utterance (large-v3 on GPU: 1.64%, 0.8 s)
+    Any other value falls back to fast."""
+    if quality == CPU_QUALITY_ACCURATE:
+        return SttProfile("cpu", "large-v3-turbo", "int8", f"{reason} - accurate CPU profile",
+                          beam_size=5, cpu_threads=cpu_thread_count())
     return SttProfile("cpu", "small", "int8", reason, beam_size=1)
 
 
-def select_profile(gpu: GpuInfo | None = None) -> SttProfile:
-    """Pick model + compute type for this host. Explicit tree, no hidden heuristics."""
+def select_profile(gpu: GpuInfo | None = None, cpu_quality: str = CPU_QUALITY_FAST) -> SttProfile:
+    """Pick model + compute type for this host. Explicit tree, no hidden heuristics.
+    cpu_quality only matters when the tree ends on the CPU."""
     gpu = probe_gpu() if gpu is None else gpu
 
     if not gpu.present:
-        return _cpu_profile("No NVIDIA GPU detected")
+        return _cpu_profile("No NVIDIA GPU detected", cpu_quality)
 
     if not gpu.cuda_usable:
         detail = (
@@ -209,7 +234,7 @@ def select_profile(gpu: GpuInfo | None = None) -> SttProfile:
             if not gpu.confirmed_by_ct2
             else "ctranslate2 could not open the CUDA device"
         )
-        return _cpu_profile(f"{gpu.name} unusable: {detail}")
+        return _cpu_profile(f"{gpu.name} unusable: {detail}", cpu_quality)
 
     if gpu.vram_mb >= VRAM_LARGE_FP16:
         return SttProfile(
@@ -227,7 +252,7 @@ def select_profile(gpu: GpuInfo | None = None) -> SttProfile:
             "cuda", "medium", "int8", f"{gpu.name}, only {gpu.vram_mb} MB VRAM"
         )
 
-    return _cpu_profile(f"{gpu.name} has too little VRAM ({gpu.vram_mb} MB)")
+    return _cpu_profile(f"{gpu.name} has too little VRAM ({gpu.vram_mb} MB)", cpu_quality)
 
 
 if __name__ == "__main__":  # python -m src.core.gpu_probe

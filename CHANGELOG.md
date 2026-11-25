@@ -2,6 +2,17 @@
 
 Detailed notes for each release: [`docs/releases/`](docs/releases/) and the [GitHub releases](https://github.com/Bottega-Alu/parlaconclaudio/releases).
 
+## 1.1.4
+
+### Dictation
+- The Dictation tile in the quick controls no longer closes the window when it starts recording: the window stays open on "Listening" and closes on the second click or when the recording ends (hotkey, time limit); the text is pasted into the app you were in.
+- Double-click on the tray icon starts and stops a recording. It now works on Windows 11 too, where the previous mouse gesture could not find the icon; the quick controls do not open on that click.
+- Starting or stopping from the tray gives the focus back to the app you were writing in, so the text is not pasted into the taskbar.
+- Without an NVIDIA GPU, Dictation > Dictation without a GPU offers Fast (Whisper small) or More accurate (Whisper large-v3-turbo on up to 16 threads), with measured times and error rates for GPU and CPU. Fast stays the default.
+
+### Voice alerts
+- The Italian male voice it-IT-GiuseppeNeural was retired by Microsoft; it-IT-GiuseppeMultilingualNeural replaces it.
+
 ## 1.1.3
 
 ### Voice alerts

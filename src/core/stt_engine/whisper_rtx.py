@@ -49,7 +49,8 @@ class WhisperRTXEngine(STTEngine):
         language: Optional[str] = None,
         beam_size: int = 5,
         vad_filter: bool = True,
-        vad_parameters: Optional[Dict] = None
+        vad_parameters: Optional[Dict] = None,
+        cpu_threads: int = 0,
     ):
         """
         Initialize WhisperRTXEngine.
@@ -64,6 +65,7 @@ class WhisperRTXEngine(STTEngine):
             beam_size: Beam search size (default: 5, higher = more accurate but slower)
             vad_filter: Enable Voice Activity Detection filtering (default: True)
             vad_parameters: Custom VAD parameters dict
+            cpu_threads: CPU inference threads (0 = ctranslate2 default, 4)
         """
         self.model_name = model_name
         self.device = device
@@ -74,6 +76,7 @@ class WhisperRTXEngine(STTEngine):
         self.beam_size = beam_size
         self.vad_filter = vad_filter
         self.vad_parameters = vad_parameters or {}
+        self.cpu_threads = cpu_threads
         self.model = None
 
         logger.info(f"Initializing WhisperRTXEngine...")
@@ -99,7 +102,8 @@ class WhisperRTXEngine(STTEngine):
                 device=self.device,
                 compute_type=self.compute_type,
                 num_workers=self.num_workers,
-                download_root=self.download_root
+                download_root=self.download_root,
+                cpu_threads=self.cpu_threads,
             )
 
             logger.info("Model loaded successfully!")

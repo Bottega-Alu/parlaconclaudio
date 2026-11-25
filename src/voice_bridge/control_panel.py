@@ -679,6 +679,7 @@ class ControlPanel:
                     [_(v) for v in STT_MODES.values()],
                     _(STT_MODES.get(config.get("stt_mode", "auto"), STT_MODES["auto"])),
                     self._apply_mode)
+        self._cpu_quality_cards(config)
         language = _(next((label for label, code in WHISPER_LANGUAGES.items()
                            if code == config.get("whisper_language")), "Rilevamento automatico"))
         self._combo(self._card("globe", _("Lingua"), _("Fissarla evita errori di riconoscimento su frasi brevi.")),
@@ -701,6 +702,47 @@ class ControlPanel:
         self._button(control, _("Ricarica modello"), lambda: self.tray._purge_vram_clicked(None, None)).pack(side="right")
         self._button(control, _("Libera memoria"), lambda: self.tray._unload_vram_clicked(),
                      enabled=bool(self.tray._on_unload_vram)).pack(side="right", padx=(0, self._p(8)))
+
+    def _cpu_quality_cards(self, config):
+        """Speed or accuracy when dictation runs on the CPU, with the measured figures
+        that justify the choice (bench parlaconclaudio-stt-engine, runs 2026-11-25_*)."""
+        import tkinter as tk
+        from src.core.gpu_probe import CPU_QUALITY_ACCURATE, CPU_QUALITY_FAST
+        c = self.colors
+        on_cpu = self.tray._get_stt_status(config)["gpu"] == "Not detected"
+        hint = (_("Questo PC detta sul processore: la scelta vale dalla prossima dettatura.")
+                if on_cpu else
+                _("Questo PC detta con la GPU NVIDIA: la scelta vale solo se la GPU non è disponibile."))
+        control = self._card("chip", _("Dettatura senza GPU"),
+                             _("Veloce usa Whisper small. Più preciso usa large-v3-turbo: sbaglia un terzo "
+                               "delle parole ma fa aspettare di più, scarica circa 1,6 GB al primo uso e "
+                               "serve una CPU con molti core.") + " " + hint)
+        self._segmented(control, ((CPU_QUALITY_FAST, _("Veloce")), (CPU_QUALITY_ACCURATE, _("Più preciso"))),
+                        config.get("stt_cpu_quality", CPU_QUALITY_FAST), self._apply_cpu_quality)
+        figures = tk.Frame(self.body, bg=c["card"], highlightthickness=1, highlightbackground=c["line"],
+                           padx=self._p(16), pady=self._p(10))
+        figures.pack(fill="x", pady=(0, self._p(4)))
+        tk.Label(figures, text=_("Prestazioni misurate su una frase di 15 secondi in italiano"),
+                 font=(self.font, 9, "bold"), fg=c["text"], bg=c["card"], anchor="w").pack(fill="x")
+        rows = (
+            (_("GPU RTX 5080 · large-v3"), _("0,8 s di attesa · 1,6% di parole sbagliate")),
+            (_("CPU Ryzen 9 9950X3D · Più preciso"), _("8,5 s di attesa · 1,9% di parole sbagliate")),
+            (_("CPU Ryzen 9 9950X3D · Veloce"), _("2,6 s di attesa · 5,7% di parole sbagliate")),
+        )
+        table = tk.Frame(figures, bg=c["card"])
+        table.pack(fill="x", pady=(self._p(4), 0))
+        for row, (setup, result) in enumerate(rows):
+            tk.Label(table, text=setup, font=(self.font, 8), fg=c["text"], bg=c["card"], anchor="w").grid(
+                row=row, column=0, sticky="w", padx=(0, self._p(16)))
+            tk.Label(table, text=result, font=(self.font, 8), fg=c["muted"], bg=c["card"], anchor="w").grid(
+                row=row, column=1, sticky="w")
+        tk.Label(figures, text=_("Su un portatile a 4 core Più preciso può impiegare più della durata della frase: "
+                                 "lì conviene Veloce, oppure un provider cloud."),
+                 font=(self.font, 8), fg=c["muted"], bg=c["card"], anchor="w", justify="left",
+                 wraplength=self._p(520)).pack(fill="x", pady=(self._p(6), 0))
+
+    def _apply_cpu_quality(self, quality):
+        self._work(lambda: self.tray._set_cpu_quality(quality))
 
     def _trigger_section(self):
         import tkinter as tk

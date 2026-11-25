@@ -663,6 +663,23 @@ class TrayIcon:
             logger.info(f"STT mode set to: {mode}")
         return handler
 
+    def _set_cpu_quality(self, quality: str) -> bool:
+        """Speed or accuracy for dictation on the CPU (gpu_probe CPU_QUALITIES).
+        The engine is unloaded through the same path as a mode switch, so the next
+        dictation loads the chosen model; refused while recording/transcribing."""
+        from src.core.gpu_probe import CPU_QUALITIES
+        if quality not in CPU_QUALITIES:
+            return False
+        config = _load_config()
+        if self._on_stt_mode_changed and self._on_stt_mode_changed(config.get("stt_mode", "auto")) is False:
+            self._notify(_("Motore invariato: attendi la fine del lavoro in corso."))
+            return False
+        config = _load_config()  # the mode switch rewrote the file
+        config["stt_cpu_quality"] = quality
+        _save_config(config)
+        logger.info(f"CPU dictation quality set to: {quality}")
+        return True
+
     def _open_key_console(self, provider):
         """Provider page where a new API key is created (URLs live in key_info.PROVIDERS)."""
         import webbrowser
@@ -867,6 +884,7 @@ class TrayIcon:
             _("{app} - Pronto").format(app=APP_NAME),
             on_quick_controls=self._open_flyout,
             on_open_panel=self._open_panel,
+            on_double_click=self._tray_double_click,
         )
 
         # Start animator
@@ -911,6 +929,23 @@ class TrayIcon:
             return
         self._show_flyout()
 
+    def _tray_double_click(self):
+        # The first click of the pair scheduled the quick controls: not this time.
+        if self._flyout_timer:
+            self._flyout_timer.cancel()
+            self._flyout_timer = None
+        self.return_focus()
+        if self._on_toggle_recording:
+            # Off the icon's message loop: starting the recorder plays a chime.
+            threading.Thread(target=self._on_toggle_recording, daemon=True).start()
+
+    def return_focus(self) -> bool:
+        """Hand the focus back to the app the user was in before touching the tray,
+        so the dictation pastes there and not into the taskbar."""
+        from .tray_popup import focus_window
+        hwnd = getattr(self._icon, "last_app_hwnd", None)
+        return focus_window(hwnd)
+
     def _open_after_click(self):
         if self._state != "recording":
             self._show_flyout()
@@ -919,7 +954,12 @@ class TrayIcon:
         self._quick_controls().show()
 
     def set_state(self, state: str) -> None:
-        self._state = state
+        previous, self._state = self._state, state
+        if (previous == "recording" and state != "recording" and self._flyout
+                and self._flyout.recording_ended()):
+            # The quick controls held the focus while listening: give it back now,
+            # before the transcription is pasted.
+            self.return_focus()
         if not self._icon:
             return
         title_map = {

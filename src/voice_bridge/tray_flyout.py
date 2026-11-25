@@ -95,6 +95,8 @@ class TrayFlyout:
         self._list_view = (0, 0, 0)   # top, bottom, content height of the list page
         self._row_boxes = {}
         self._error_until = 0.0
+        self._listening = False   # a recording started from the tile, flyout still open
+        self._listen_since = 0.0
         self._state_signature = None
         self._fonts = {}
         self._images = {}
@@ -894,9 +896,29 @@ class TrayFlyout:
             self._place()
 
     def _record(self):
-        self._hide()
-        # Give Windows time to return focus to the previous editor before paste.
-        self.root.after(180, lambda: self._work(self.tray._on_toggle_recording))
+        if self.tray._state == "recording":
+            self._hide()
+
+            def stop():
+                self.tray.return_focus()
+                self.tray._on_toggle_recording()
+            # Give Windows time to return focus to the previous editor before paste.
+            self.root.after(180, lambda: self._work(stop))
+            return
+        # Start: stay open on "In ascolto"; the second click or the end of the
+        # recording (hotkey, time limit) closes it and the text goes to the app before.
+        self._listening, self._listen_since = True, time.monotonic()
+        self._work(self.tray._on_toggle_recording)
+
+    def recording_ended(self) -> bool:
+        """Bridge thread: a recording ended. True when it was started from the tile
+        with the flyout still open, which then closes so the paste lands in the app."""
+        if not self._listening:
+            return False
+        self._listening = False
+        self._commands.put("hide")
+        self._wake()
+        return True
 
     def _mute(self):
         self._work(lambda: self.tray._make_toggle_mute()(None, None))
@@ -915,6 +937,9 @@ class TrayFlyout:
 
     def _hide(self):
         self.root.withdraw()
+        # Closed by hand: the user went elsewhere, the end of the recording must not
+        # pull the focus back.
+        self._listening = False
         # Next opening starts from the tiles, like Windows Quick Settings.
         self._page, self._expanded, self._scroll = "main", None, 0
         self._hover = self._pressed = self._drag = None
@@ -983,6 +1008,9 @@ class TrayFlyout:
             return
         if self.root.state() != "withdrawn":
             self._update_state()
+        if (self._listening and self.tray._state != "recording"
+                and time.monotonic() - self._listen_since > 3):
+            self._listening = False  # the recording never started (engine busy or loading)
         self._ticks = getattr(self, "_ticks", 0) + 1
         if self._ticks % 5 == 0:  # ~5 s hidden: the tray logo follows a taskbar light/dark switch
             self.tray._animator.follow_theme()
@@ -999,6 +1027,8 @@ class TrayFlyout:
                     return False
                 if command == "show":
                     self._show()
+                if command == "hide":
+                    self._hide()
                 if command == "refresh":
                     self._working = False
                     self._refresh(rebuild=False)
