@@ -1148,7 +1148,7 @@ _FRISCO_QUOTES = [
 
 # Native voices per language (used 50% of the time for matching quotes)
 _NATIVE_VOICES = {
-    "it": ["it-IT-IsabellaNeural", "it-IT-DiegoNeural", "it-IT-GiuseppeNeural"],
+    "it": ["it-IT-IsabellaNeural", "it-IT-DiegoNeural", "it-IT-GiuseppeMultilingualNeural"],
     "en": ["en-US-AndrewMultilingualNeural", "en-US-SeraphinaMultilingualNeural",
             "en-US-BrianMultilingualNeural", "en-US-EmmaMultilingualNeural"],
     "pt": ["pt-BR-ThalitaMultilingualNeural"],
