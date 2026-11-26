@@ -12,6 +12,11 @@ console-subsystem trampoline). Flags: CREATE_NO_WINDOW, never DETACHED_PROCESS:
 DETACHED_PROCESS overrides CREATE_NO_WINDOW, and a console trampoline started
 detached hands its console-subsystem child a brand-new console WINDOW.
 
+Administrator mode (autostart.py): when the logon task of THIS install runs
+HighestAvailable, the stub starts it with schtasks /Run instead of starting
+pythonw, so a Start-menu launch is elevated too (no UAC prompt: the task was
+approved once). Any failure falls back to the normal, unelevated start.
+
 Single-instance handling is NOT done here on purpose: `python -m src.voice_bridge`
 checks a named mutex (src/voice_bridge/single_instance.py) and a second launch
 exits on its own, leaving the running bridge untouched. Crash relaunch is not
@@ -30,7 +35,7 @@ from pathlib import Path
 # run as a script (VoiceBridge.bat) it is found through the repo root.
 if not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.voice_bridge import gui_python  # noqa: E402
+from src.voice_bridge import autostart, gui_python  # noqa: E402
 
 APP_TITLE = "Voice Bridge"
 BOOTSTRAP_LOG = "bootstrap.log"  # written by installer/vb_bootstrap.py into the install root
@@ -125,11 +130,27 @@ def launch_kwargs(root: Path, gui: "gui_python.GuiPython", base_env) -> dict:
     )
 
 
+def start_elevated_task(root: Path, runner=subprocess.run) -> bool:
+    """True when the bridge was started through this install's elevated task."""
+    task = autostart.task_definition(runner)
+    if not (task and task.elevated and task.runs(root)):
+        return False
+    try:
+        proc = runner(autostart.run_task_command(), capture_output=True, timeout=30,
+                      stdin=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
 def main() -> int:
     root = _resolve_root()
     if root is None:
         _error(_not_found_message(_candidate_roots()))
         return 2
+
+    if start_elevated_task(root):
+        return 0
 
     gui = gui_python.resolve(root / "venv")
 

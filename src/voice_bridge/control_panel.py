@@ -71,6 +71,7 @@ class ControlPanel:
         self._testing = False
         self._test_events = []
         self._autostart = None  # unknown until a worker has asked Windows
+        self._elevated = None   # administrator mode: the logon task's run level
         self._history_all = False
         self._history_mtime = None
         # Sound pack add-ons: catalogue fetched only when the user asks (addons.py).
@@ -204,6 +205,7 @@ class ControlPanel:
             from . import autostart
             try:
                 self._autostart = autostart.is_enabled()
+                self._elevated = autostart.is_elevated_mode()
             except Exception:
                 logger.exception("Stato dell'avvio automatico non disponibile")
             self._commands.put("refresh")
@@ -481,6 +483,16 @@ class ControlPanel:
                      bg=self.colors["card"]).pack(side="right")
         else:
             self._switch(control, self._autostart, lambda on: self._toggle_autostart())
+        control = self._card("key", _("Funziona anche nelle finestre amministratore"),
+                             _("L'app parte come amministratore: i tasti per dettare e l'incolla funzionano "
+                               "anche nei terminali aperti come amministratore. Windows chiede conferma una "
+                               "volta e l'app si riavvia; parte anche all'accesso a Windows."))
+        if self._elevated is None:
+            import tkinter as tk
+            tk.Label(control, text=_("Verifica…"), font=(self.font, 9), fg=self.colors["muted"],
+                     bg=self.colors["card"]).pack(side="right")
+        else:
+            self._switch(control, self._elevated, lambda on: self._toggle_elevated(on))
 
     def _logo_section(self):
         """Tray icon look: one tile per style, the current one outlined; hover plays 'recording'."""
@@ -1224,6 +1236,21 @@ class ControlPanel:
             (logger.info if result.ok else logger.error)(result.log_line())
             self.tray._notify(result.summary())
             self._autostart = autostart.is_enabled()
+        self._work(run)
+
+    def _toggle_elevated(self, on):
+        def run():
+            from . import autostart
+            result = autostart.enable(elevated=on)
+            (logger.info if result.ok else logger.error)(result.log_line())
+            if not result.ok:
+                self._elevated = autostart.is_elevated_mode()
+                self.tray._notify(_("Modalità amministratore invariata: Windows non ha dato la conferma."))
+                return
+            self._elevated, self._autostart = on, True
+            self.tray._notify(_("L'app si riavvia come amministratore.") if on
+                              else _("L'app si riavvia senza privilegi di amministratore."))
+            self.tray._restart_via_task()
         self._work(run)
 
     def _preview(self, pack):

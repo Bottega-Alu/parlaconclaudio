@@ -2,6 +2,11 @@
 
 Detailed notes for each release: [`docs/releases/`](docs/releases/) and the [GitHub releases](https://github.com/Bottega-Alu/parlaconclaudio/releases).
 
+## 1.1.5
+
+### Dictation
+- New switch "Also works in administrator windows" (app window > Personalize > System). Windows gives a normal app no keys while a window opened as administrator (for example an Administrator terminal) is in front, and blocks its paste there: the dictation keys did nothing until you clicked elsewhere. With the switch on, the app runs as administrator through its sign-in task: Windows asks for confirmation once, the app restarts, and the choice survives upgrades. The Start-menu shortcut starts it the same way.
+
 ## 1.1.4
 
 ### Dictation
