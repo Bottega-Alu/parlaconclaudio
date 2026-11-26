@@ -55,6 +55,7 @@ Write-Host "`n=== 1/2  VoiceBridge.exe (launcher, no console)" -ForegroundColor 
     --specpath $Work `
     --paths $Root `
     --hidden-import src.voice_bridge.gui_python `
+    --hidden-import src.voice_bridge.autostart `
     @CommonExcludes `
     --exclude-module ctranslate2 `
     --exclude-module pystray `

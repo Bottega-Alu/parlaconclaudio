@@ -1096,6 +1096,34 @@ class TrayIcon:
             self._panel = ControlPanel(self)
         self._panel.show()
 
+    def _restart_via_task(self) -> bool:
+        """Exit and come back through the logon task, at the task's run level
+        (administrator mode). A detached `autostart relaunch` waits for the
+        supervisor to exit, then runs the task: the mutex is free by then."""
+        import sys
+        from . import autostart, gui_python, supervisor
+        root = autostart.APP_ROOT
+        gui = gui_python.resolve(root / "venv")
+        wait_pid = os.getppid() if supervisor.CHILD_FLAG in sys.argv else os.getpid()
+        env = dict(os.environ)
+        env.pop(gui_python.PYVENV_LAUNCHER_ENV, None)
+        env.update(gui.env)
+        args = [str(gui.exe), "-m", "src.voice_bridge.autostart", "relaunch", "--wait-pid", str(wait_pid)]
+        flags = 0x08000000 | 0x00000200  # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+        for extra in (0x01000000, 0):  # CREATE_BREAKAWAY_FROM_JOB when the job allows it
+            try:
+                subprocess.Popen(args, cwd=str(root), env=env, creationflags=flags | extra,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, close_fds=True)
+                break
+            except OSError:
+                if not extra:
+                    logger.exception("Restart through the logon task failed: the app stays as it is")
+                    return False
+        logger.info("Restarting through the logon task (waiting for PID %d)", wait_pid)
+        self._exit_clicked(None, None)
+        return True
+
     def _exit_clicked(self, icon, item):
         if self._on_exit:
             self._on_exit()

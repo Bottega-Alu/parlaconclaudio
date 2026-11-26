@@ -135,14 +135,22 @@ def test_task_name_matches_installer():
 
 
 class _Runner:
-    def __init__(self, *codes, stderr=""):
+    """schtasks fake. `/Query /XML` (the registered task) answers `registered`
+    (XML text) or "absent", without using up the codes of the other calls."""
+
+    def __init__(self, *codes, stderr="", registered: str | None = None):
         self.codes = list(codes)
         self.calls: list[list[str]] = []
         self.xml_seen: str | None = None
         self.stderr = stderr
+        self.registered = registered
 
     def __call__(self, cmd, **kw):
         assert kw["creationflags"] & autostart.CREATE_NO_WINDOW
+        if cmd == autostart.query_xml_command():
+            found = self.registered is not None
+            return subprocess.CompletedProcess(cmd, 0 if found else 1,
+                                               stdout=(self.registered or "").encode("utf-8"), stderr=b"")
         self.calls.append(cmd)
         if "/XML" in cmd:
             self.xml_seen = Path(cmd[cmd.index("/XML") + 1]).read_text(encoding="utf-16")
